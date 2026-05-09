@@ -187,12 +187,16 @@ export fn run(s: *server) int = {
 		case let m: lsp::message =>
 			yield m;
 		case let e: lsp::decode_error =>
-			// Structural error in a syntactically-valid JSON message.
 			send_error(s, void, lsp::INVALID_REQUEST, e: str);
+			if (s.state == server_state::READY) {
+				log_warning(s, e: str);
+			};
 			continue;
 		case let e: json::error =>
-			// JSON itself failed to parse.
 			send_error(s, void, lsp::PARSE_ERROR, json::strerror(e));
+			if (s.state == server_state::READY) {
+				log_warning(s, json::strerror(e));
+			};
 			continue;
 		};
 
