@@ -24,7 +24,12 @@
       "Bash(make test *)",
       "Bash(git config *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git commit *)",
+      "Bash(mkdir -p .cache)",
+      "Bash(hare build *)",
+      "Bash(chmod +x .tmp/build-diag-test.sh)",
+      "Bash(.tmp/build-diag-test.sh)"
     ]
   }
 }
