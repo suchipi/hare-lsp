@@ -176,3 +176,101 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer free(r);
 	assert(r == "let s = \"a\tb\";");
 };
+
+@test fn on_type_formatting_reindents_close_brace() void = {
+	let (s, scan, in_buf, out) = fmt_test_server();
+	defer fmt_test_cleanup(&s, scan, in_buf, out);
+	// `}` on line 1 with 4 leading spaces; expected indent (depth 0) is empty.
+	fmt_open(&s, "file:///x.ha", "fn x() void = {\\n    }\\n");
+
+	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":5},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 50.0,
+		method = strings::dup("textDocument/onTypeFormatting")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_on_type_formatting(&s, r);
+	const v = fmt_skip_to_response(out, 50.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	assert(len(result) == 1);
+	const e0 = result[0] as json::object;
+	const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+	assert(new_text == "");
+};
+
+@test fn on_type_formatting_semicolon_no_op() void = {
+	let (s, scan, in_buf, out) = fmt_test_server();
+	defer fmt_test_cleanup(&s, scan, in_buf, out);
+	fmt_open(&s, "file:///x.ha", "fn x() void = void;\\n");
+
+	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":19},"ch":";","options":{"tabSize":8,"insertSpaces":false}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 51.0,
+		method = strings::dup("textDocument/onTypeFormatting")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_on_type_formatting(&s, r);
+	const v = fmt_skip_to_response(out, 51.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	assert(len(result) == 0);
+};
+
+@test fn on_type_formatting_correct_indent_no_edit() void = {
+	let (s, scan, in_buf, out) = fmt_test_server();
+	defer fmt_test_cleanup(&s, scan, in_buf, out);
+	// Already correctly indented: `}` at column 0 in depth-0 context.
+	fmt_open(&s, "file:///x.ha", "fn x() void = {\\n}\\n");
+
+	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":1},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 52.0,
+		method = strings::dup("textDocument/onTypeFormatting")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_on_type_formatting(&s, r);
+	const v = fmt_skip_to_response(out, 52.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	assert(len(result) == 0);
+};
+
+@test fn on_type_formatting_with_space_indent_emits_spaces() void = {
+	let (s, scan, in_buf, out) = fmt_test_server();
+	defer fmt_test_cleanup(&s, scan, in_buf, out);
+	s.config.format_indent_style = indent_style::SPACE;
+	s.config.format_indent_width = 2;
+	// Nested block where the inner `}` should land at depth 1 = 2 spaces.
+	// (Hare requires `;` after each compound expression.)
+	fmt_open(&s, "file:///x.ha",
+		"fn x() void = {\\n\\tif (true) {\\n\\t\\treturn;\\n};\\n};\\n");
+
+	// Cursor is right after the inner `}` on line 3, char position 1.
+	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":3,"character":1},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 53.0,
+		method = strings::dup("textDocument/onTypeFormatting")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_on_type_formatting(&s, r);
+	const v = fmt_skip_to_response(out, 53.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	assert(len(result) == 1);
+	const e0 = result[0] as json::object;
+	const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+	assert(new_text == "  ");
+};

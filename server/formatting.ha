@@ -202,11 +202,223 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 };
 
 export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
-	// Conservative: emit no edits. On-type reformatting that doesn't
-	// preserve cursor intent leads to user frustration; we'd rather
-	// require an explicit format request than mis-correct the user's
-	// in-progress edit.
-	send_array_fmt(s, r.id, []);
+	const obj = match (params_obj_fmt(r.params)) {
+	case let o: json::object => yield o;
+	case void =>
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+	const uri = match (uri_from_request(r.params)) {
+	case let s: str => yield s;
+	case void =>
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+	const ch = match (json::get(&obj, "ch")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let s: str => yield s;
+		case =>
+			send_array_fmt(s, r.id, []);
+			return;
+		};
+	case =>
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+	// Only `}` triggers reindent; `;` doesn't change indent in Hare.
+	if (ch != "}") {
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+	const pos_v = match (json::get(&obj, "position")) {
+	case let p: *json::value => yield *p;
+	case =>
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+	const pos = match (lsp::decode_position(pos_v)) {
+	case let p: lsp::position => yield p;
+	case lsp::bad_message =>
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+	const doc = match (find_document(s, uri)) {
+	case let p: *document => yield p;
+	case null =>
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+	const data = analysis::bytes(&doc.buf);
+	const enc = position_encoding(s);
+	const cursor_off = analysis::position_to_byte(data, doc.buf.line_index, enc,
+		analysis::position { line = pos.line, character = pos.character });
+	if (cursor_off == 0 || cursor_off > len(data)) {
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+
+	// The character that triggered us is at cursor_off - 1.
+	const close_at = cursor_off - 1;
+	if (close_at >= len(data) || data[close_at] != '}': u8) {
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+
+	// Find the start of the line containing the `}`.
+	let line_start = close_at;
+	for (line_start > 0 && data[line_start - 1] != '\n': u8; line_start -= 1) void;
+
+	// Count current leading whitespace on the line.
+	let cur_ws_end = line_start;
+	for (cur_ws_end < len(data); cur_ws_end += 1) {
+		const b = data[cur_ws_end];
+		if (b != ' ': u8 && b != '\t': u8) break;
+	};
+
+	// The line should be only whitespace + `}` (possibly followed by `;`
+	// or other characters; we still reindent the leading whitespace if
+	// the `}` is the first non-whitespace character on the line).
+	if (cur_ws_end != close_at) {
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+
+	// Compute the expected depth at `close_at` by lexing from the start
+	// of the buffer up to that position. Each `{` token increments the
+	// depth, each `}` decrements. The expected indent for the closing
+	// brace is `depth - 1` (one less than the depth of the contents
+	// inside the block).
+	const depth = brace_depth_before(data, close_at);
+	if (depth == 0) {
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+	const expected_depth = depth - 1;
+
+	// Build the new indent string.
+	let new_indent: []u8 = [];
+	defer free(new_indent);
+	switch (s.config.format_indent_style) {
+	case indent_style::TAB =>
+		for (let i = 0u32; i < expected_depth; i += 1) {
+			append(new_indent, '\t': u8)!;
+		};
+	case indent_style::SPACE =>
+		const w = s.config.format_indent_width;
+		for (let i = 0u32; i < expected_depth * w; i += 1) {
+			append(new_indent, ' ': u8)!;
+		};
+	};
+
+	// Compare with the current indent; if equal, no edit needed.
+	const cur_ws = data[line_start..cur_ws_end];
+	if (slices_equal(cur_ws, new_indent)) {
+		send_array_fmt(s, r.id, []);
+		return;
+	};
+
+	// Build a TextEdit replacing the leading whitespace.
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, line_start);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, cur_ws_end);
+	const new_text = strings::fromutf8(new_indent)!;
+
+	let edit = json::newobject();
+	let r_obj = json::newobject();
+	let s_obj = json::newobject();
+	json::put(&s_obj, "line", start_pos.line: f64)!;
+	json::put(&s_obj, "character", start_pos.character: f64)!;
+	let e_obj = json::newobject();
+	json::put(&e_obj, "line", end_pos.line: f64)!;
+	json::put(&e_obj, "character", end_pos.character: f64)!;
+	json::put(&r_obj, "start", s_obj)!;
+	json::put(&r_obj, "end", e_obj)!;
+	json::put(&edit, "range", r_obj)!;
+	json::set(&edit, "newText", new_text: json::value)!;
+	let arr: []json::value = [];
+	append(arr, edit: json::value)!;
+	send_array_fmt(s, r.id, arr);
+};
+
+// Returns the brace nesting depth at byte offset `off`. Manual scan that
+// skips over strings, runes, raw strings, line comments, and block
+// comments so braces inside any of those don't fool us. Avoids hare::lex
+// here because the stdlib lexer can hit double-unlex aborts when fed a
+// truncated buffer mid-token.
+fn brace_depth_before(data: []u8, off: size) u32 = {
+	let depth: u32 = 0;
+	const limit = if (off > len(data)) len(data) else off;
+	let i = 0z;
+	for (i < limit) {
+		const b = data[i];
+		switch (b) {
+		case '/': u8 =>
+			if (i + 1 < limit && data[i + 1] == '/': u8) {
+				i += 2;
+				for (i < limit && data[i] != '\n': u8; i += 1) void;
+			} else if (i + 1 < limit && data[i + 1] == '*': u8) {
+				i += 2;
+				for (i + 1 < limit; i += 1) {
+					if (data[i] == '*': u8 && data[i + 1] == '/': u8) {
+						i += 2;
+						break;
+					};
+				};
+				if (i + 1 >= limit) i = limit;
+			} else {
+				i += 1;
+			};
+		case '"': u8 =>
+			i += 1;
+			for (i < limit; i += 1) {
+				if (data[i] == '\\': u8 && i + 1 < limit) {
+					i += 1;
+					continue;
+				};
+				if (data[i] == '"': u8) {
+					i += 1;
+					break;
+				};
+			};
+		case '\'': u8 =>
+			i += 1;
+			for (i < limit; i += 1) {
+				if (data[i] == '\\': u8 && i + 1 < limit) {
+					i += 1;
+					continue;
+				};
+				if (data[i] == '\'': u8) {
+					i += 1;
+					break;
+				};
+			};
+		case '`': u8 =>
+			i += 1;
+			for (i < limit; i += 1) {
+				if (data[i] == '`': u8) {
+					i += 1;
+					break;
+				};
+			};
+		case '{': u8 =>
+			depth += 1;
+			i += 1;
+		case '}': u8 =>
+			if (depth > 0) depth -= 1;
+			i += 1;
+		case =>
+			i += 1;
+		};
+	};
+	return depth;
+};
+
+fn slices_equal(a: []u8, b: []u8) bool = {
+	if (len(a) != len(b)) return false;
+	for (let i = 0z; i < len(a); i += 1) {
+		if (a[i] != b[i]) return false;
+	};
+	return true;
 };
 
 fn bytes_equal(a: []u8, b: []u8) bool = {
