@@ -41,17 +41,72 @@ export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
 
 	let arr: []json::value = [];
 	if (s.config.inlay_hints_parameter_names) {
-		// Walk decls and find call sites within them.
-		// For minimal correctness we scan the source for call-like
-		// patterns and look up matching function decls in the local
-		// index. The parameter-name source is the resolved decl's
-		// prototype.
 		let idx = analysis::build_index(&pr.subunit);
 		defer analysis::finish_index(&idx);
 		emit_param_hints(s, doc, &pr.subunit, &idx, &arr);
 	};
+	if (s.config.inlay_hints_inferred_types) {
+		emit_inferred_type_hints(s, doc, &pr.subunit, &arr);
+	};
 
 	send_array_ih(s, r.id, arr);
+};
+
+// Emits ":<type>" hints right after `let x` / `const x` bindings whose
+// declared type was omitted.
+fn emit_inferred_type_hints(
+	s: *server, doc: *document, su: *ast::subunit, arr: *[]json::value,
+) void = {
+	const data = analysis::bytes(&doc.buf);
+	for (let i = 0z; i < len(su.decls); i += 1) {
+		const d = &su.decls[i];
+		const has_type_already = match (d.decl) {
+		case let g: ast::decl_global =>
+			yield !(g._type is null);
+		case let c: ast::decl_const =>
+			yield !(c._type is null);
+		case => yield true;
+		};
+		if (has_type_already) continue;
+		const off = d.loc.start.off: size;
+		const label = match (analysis::type_of_expr_at(data, su, off)) {
+		case let s: str => yield s;
+		case void => continue;
+		};
+		defer free(label);
+		// Position the hint at the end of the binding's name. We
+		// approximate by walking forward from the start of the decl
+		// past keyword + name to the next ':' or '='.
+		const insert_off = find_post_name_offset(data, off);
+		const enc = position_encoding(s);
+		const pos = analysis::byte_to_position(data, doc.buf.line_index,
+			enc, insert_off);
+		let hint = json::newobject();
+		let p_obj = json::newobject();
+		json::put(&p_obj, "line", pos.line: f64)!;
+		json::put(&p_obj, "character", pos.character: f64)!;
+		json::put(&hint, "position", p_obj)!;
+		const lbl = strings::concat(": ", label)!;
+		defer free(lbl);
+		json::set(&hint, "label", lbl: json::value)!;
+		json::put(&hint, "kind", 1: f64)!; // 1 = Type
+		json::put(&hint, "paddingLeft", true: json::value)!;
+		let cur = *arr;
+		append(cur, hint: json::value)!;
+		*arr = cur;
+	};
+};
+
+// Skips "let "/"const "/"def " plus the binding name, returning the byte
+// offset just past the name.
+fn find_post_name_offset(data: []u8, start: size) size = {
+	let i = start;
+	// Skip a leading keyword (let/const/def/static).
+	for (i < len(data) && is_word_byte_ih(data[i]); i += 1) void;
+	for (i < len(data) && is_ws(data[i]); i += 1) void;
+	// Skip the name.
+	for (i < len(data) && is_word_byte_ih(data[i]); i += 1) void;
+	return i;
 };
 
 fn emit_param_hints(
