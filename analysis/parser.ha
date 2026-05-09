@@ -121,22 +121,20 @@ export fn parse_recover(text: []u8, path: str) parse_result = {
 	return res;
 };
 
-// Releases owned memory in a parse_result. Frees error message strings, the
-// errors slice, and frees the subunit's imports/decls via ast helpers when
-// available; for now we just free the slices since the AST nodes hold their
-// own strings (the upstream `ast` module doesn't expose a comprehensive
-// finish for ast::subunit, so we leak per-decl strings — this is consistent
-// with hare::parse usage in stdlib tests and acceptable for an LSP that
-// reparses on every change).
+// Releases owned memory in a parse_result, including each ast::decl via
+// ast::decl_finish.
 export fn finish_parse_result(r: *parse_result) void = {
 	for (let i = 0z; i < len(r.errors); i += 1) {
 		free(r.errors[i].message);
 	};
 	free(r.errors);
-	// AST nodes own their strings; we lean on the assumption that the
-	// process-wide allocator reclaims them on reparse. The upstream ast
-	// module does not provide a tree-finish helper.
+	for (let i = 0z; i < len(r.subunit.imports); i += 1) {
+		ast::import_finish(r.subunit.imports[i]);
+	};
 	free(r.subunit.imports);
+	for (let i = 0z; i < len(r.subunit.decls); i += 1) {
+		ast::decl_finish(r.subunit.decls[i]);
+	};
 	free(r.subunit.decls);
 };
 
