@@ -390,6 +390,8 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_code_action(s, r);
 	case "codeAction/resolve" =>
 		handle_code_action_resolve(s, r);
+	case "workspace/executeCommand" =>
+		handle_execute_command(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -596,6 +598,14 @@ fn build_initialize_result() (json::value | nomem) = {
 	json::put(&ca_provider, "codeActionKinds", ca_kinds: json::value)?;
 	json::put(&ca_provider, "resolveProvider", true: json::value)?;
 	json::put(&caps, "codeActionProvider", ca_provider)?;
+	let xc_provider = json::newobject();
+	let xc_cmds: []json::value = [];
+	append(xc_cmds, strings::dup("hare-lsp.runTest")?: json::value)?;
+	append(xc_cmds, strings::dup("hare-lsp.runModule")?: json::value)?;
+	append(xc_cmds, strings::dup("hare-lsp.organizeImports")?: json::value)?;
+	append(xc_cmds, strings::dup("hare-lsp.applyAutoImport")?: json::value)?;
+	json::put(&xc_provider, "commands", xc_cmds: json::value)?;
+	json::put(&caps, "executeCommandProvider", xc_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
