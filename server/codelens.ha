@@ -1,0 +1,309 @@
+// SPDX-License-Identifier: MPL-2.0
+// (c) hare-lsp authors
+//
+// Code lens. Two lens kinds:
+//   1. "Run test" above each @test function.
+//   2. "N references" above each exported function / type.
+//
+// Resolve fills in the command for the lens based on a `data` carrier
+// that the unresolved lens carries.
+
+use analysis;
+use bufio;
+use encoding::json;
+use hare::lex;
+use hare::lex::{ltok};
+use io;
+use lsp;
+use memio;
+use strings;
+
+export fn handle_code_lens(s: *server, r: lsp::request) void = {
+	const uri = match (uri_from_cl(r.params)) {
+	case let s: str => yield s;
+	case void =>
+		send_array_cl(s, r.id, []);
+		return;
+	};
+	const doc = match (find_document(s, uri)) {
+	case let p: *document => yield p;
+	case null =>
+		send_array_cl(s, r.id, []);
+		return;
+	};
+	const data = analysis::bytes(&doc.buf);
+	let pr = analysis::parse_recover(data, uri);
+	defer analysis::finish_parse_result(&pr);
+	let idx = analysis::build_index(&pr.subunit);
+	defer analysis::finish_index(&idx);
+
+	let arr: []json::value = [];
+	const enc = position_encoding(s);
+
+	// Reference-count lens for each exported decl.
+	for (let i = 0z; i < len(idx.symbols); i += 1) {
+		const sym = &idx.symbols[i];
+		if (!sym.exported) continue;
+		let lens = json::newobject();
+		const sp = analysis::byte_to_position(data, doc.buf.line_index,
+			enc, sym.span.start.off: size);
+		const ep = analysis::byte_to_position(data, doc.buf.line_index,
+			enc, sym.span.end.off: size);
+		json::put(&lens, "range", encode_range_cl(sp, ep))!;
+		// Carry a `data` blob so resolve knows what to fill in.
+		let lens_data = json::newobject();
+		json::set(&lens_data, "kind", "references": json::value)!;
+		json::set(&lens_data, "uri", uri: json::value)!;
+		json::set(&lens_data, "name", sym.short_name: json::value)!;
+		json::put(&lens, "data", lens_data)!;
+		append(arr, lens: json::value)!;
+	};
+
+	// Run-test lens: lex the file looking for `@test` attributes.
+	const test_offsets = find_test_offsets(data);
+	defer free(test_offsets);
+	for (let i = 0z; i < len(test_offsets); i += 1) {
+		const off = test_offsets[i];
+		const sp = analysis::byte_to_position(data, doc.buf.line_index, enc, off);
+		let lens = json::newobject();
+		let r_obj = json::newobject();
+		let s_obj = json::newobject();
+		json::put(&s_obj, "line", sp.line: f64)!;
+		json::put(&s_obj, "character", sp.character: f64)!;
+		let e_obj = json::newobject();
+		json::put(&e_obj, "line", sp.line: f64)!;
+		json::put(&e_obj, "character", (sp.character + 5): f64)!;
+		json::put(&r_obj, "start", s_obj)!;
+		json::put(&r_obj, "end", e_obj)!;
+		json::put(&lens, "range", r_obj)!;
+		// Eager command (no resolve needed for run-test).
+		let cmd = json::newobject();
+		json::set(&cmd, "title", "▶ Run test": json::value)!;
+		json::set(&cmd, "command", "hare-lsp.runTest": json::value)!;
+		let args: []json::value = [];
+		append(args, uri: json::value)!;
+		json::put(&cmd, "arguments", args: json::value)!;
+		json::put(&lens, "command", cmd)!;
+		append(arr, lens: json::value)!;
+	};
+
+	send_array_cl(s, r.id, arr);
+};
+
+export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
+	// For "references" lenses, count occurrences and fill in command.
+	const obj = match (params_obj_cl(r.params)) {
+	case let o: json::object => yield o;
+	case void =>
+		echo_back(s, r);
+		return;
+	};
+	const data_field = match (json::get(&obj, "data")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case =>
+			echo_back(s, r);
+			return;
+		};
+	case =>
+		echo_back(s, r);
+		return;
+	};
+	const kind = match (json::get(&data_field, "kind")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let s: str => yield s;
+		case =>
+			echo_back(s, r);
+			return;
+		};
+	case =>
+		echo_back(s, r);
+		return;
+	};
+	if (kind != "references") {
+		echo_back(s, r);
+		return;
+	};
+	const name = match (json::get(&data_field, "name")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let s: str => yield s;
+		case =>
+			echo_back(s, r);
+			return;
+		};
+	case =>
+		echo_back(s, r);
+		return;
+	};
+
+	// Count references across the workspace.
+	let count = 0z;
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		count += count_token_occurrences(analysis::bytes(&s.documents[i].buf), name);
+	};
+
+	// Build the command "N references".
+	let cmd = json::newobject();
+	const title = strings::concat(fmt_size_cl(count), " references")!;
+	defer free(title);
+	json::set(&cmd, "title", title: json::value)!;
+	json::set(&cmd, "command", "hare-lsp.showReferences": json::value)!;
+
+	// Echo back the lens with `command` filled in.
+	let result_obj = match (json::dup(r.params as json::value)) {
+	case let v: json::value => yield v as json::object;
+	case nomem =>
+		send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+		return;
+	};
+	// Replace any existing command and add the new one.
+	json::put(&result_obj, "command", cmd)!;
+	const v: json::value = result_obj;
+	defer json::finish(v);
+	match (lsp::encode_response_result(s.out, r.id, v)) {
+	case size => void;
+	case => void;
+	};
+};
+
+fn count_token_occurrences(data: []u8, name: str) size = {
+	const t = strings::toutf8(name);
+	let count = 0z;
+	let i = 0z;
+	for (i + len(t) <= len(data); i += 1) {
+		if (i > 0 && is_word_byte_cl(data[i - 1])) continue;
+		if (i + len(t) < len(data) && is_word_byte_cl(data[i + len(t)])) continue;
+		let ok = true;
+		for (let j = 0z; j < len(t); j += 1) {
+			if (data[i + j] != t[j]) {
+				ok = false;
+				break;
+			};
+		};
+		if (ok) {
+			count += 1;
+			i += len(t) - 1;
+		};
+	};
+	return count;
+};
+
+fn is_word_byte_cl(b: u8) bool = {
+	if (b >= 'a': u8 && b <= 'z': u8) return true;
+	if (b >= 'A': u8 && b <= 'Z': u8) return true;
+	if (b >= '0': u8 && b <= '9': u8) return true;
+	return b == '_': u8;
+};
+
+fn find_test_offsets(data: []u8) []size = {
+	let out: []size = [];
+	let src = memio::fixed(data);
+	let scan = bufio::newscanner(&src);
+	defer bufio::finish(&scan);
+	let lexer = lex::init(&scan, "<doc>");
+	defer lex::finish(&lexer);
+	for (true) {
+		const tok = match (lex::lex(&lexer)) {
+		case let t: lex::token => yield t;
+		case lex::error => break;
+		};
+		if (tok.0 == ltok::EOF) break;
+		if (tok.0 == ltok::ATTR_TEST) {
+			append(out, tok.2.off: size)!;
+		};
+	};
+	return out;
+};
+
+fn echo_back(s: *server, r: lsp::request) void = {
+	const v: json::value = match (r.params) {
+	case let v: json::value =>
+		yield match (json::dup(v)) {
+		case let copy: json::value => yield copy;
+		case nomem =>
+			send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+			return;
+		};
+	case void => yield json::_null: json::value;
+	};
+	defer json::finish(v);
+	match (lsp::encode_response_result(s.out, r.id, v)) {
+	case size => void;
+	case => void;
+	};
+};
+
+fn fmt_size_cl(n: size) str = {
+	if (n == 0) return strings::dup("0")!;
+	let buf: [21]u8 = [0...];
+	let i = len(buf);
+	let v = n;
+	for (v > 0; v /= 10) {
+		i -= 1;
+		buf[i] = ('0': u8) + (v % 10): u8;
+	};
+	return strings::dup(strings::fromutf8(buf[i..])!)!;
+};
+
+fn encode_range_cl(start: analysis::position, end: analysis::position) json::value = {
+	let r = json::newobject();
+	let s_obj = json::newobject();
+	json::put(&s_obj, "line", start.line: f64)!;
+	json::put(&s_obj, "character", start.character: f64)!;
+	let e_obj = json::newobject();
+	json::put(&e_obj, "line", end.line: f64)!;
+	json::put(&e_obj, "character", end.character: f64)!;
+	json::put(&r, "start", s_obj)!;
+	json::put(&r, "end", e_obj)!;
+	return r;
+};
+
+fn uri_from_cl(p: (json::value | void)) (str | void) = {
+	const v = match (p) {
+	case let v: json::value => yield v;
+	case void => return void;
+	};
+	const obj = match (v) {
+	case let o: json::object => yield o;
+	case => return void;
+	};
+	const td = match (json::get(&obj, "textDocument")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case => return void;
+		};
+	case => return void;
+	};
+	match (json::get(&td, "uri")) {
+	case let p: *json::value =>
+		match (*p) {
+		case let s: str => return s;
+		case => return void;
+		};
+	case => return void;
+	};
+};
+
+fn params_obj_cl(p: (json::value | void)) (json::object | void) = {
+	const v = match (p) {
+	case let v: json::value => yield v;
+	case void => return void;
+	};
+	return match (v) {
+	case let o: json::object => yield o;
+	case => yield void;
+	};
+};
+
+fn send_array_cl(s: *server, id: lsp::id, arr: []json::value) void = {
+	const v: json::value = arr;
+	defer json::finish(v);
+	match (lsp::encode_response_result(s.out, id, v)) {
+	case size => void;
+	case => void;
+	};
+};

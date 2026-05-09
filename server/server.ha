@@ -382,6 +382,10 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_inlay_hint(s, r);
 	case "inlayHint/resolve" =>
 		handle_inlay_hint_resolve(s, r);
+	case "textDocument/codeLens" =>
+		handle_code_lens(s, r);
+	case "codeLens/resolve" =>
+		handle_code_lens_resolve(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -578,6 +582,9 @@ fn build_initialize_result() (json::value | nomem) = {
 	let ih_provider = json::newobject();
 	json::put(&ih_provider, "resolveProvider", true: json::value)?;
 	json::put(&caps, "inlayHintProvider", ih_provider)?;
+	let cl_provider = json::newobject();
+	json::put(&cl_provider, "resolveProvider", true: json::value)?;
+	json::put(&caps, "codeLensProvider", cl_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
