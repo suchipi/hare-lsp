@@ -304,6 +304,12 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_textdocument_diagnostic(s, r);
 	case "workspace/diagnostic" =>
 		handle_workspace_diagnostic(s, r);
+	case "workspace/willCreateFiles" =>
+		handle_will_create_files(s, r);
+	case "workspace/willRenameFiles" =>
+		handle_will_rename_files(s, r);
+	case "workspace/willDeleteFiles" =>
+		handle_will_delete_files(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -317,6 +323,8 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 			s.state = server_state::READY;
 			// Pull initial settings from the client.
 			request_configuration(s);
+			// Ask the client to watch *.ha and *.s files.
+			register_file_watchers(s);
 		};
 	case "exit" =>
 		s.state = server_state::EXITED;
@@ -340,6 +348,14 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 		handle_did_save(s, n);
 	case "textDocument/willSave" =>
 		handle_will_save(s, n);
+	case "workspace/didChangeWatchedFiles" =>
+		handle_did_change_watched_files(s, n);
+	case "workspace/didCreateFiles" =>
+		handle_did_create_files(s, n);
+	case "workspace/didRenameFiles" =>
+		handle_did_rename_files(s, n);
+	case "workspace/didDeleteFiles" =>
+		handle_did_delete_files(s, n);
 	case =>
 		// Per LSP, unknown notifications are silently ignored.
 		void;
@@ -445,6 +461,38 @@ fn build_initialize_result() (json::value | nomem) = {
 	json::put(&folders_caps, "supported", true: json::value)?;
 	json::put(&folders_caps, "changeNotifications", true: json::value)?;
 	json::put(&ws, "workspaceFolders", folders_caps)?;
+
+	// File operation support.
+	let file_ops = json::newobject();
+	let file_ops_filter = json::newobject();
+	let pattern = json::newobject();
+	json::set(&pattern, "glob", "**/*.ha": json::value)?;
+	json::put(&file_ops_filter, "pattern", pattern)?;
+	let filters: []json::value = [];
+	append(filters, file_ops_filter: json::value)?;
+	let create_caps = json::newobject();
+	json::put(&create_caps, "filters", filters: json::value)?;
+	json::put(&file_ops, "willCreate", create_caps)?;
+	let rename_filter = json::newobject();
+	let rename_pattern = json::newobject();
+	json::set(&rename_pattern, "glob", "**/*.ha": json::value)?;
+	json::put(&rename_filter, "pattern", rename_pattern)?;
+	let rename_filters: []json::value = [];
+	append(rename_filters, rename_filter: json::value)?;
+	let rename_caps = json::newobject();
+	json::put(&rename_caps, "filters", rename_filters: json::value)?;
+	json::put(&file_ops, "willRename", rename_caps)?;
+	let del_filter = json::newobject();
+	let del_pattern = json::newobject();
+	json::set(&del_pattern, "glob", "**/*.ha": json::value)?;
+	json::put(&del_filter, "pattern", del_pattern)?;
+	let del_filters: []json::value = [];
+	append(del_filters, del_filter: json::value)?;
+	let del_caps = json::newobject();
+	json::put(&del_caps, "filters", del_filters: json::value)?;
+	json::put(&file_ops, "willDelete", del_caps)?;
+	json::put(&ws, "fileOperations", file_ops)?;
+
 	ws_ok = true;
 	json::put(&caps, "workspace", ws)?;
 
