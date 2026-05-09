@@ -108,6 +108,8 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 		buf = analysis::from_str(text),
 	};
 	upsert_document(s, doc);
+	const stored = find_document(s, uri) as *document;
+	refresh_diagnostics(s, stored);
 };
 
 // Handles textDocument/didChange. Applies each content change in order.
@@ -147,6 +149,7 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 	for (let i = 0z; i < len(changes); i += 1) {
 		apply_content_change(s, doc, changes[i]);
 	};
+	refresh_diagnostics(s, doc);
 };
 
 fn apply_content_change(s: *server, doc: *document, change: json::value) void = {
@@ -204,6 +207,7 @@ export fn handle_did_close(s: *server, n: lsp::notification) void = {
 	case let s: str => yield s;
 	case void => return;
 	};
+	clear_diagnostics(s, uri);
 	remove_document(s, uri);
 };
 
@@ -232,6 +236,7 @@ export fn handle_did_save(s: *server, n: lsp::notification) void = {
 		analysis::replace_all(&doc.buf, strings::toutf8(txt));
 	case void => void;
 	};
+	refresh_diagnostics(s, doc);
 };
 
 // Handles textDocument/willSave (notification). LSP allows the client to
