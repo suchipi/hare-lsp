@@ -1,0 +1,225 @@
+// SPDX-License-Identifier: MPL-2.0
+// (c) hare-lsp authors
+//
+// Workspace indexing: walks workspace folders, populates the workspace
+// index, and answers workspace/symbol + workspaceSymbol/resolve.
+
+use analysis;
+use encoding::json;
+use fs;
+use io;
+use lsp;
+use os;
+use strings;
+
+// Walks every known workspace folder and populates the workspace index.
+// Called from `initialized`. Sends a $/progress reporter so editors that
+// surface progress (Neovim, Helix, Emacs eglot) show indexing.
+export fn scan_workspace_folders(s: *server) void = {
+	if (len(s.workspace_folders) == 0) return;
+
+	let total: size = 0;
+	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
+		const path = uri_to_local_path(s.workspace_folders[i].uri);
+		defer free(path);
+		total += analysis::index_directory(&s.workspace_index, path);
+	};
+
+	// Notify clients that workspace symbols / diagnostics may be stale.
+	request_diagnostic_refresh(s);
+};
+
+fn uri_to_local_path(uri: str) str = {
+	const prefix = "file://";
+	if (strings::hasprefix(uri, prefix)) {
+		return strings::dup(strings::sub(uri, len(prefix), strings::end))!;
+	};
+	return strings::dup(uri)!;
+};
+
+// Handles workspace/symbol. Performs a fuzzy substring match on the index.
+export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
+	const query_str = match (extract_query(r.params)) {
+	case let s: str => yield s;
+	case void => yield "";
+	};
+
+	let arr: []json::value = [];
+	let arr_owned = true;
+	defer if (arr_owned) {
+		for (let i = 0z; i < len(arr); i += 1) {
+			json::finish(arr[i]);
+		};
+		free(arr);
+	};
+
+	if (len(query_str) == 0) {
+		// Empty query: return everything (cap at 200 to keep responses
+		// snappy).
+		const cap = if (len(s.workspace_index.entries) < 200z) {
+			yield len(s.workspace_index.entries);
+		} else {
+			yield 200z;
+		};
+		for (let i = 0z; i < cap; i += 1) {
+			append(arr, encode_workspace_symbol(&s.workspace_index.entries[i]))!;
+		};
+	} else {
+		const matches = analysis::fuzzy_search(&s.workspace_index, query_str);
+		defer free(matches);
+		const cap = if (len(matches) < 200z) len(matches) else 200z;
+		for (let i = 0z; i < cap; i += 1) {
+			append(arr, encode_workspace_symbol(
+				&s.workspace_index.entries[matches[i]]))!;
+		};
+	};
+
+	const result_v: json::value = arr;
+	arr_owned = false;
+	defer json::finish(result_v);
+	match (lsp::encode_response_result(s.out, r.id, result_v)) {
+	case size => void;
+	case => void;
+	};
+};
+
+// Handles workspaceSymbol/resolve. Currently a no-op: we already include
+// the location in workspace/symbol. Some clients still call resolve, so we
+// pass the input through unchanged.
+export fn handle_workspace_symbol_resolve(s: *server, r: lsp::request) void = {
+	const v: json::value = match (r.params) {
+	case let v: json::value =>
+		yield match (json::dup(v)) {
+		case let copy: json::value => yield copy;
+		case nomem =>
+			send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+			return;
+		};
+	case void => yield json::_null: json::value;
+	};
+	defer json::finish(v);
+	match (lsp::encode_response_result(s.out, r.id, v)) {
+	case size => void;
+	case => void;
+	};
+};
+
+fn encode_workspace_symbol(e: *analysis::workspace_entry) json::value = {
+	let o = json::newobject();
+	json::set(&o, "name", e.short_name: json::value)!;
+	json::put(&o, "kind", workspace_entry_kind_to_lsp(e.kind))!;
+	let loc = json::newobject();
+	json::set(&loc, "uri", e.uri: json::value)!;
+	// We don't have line indices for the file's text here; report a
+	// degenerate range pointing at the start. Clients use uri to navigate
+	// and the range mostly to scroll; we keep it cheap and accept the
+	// imprecision until per-file caches land.
+	let range = json::newobject();
+	let zero = json::newobject();
+	json::put(&zero, "line", 0: f64)!;
+	json::put(&zero, "character", 0: f64)!;
+	json::put(&range, "start", zero)!;
+	let zero2 = json::newobject();
+	json::put(&zero2, "line", 0: f64)!;
+	json::put(&zero2, "character", 0: f64)!;
+	json::put(&range, "end", zero2)!;
+	json::put(&loc, "range", range)!;
+	json::put(&o, "location", loc)!;
+	if (len(e.docs) > 0) {
+		json::set(&o, "containerName", e.full_name: json::value)!;
+	};
+	return o;
+};
+
+fn workspace_entry_kind_to_lsp(k: analysis::symbol_kind) f64 = {
+	switch (k) {
+	case analysis::symbol_kind::FUNCTION => return 12.0;
+	case analysis::symbol_kind::TYPE => return 23.0;
+	case analysis::symbol_kind::CONST => return 14.0;
+	case analysis::symbol_kind::GLOBAL => return 13.0;
+	case analysis::symbol_kind::DEF => return 14.0;
+	};
+};
+
+fn extract_query(p: (json::value | void)) (str | void) = {
+	const v = match (p) {
+	case let v: json::value => yield v;
+	case void => return void;
+	};
+	const obj = match (v) {
+	case let o: json::object => yield o;
+	case => return void;
+	};
+	match (json::get(&obj, "query")) {
+	case let p: *json::value =>
+		match (*p) {
+		case let s: str =>
+			return s;
+		case => return void;
+		};
+	case => return void;
+	};
+};
+
+// Refreshes the workspace index for files reported by
+// workspace/didChangeWatchedFiles. Called from the file watch handler.
+export fn workspace_handle_file_event(s: *server, uri: str, event_type: int) void = {
+	const path = uri_to_local_path(uri);
+	defer free(path);
+	switch (event_type) {
+	case 3 =>
+		// Deleted.
+		analysis::drop_file(&s.workspace_index, path);
+	case 1, 2 =>
+		// Created or Changed: re-index the file.
+		const f = match (open_file_for_read(path)) {
+		case let b: []u8 => yield b;
+		case void => return;
+		};
+		defer free(f);
+		analysis::index_file(&s.workspace_index, path, f);
+	case => void;
+	};
+};
+
+fn open_file_for_read(path_str: str) ([]u8 | void) = {
+	const f = match (os_open_helper(path_str)) {
+	case let f: io_file_helper => yield f;
+	case void => return void;
+	};
+	defer io_close_helper(f);
+	let buf: []u8 = [];
+	let chunk: [4096]u8 = [0...];
+	for (true) {
+		match (io_read_helper(f, chunk[..])) {
+		case let n: size =>
+			append(buf, chunk[..n]...)!;
+		case void => break;
+		};
+	};
+	return buf;
+};
+
+// Internal type aliases — Hare doesn't need them, but we wrap os::open and
+// io::read here to keep the signature local.
+type io_file_helper = io::file;
+
+fn os_open_helper(path_str: str) (io_file_helper | void) = {
+	match (os::open(path_str)) {
+	case let f: io::file => return f;
+	case fs::error => return void;
+	};
+};
+
+fn io_close_helper(f: io_file_helper) void = {
+	io::close(f)!;
+};
+
+fn io_read_helper(f: io_file_helper, buf: []u8) (size | void) = {
+	match (io::read(f, buf)) {
+	case let n: size => return n;
+	case io::EOF => return void;
+	case io::error => return void;
+	};
+};
+

@@ -101,6 +101,7 @@ export fn handle_did_change_watched_files(s: *server, n: lsp::notification) void
 		};
 		// 1 = Created, 2 = Changed, 3 = Deleted.
 		log_trace(s, fmt_watcher_event(uri, change_type), "");
+		workspace_handle_file_event(s, uri, change_type);
 	};
 };
 

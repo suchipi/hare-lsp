@@ -3,6 +3,7 @@
 //
 // Core server state and the main message-handling loop.
 
+use analysis;
 use bufio;
 use encoding::json;
 use fmt;
@@ -74,6 +75,9 @@ export type server = struct {
 
 	// Open documents, keyed by URI.
 	documents: []document,
+
+	// Workspace-wide symbol index.
+	workspace_index: analysis::workspace_index,
 };
 
 // Tracks an outgoing request the server is waiting on a response for.
@@ -113,6 +117,7 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	client_capabilities = void,
 	config = default_config(),
 	documents = [],
+	workspace_index = analysis::new_workspace_index(),
 };
 
 // Releases resources held by the server. Does not close the underlying I/O
@@ -155,6 +160,7 @@ export fn finish(s: *server) void = {
 		finish_document(&s.documents[i]);
 	};
 	free(s.documents);
+	analysis::finish_workspace_index(&s.workspace_index);
 };
 
 // Runs the main message loop until the client sends `exit` (or EOF). Returns
@@ -304,6 +310,10 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_textdocument_diagnostic(s, r);
 	case "workspace/diagnostic" =>
 		handle_workspace_diagnostic(s, r);
+	case "workspace/symbol" =>
+		handle_workspace_symbol(s, r);
+	case "workspaceSymbol/resolve" =>
+		handle_workspace_symbol_resolve(s, r);
 	case "workspace/willCreateFiles" =>
 		handle_will_create_files(s, r);
 	case "workspace/willRenameFiles" =>
@@ -347,6 +357,8 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 			request_configuration(s);
 			// Ask the client to watch *.ha and *.s files.
 			register_file_watchers(s);
+			// Build the initial workspace index.
+			scan_workspace_folders(s);
 		};
 	case "exit" =>
 		s.state = server_state::EXITED;
@@ -488,6 +500,9 @@ fn build_initialize_result() (json::value | nomem) = {
 	let dl_provider = json::newobject();
 	json::put(&dl_provider, "resolveProvider", true: json::value)?;
 	json::put(&caps, "documentLinkProvider", dl_provider)?;
+	let ws_sym_provider = json::newobject();
+	json::put(&ws_sym_provider, "resolveProvider", true: json::value)?;
+	json::put(&caps, "workspaceSymbolProvider", ws_sym_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
