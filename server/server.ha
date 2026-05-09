@@ -68,6 +68,9 @@ export type server = struct {
 	// json form so feature handlers can consult them without depending on a
 	// parsed struct that grows with the spec.
 	client_capabilities: (json::value | void),
+
+	// User-configured server settings.
+	config: config,
 };
 
 // Tracks an outgoing request the server is waiting on a response for.
@@ -105,6 +108,7 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	registrations = [],
 	next_registration_seq = 0,
 	client_capabilities = void,
+	config = default_config(),
 };
 
 // Releases resources held by the server. Does not close the underlying I/O
@@ -142,6 +146,7 @@ export fn finish(s: *server) void = {
 	case let v: json::value =>
 		json::finish(v);
 	};
+	finish_config(&s.config);
 };
 
 // Runs the main message loop until the client sends `exit` (or EOF). Returns
@@ -210,12 +215,20 @@ fn handle_response(s: *server, r: lsp::response) void = {
 		return;
 	};
 	const method = s.pending_requests[idx].method;
-	// For now we only log the outcome; specific feature handlers (e.g.
-	// auto-import accept dialog) will add their own routing in later steps.
 	match (r.body) {
 	case let v: json::value =>
-		// Successful — fire-and-forget for the methods we currently send.
-		void;
+		switch (method) {
+		case "workspace/configuration" =>
+			apply_configuration_response(s, v);
+		case "workspace/workspaceFolders" =>
+			apply_workspace_folders_response(s, v);
+		case =>
+			// Other server-initiated requests (showMessageRequest,
+			// showDocument, registerCapability,
+			// workDoneProgress/create) don't currently need
+			// further processing on success.
+			void;
+		};
 	case let e: lsp::response_error =>
 		fmt::fprintln(os::stderr, "hare-lsp: response error for",
 			method, ":", e.message)!;
@@ -288,6 +301,8 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 	case "initialized" =>
 		if (s.state == server_state::INITIALIZING) {
 			s.state = server_state::READY;
+			// Pull initial settings from the client.
+			request_configuration(s);
 		};
 	case "exit" =>
 		s.state = server_state::EXITED;
@@ -299,6 +314,8 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 		handle_progress_cancel(s, n);
 	case "workspace/didChangeWorkspaceFolders" =>
 		handle_did_change_workspace_folders(s, n);
+	case "workspace/didChangeConfiguration" =>
+		handle_did_change_configuration(s, n);
 	case =>
 		// Per LSP, unknown notifications are silently ignored.
 		void;
