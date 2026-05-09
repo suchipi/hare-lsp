@@ -366,6 +366,12 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_completion_resolve(s, r);
 	case "textDocument/signatureHelp" =>
 		handle_signature_help(s, r);
+	case "textDocument/formatting" =>
+		handle_formatting(s, r);
+	case "textDocument/rangeFormatting" =>
+		handle_range_formatting(s, r);
+	case "textDocument/onTypeFormatting" =>
+		handle_on_type_formatting(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -546,6 +552,14 @@ fn build_initialize_result() (json::value | nomem) = {
 	append(sh_triggers, strings::dup(",")?: json::value)?;
 	json::put(&sh_provider, "triggerCharacters", sh_triggers: json::value)?;
 	json::put(&caps, "signatureHelpProvider", sh_provider)?;
+	json::put(&caps, "documentFormattingProvider", true: json::value)?;
+	json::put(&caps, "documentRangeFormattingProvider", true: json::value)?;
+	let on_type_fmt = json::newobject();
+	json::set(&on_type_fmt, "firstTriggerCharacter", "}": json::value)?;
+	let on_type_more: []json::value = [];
+	append(on_type_more, strings::dup(";")?: json::value)?;
+	json::put(&on_type_fmt, "moreTriggerCharacter", on_type_more: json::value)?;
+	json::put(&caps, "documentOnTypeFormattingProvider", on_type_fmt)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
