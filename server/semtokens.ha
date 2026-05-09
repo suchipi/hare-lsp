@@ -73,20 +73,152 @@ export fn handle_semantic_tokens_full(s: *server, r: lsp::request) void = {
 	};
 	const data = analysis::bytes(&doc.buf);
 	const tokens = compute_semantic_tokens(s, data);
-	defer free(tokens);
-	send_tokens(s, r.id, tokens);
+	// Cache for the next /full/delta call.
+	free(doc.prev_tokens);
+	let saved: []u32 = alloc([], len(tokens))!;
+	append(saved, tokens...)!;
+	doc.prev_tokens = saved;
+	free(doc.prev_result_id);
+	const new_id = next_semantic_id(s);
+	doc.prev_result_id = strings::dup(new_id)!;
+	defer free(new_id);
+	send_tokens_with_id(s, r.id, tokens, new_id);
+	free(tokens);
 };
 
+// Delta encoding for semantic tokens. If the client's previousResultId
+// matches our stored id, we compute a coarse diff and emit a single edit
+// covering the differing slice. Otherwise we fall back to /full.
 export fn handle_semantic_tokens_full_delta(s: *server, r: lsp::request) void = {
-	// Until we maintain previous-result caches, full/delta returns the
-	// same data as full. The client falls back gracefully.
-	handle_semantic_tokens_full(s, r);
+	const obj = match (params_obj_st(r.params)) {
+	case let o: json::object => yield o;
+	case void =>
+		handle_semantic_tokens_full(s, r);
+		return;
+	};
+	const uri = match (uri_from_st(r.params)) {
+	case let s: str => yield s;
+	case void =>
+		send_empty_tokens(s, r.id);
+		return;
+	};
+	const prev_id = match (json::get(&obj, "previousResultId")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let s: str => yield s;
+		case =>
+			handle_semantic_tokens_full(s, r);
+			return;
+		};
+	case =>
+		handle_semantic_tokens_full(s, r);
+		return;
+	};
+	const doc = match (find_document(s, uri)) {
+	case let p: *document => yield p;
+	case null =>
+		send_empty_tokens(s, r.id);
+		return;
+	};
+	if (prev_id != doc.prev_result_id || len(doc.prev_result_id) == 0) {
+		handle_semantic_tokens_full(s, r);
+		return;
+	};
+
+	// Compute the new tokens and diff against prev.
+	const data = analysis::bytes(&doc.buf);
+	const new_tokens = compute_semantic_tokens(s, data);
+	const old_tokens = doc.prev_tokens;
+	const (lo, hi_old, hi_new) = diff_bounds(old_tokens, new_tokens);
+
+	// Update the cache.
+	free(doc.prev_tokens);
+	let saved: []u32 = alloc([], len(new_tokens))!;
+	append(saved, new_tokens...)!;
+	doc.prev_tokens = saved;
+	free(doc.prev_result_id);
+	const new_id = next_semantic_id(s);
+	doc.prev_result_id = strings::dup(new_id)!;
+	defer free(new_id);
+	defer free(new_tokens);
+
+	// Build the response.
+	let result = json::newobject();
+	json::set(&result, "resultId", new_id: json::value)!;
+	let edits: []json::value = [];
+	if (lo < hi_old || lo < hi_new) {
+		let edit = json::newobject();
+		json::put(&edit, "start", lo: f64)!;
+		json::put(&edit, "deleteCount", (hi_old - lo): f64)!;
+		let data_arr: []json::value = [];
+		for (let i = lo; i < hi_new; i += 1) {
+			append(data_arr, new_tokens[i]: f64: json::value)!;
+		};
+		json::put(&edit, "data", data_arr: json::value)!;
+		append(edits, edit: json::value)!;
+	};
+	json::put(&result, "edits", edits: json::value)!;
+	const v: json::value = result;
+	defer json::finish(v);
+	match (lsp::encode_response_result(s.out, r.id, v)) {
+	case size => void;
+	case => void;
+	};
 };
 
 export fn handle_semantic_tokens_range(s: *server, r: lsp::request) void = {
 	// Same data; clients filter by their own range. Full responses are
 	// fine here and avoid the complexity of a partial encoding.
 	handle_semantic_tokens_full(s, r);
+};
+
+// Returns (lo, hi_old, hi_new) such that:
+//   - tokens prior to `lo` are identical in both arrays
+//   - tokens after `hi_old` (in old) and `hi_new` (in new) are identical
+//   - the slice [lo..hi_new) replaces [lo..hi_old) in the old array.
+fn diff_bounds(old: []u32, new: []u32) (size, size, size) = {
+	const min_len = if (len(old) < len(new)) len(old) else len(new);
+	let lo: size = 0;
+	for (lo < min_len; lo += 1) {
+		if (old[lo] != new[lo]) break;
+	};
+	// Walk from the back. Stop before lo so we don't overlap.
+	let hi_old = len(old);
+	let hi_new = len(new);
+	for (hi_old > lo && hi_new > lo) {
+		if (old[hi_old - 1] != new[hi_new - 1]) break;
+		hi_old -= 1;
+		hi_new -= 1;
+	};
+	return (lo, hi_old, hi_new);
+};
+
+fn next_semantic_id(s: *server) str = {
+	const id = s.next_semantic_result_id;
+	s.next_semantic_result_id += 1;
+	let buf: [21]u8 = [0...];
+	let i = len(buf);
+	let v = id;
+	if (v == 0) {
+		i -= 1;
+		buf[i] = '0': u8;
+	};
+	for (v > 0; v /= 10) {
+		i -= 1;
+		buf[i] = ('0': u8) + (v % 10): u8;
+	};
+	return strings::dup(strings::fromutf8(buf[i..])!)!;
+};
+
+fn params_obj_st(p: (json::value | void)) (json::object | void) = {
+	const v = match (p) {
+	case let v: json::value => yield v;
+	case void => return void;
+	};
+	return match (v) {
+	case let o: json::object => yield o;
+	case => yield void;
+	};
 };
 
 // Returns a flat []u32 of LSP-encoded token tuples for the given source.
@@ -186,11 +318,18 @@ fn token_length(tok: lex::token) u32 = {
 };
 
 fn send_tokens(s: *server, id: lsp::id, tokens: []u32) void = {
+	send_tokens_with_id(s, id, tokens, "");
+};
+
+fn send_tokens_with_id(s: *server, id: lsp::id, tokens: []u32, result_id: str) void = {
 	let arr: []json::value = [];
 	for (let i = 0z; i < len(tokens); i += 1) {
 		append(arr, tokens[i]: f64: json::value)!;
 	};
 	let result = json::newobject();
+	if (len(result_id) > 0) {
+		json::set(&result, "resultId", result_id: json::value)!;
+	};
 	json::put(&result, "data", arr: json::value)!;
 	const v: json::value = result;
 	defer json::finish(v);

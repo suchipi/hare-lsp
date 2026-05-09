@@ -25,6 +25,11 @@ export type document = struct {
 	version: i64,
 	// Document text and line index.
 	buf: analysis::buffer,
+	// Previously-issued semantic tokens for this document, used by
+	// /full/delta to emit minimal edits. result_id is empty when no
+	// /full has been issued yet.
+	prev_tokens: []u32,
+	prev_result_id: str,
 };
 
 // Looks up a document by URI. Returns nullable so callers can check before
@@ -70,6 +75,8 @@ export fn finish_document(d: *document) void = {
 	free(d.uri);
 	free(d.language_id);
 	analysis::finish(&d.buf);
+	free(d.prev_tokens);
+	free(d.prev_result_id);
 };
 
 // --- handlers --------------------------------------------------------
@@ -106,9 +113,14 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 		language_id = strings::dup(lang)!,
 		version = version,
 		buf = analysis::from_str(text),
+		prev_tokens = [],
+		prev_result_id = strings::dup("")!,
 	};
 	upsert_document(s, doc);
-	const stored = find_document(s, uri) as *document;
+	const stored = match (find_document(s, uri)) {
+	case let p: *document => yield p;
+	case null => return;
+	};
 	refresh_diagnostics(s, stored);
 };
 
@@ -136,6 +148,11 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 	case null => return;
 	};
 	doc.version = version;
+	// Any text edit invalidates the cached semantic tokens.
+	free(doc.prev_tokens);
+	doc.prev_tokens = [];
+	free(doc.prev_result_id);
+	doc.prev_result_id = strings::dup("")!;
 
 	const changes = match (json::get(&obj, "contentChanges")) {
 	case let p: *json::value =>

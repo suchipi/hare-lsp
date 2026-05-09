@@ -42,6 +42,9 @@ export type server = struct {
 	// `token` fields).
 	next_progress_token: u64,
 
+	// Counter for semantic-token result ids handed back to clients.
+	next_semantic_result_id: u64,
+
 	// Pending server-initiated requests awaiting a response from the client.
 	// Keyed by request id; carries the method name so handlers can route
 	// responses appropriately.
@@ -108,6 +111,7 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	client_pid = void,
 	next_request_id = 0,
 	next_progress_token = 0,
+	next_semantic_result_id = 1,
 	pending_requests = [],
 	cancelled_progress = [],
 	cancelled_ids = [],
@@ -586,7 +590,9 @@ fn build_initialize_result() (json::value | nomem) = {
 	json::put(&caps, "documentOnTypeFormattingProvider", on_type_fmt)?;
 	let st_provider = json::newobject();
 	json::put(&st_provider, "legend", token_legend())?;
-	json::put(&st_provider, "full", true: json::value)?;
+	let full_caps = json::newobject();
+	json::put(&full_caps, "delta", true: json::value)?;
+	json::put(&st_provider, "full", full_caps)?;
 	json::put(&st_provider, "range", true: json::value)?;
 	json::put(&caps, "semanticTokensProvider", st_provider)?;
 	let ih_provider = json::newobject();
