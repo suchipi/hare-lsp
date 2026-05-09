@@ -15,6 +15,7 @@ use io;
 use lsp;
 use os;
 use strings;
+use time;
 
 // An open document.
 export type document = struct {
@@ -30,6 +31,15 @@ export type document = struct {
 	// /full has been issued yet.
 	prev_tokens: []u32,
 	prev_result_id: str,
+	// Timestamp of the last buffer-mutating event (didOpen/didChange/
+	// didSave). Used by the diagnostics debouncer.
+	last_edit_at: time::instant,
+	// Timestamp of the last published parse-diagnostics for this doc.
+	last_publish_at: time::instant,
+	// True when the doc has had a buffer mutation that hasn't yet been
+	// followed by a publishDiagnostics call (because the debounce
+	// suppressed it). Cleared whenever we actually publish.
+	diagnostics_pending: bool,
 };
 
 // Looks up a document by URI. Returns nullable so callers can check before
@@ -108,6 +118,7 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 	case void => yield 0i64;
 	};
 
+	const now = time::now(time::clock::MONOTONIC);
 	const doc = document {
 		uri = strings::dup(uri)!,
 		language_id = strings::dup(lang)!,
@@ -115,13 +126,20 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 		buf = analysis::from_str(text),
 		prev_tokens = [],
 		prev_result_id = strings::dup("")!,
+		last_edit_at = now,
+		last_publish_at = time::INSTANT_ZERO,
+		diagnostics_pending = false,
 	};
 	upsert_document(s, doc);
 	const stored = match (find_document(s, uri)) {
 	case let p: *document => yield p;
 	case null => return;
 	};
+	// didOpen always publishes immediately so the editor sees an initial
+	// diagnostic state.
 	refresh_diagnostics(s, stored);
+	stored.last_publish_at = time::now(time::clock::MONOTONIC);
+	stored.diagnostics_pending = false;
 };
 
 // Handles textDocument/didChange. Applies each content change in order.
@@ -166,7 +184,36 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 	for (let i = 0z; i < len(changes); i += 1) {
 		apply_content_change(s, doc, changes[i]);
 	};
+	doc.last_edit_at = time::now(time::clock::MONOTONIC);
+	doc.diagnostics_pending = true;
+	maybe_flush_diagnostics(s, doc);
+};
+
+// Publishes diagnostics for `doc` if the configured debounce window since
+// the last publish has elapsed. Otherwise leaves diagnostics_pending true
+// so a subsequent message will flush.
+fn maybe_flush_diagnostics(s: *server, doc: *document) void = {
+	if (!doc.diagnostics_pending) return;
+	const debounce_ms = s.config.diagnostics_debounce_ms: i64;
+	const now = time::now(time::clock::MONOTONIC);
+	const since_publish_ns = time::diff(doc.last_publish_at, now);
+	const debounce_ns = debounce_ms * time::MILLISECOND;
+	if (since_publish_ns < debounce_ns) {
+		return;
+	};
 	refresh_diagnostics(s, doc);
+	doc.last_publish_at = now;
+	doc.diagnostics_pending = false;
+};
+
+// Walks every open document and flushes any diagnostics whose debounce
+// deadline has passed. Called from the dispatcher between messages so
+// rapid keystrokes coalesce but a single trailing edit still publishes
+// once the user stops typing and the next message arrives.
+export fn flush_pending_diagnostics(s: *server) void = {
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		maybe_flush_diagnostics(s, &s.documents[i]);
+	};
 };
 
 fn apply_content_change(s: *server, doc: *document, change: json::value) void = {
@@ -253,7 +300,10 @@ export fn handle_did_save(s: *server, n: lsp::notification) void = {
 		analysis::replace_all(&doc.buf, strings::toutf8(txt));
 	case void => void;
 	};
+	// Save bypasses the debounce: we want fresh diagnostics now.
 	refresh_diagnostics_with_build(s, doc);
+	doc.last_publish_at = time::now(time::clock::MONOTONIC);
+	doc.diagnostics_pending = false;
 };
 
 // Handles textDocument/willSave (notification). LSP allows the client to

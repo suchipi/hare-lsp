@@ -97,9 +97,68 @@ fn next_msg(data: []u8) (json::value, size) = {
 	assert(src == "hare-lsp/parse");
 };
 
+@test fn debounce_suppresses_rapid_changes() void = {
+	let (s, scan, in_buf, out) = diag_test_server();
+	defer diag_test_cleanup(&s, scan, in_buf, out);
+	// Set a very large debounce so rapid changes coalesce.
+	s.config.diagnostics_debounce_ms = 60000;
+
+	// Open + change. The didOpen always publishes; the didChange is
+	// inside the debounce window so it should NOT.
+	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"fn a() void = void;\n"}}`;
+	let pv1 = json::loadstr(open)!;
+	const n1 = lsp::notification {
+		method = strings::dup("textDocument/didOpen")!,
+		params = pv1,
+	};
+	defer { free(n1.method); json::finish(pv1); };
+	handle_did_open(&s, n1);
+
+	const change = `{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"fn bad( = void;\n"}]}`;
+	let pv2 = json::loadstr(change)!;
+	const n2 = lsp::notification {
+		method = strings::dup("textDocument/didChange")!,
+		params = pv2,
+	};
+	defer { free(n2.method); json::finish(pv2); };
+	handle_did_change(&s, n2);
+
+	// Count publishDiagnostics notifications: should be exactly 1
+	// (the didOpen).
+	const data = memio::buffer(out);
+	let off = 0z;
+	let publishes = 0z;
+	for (off < len(data)) {
+		const (v, n) = next_msg(data[off..]);
+		defer json::finish(v);
+		const obj = v as json::object;
+		match (json::get(&obj, "method")) {
+		case let p: *json::value =>
+			match (*p) {
+			case let m: str =>
+				if (m == "textDocument/publishDiagnostics") {
+					publishes += 1;
+				};
+			case => void;
+			};
+		case => void;
+		};
+		off += n;
+	};
+	assert(publishes == 1);
+	// And the document is marked as having pending diagnostics.
+	const doc = match (find_document(&s, "file:///x.ha")) {
+	case let p: *document => yield p;
+	case null => abort("doc missing");
+	};
+	assert(doc.diagnostics_pending);
+};
+
 @test fn changing_to_broken_publishes_diagnostic() void = {
 	let (s, scan, in_buf, out) = diag_test_server();
 	defer diag_test_cleanup(&s, scan, in_buf, out);
+	// Disable debounce so didChange publishes immediately.
+	s.config.diagnostics_debounce_ms = 0;
 
 	// Open a clean file.
 	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;\n"}}`;

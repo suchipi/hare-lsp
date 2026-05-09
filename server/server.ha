@@ -206,6 +206,11 @@ export fn run(s: *server) int = {
 
 		dispatch(s, msg);
 		lsp::finish_message(msg);
+		// Flush any pending debounced diagnostics now that we've
+		// processed a message. Rapid didChange-only traffic naturally
+		// coalesces; a trailing edit publishes once any later message
+		// arrives.
+		flush_pending_diagnostics(s);
 	};
 	return EXIT_OK;
 };
