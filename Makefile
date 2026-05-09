@@ -37,6 +37,7 @@ test:
 
 clean:
 	rm -rf hare-lsp .cache
+	rm -rf editors/vscode/out editors/vscode/node_modules editors/vscode/*.vsix
 
 install: hare-lsp
 	mkdir -p "$(DESTDIR)$(BINDIR)"
@@ -45,4 +46,14 @@ install: hare-lsp
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/hare-lsp"
 
-.PHONY: all check-deps test clean install uninstall
+# --- VSCode extension ------------------------------------------------
+
+VSCODE_DIR = editors/vscode
+
+vscode-extension:
+	cd $(VSCODE_DIR) && npm install && npm run package
+
+vscode-install: vscode-extension
+	cd $(VSCODE_DIR) && code --install-extension hare-lsp-*.vsix
+
+.PHONY: all check-deps test clean install uninstall vscode-extension vscode-install

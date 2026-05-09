@@ -1,3 +1,6 @@
 /hare-lsp
 /.cache/
 /.tmp/
+editors/vscode/node_modules/
+editors/vscode/out/
+editors/vscode/*.vsix

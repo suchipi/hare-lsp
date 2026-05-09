@@ -1,0 +1,147 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Hare",
+  "scopeName": "source.hare",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#runes" },
+    { "include": "#numbers" },
+    { "include": "#attributes" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.hare",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.hare",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.hare",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.hare",
+              "match": "\\\\([abfnrtv'\"\\\\0]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.other.raw.hare",
+          "begin": "`",
+          "end": "`"
+        }
+      ]
+    },
+    "runes": {
+      "name": "string.quoted.single.hare",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.hare",
+          "match": "\\\\([abfnrtv'\"\\\\0]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.hare",
+          "match": "\\b0[xX][0-9A-Fa-f_]+(?:[uiz](?:8|16|32|64)?)?\\b"
+        },
+        {
+          "name": "constant.numeric.octal.hare",
+          "match": "\\b0[oO][0-7_]+(?:[uiz](?:8|16|32|64)?)?\\b"
+        },
+        {
+          "name": "constant.numeric.binary.hare",
+          "match": "\\b0[bB][01_]+(?:[uiz](?:8|16|32|64)?)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.hare",
+          "match": "\\b[0-9][0-9_]*\\.[0-9_]+(?:[eE][+-]?[0-9_]+)?(?:f(?:32|64))?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.hare",
+          "match": "\\b[0-9][0-9_]*(?:[uiz](?:8|16|32|64)?)?\\b"
+        }
+      ]
+    },
+    "attributes": {
+      "name": "storage.modifier.attribute.hare",
+      "match": "@(test|init|fini|symbol|threadlocal|packed|undefined|offset)\\b"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.hare",
+          "match": "\\b(if|else|for|while|switch|match|case|return|break|continue|defer|yield|abort|assert)\\b"
+        },
+        {
+          "name": "keyword.declaration.hare",
+          "match": "\\b(fn|let|const|def|type|export|use|static|enum|struct|union|opaque)\\b"
+        },
+        {
+          "name": "keyword.operator.expression.hare",
+          "match": "\\b(as|is|len|alloc|free|append|insert|delete|align|offset|vaarg|vaend|valist|vastart)\\b"
+        },
+        {
+          "name": "keyword.other.hare",
+          "match": "\\b(nullable|never|nomem)\\b"
+        }
+      ]
+    },
+    "types": {
+      "name": "storage.type.hare",
+      "match": "\\b(bool|done|f32|f64|i8|i16|i32|i64|int|opaque|rune|size|str|u8|u16|u32|u64|uint|uintptr|void|valist)\\b"
+    },
+    "constants": {
+      "name": "constant.language.hare",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "operators": {
+      "name": "keyword.operator.hare",
+      "match": "(=>|->|::|\\.\\.\\.|\\.\\.|==|!=|<=|>=|&&|\\|\\||<<|>>|[+\\-*/%&|^!~<>=?])"
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.terminator.statement.hare",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.separator.hare",
+          "match": "[,:]"
+        },
+        {
+          "name": "punctuation.section.parens.hare",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.section.brackets.hare",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.section.braces.hare",
+          "match": "[{}]"
+        }
+      ]
+    }
+  }
+}
