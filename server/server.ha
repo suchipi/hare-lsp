@@ -386,6 +386,10 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_code_lens(s, r);
 	case "codeLens/resolve" =>
 		handle_code_lens_resolve(s, r);
+	case "textDocument/codeAction" =>
+		handle_code_action(s, r);
+	case "codeAction/resolve" =>
+		handle_code_action_resolve(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -585,6 +589,13 @@ fn build_initialize_result() (json::value | nomem) = {
 	let cl_provider = json::newobject();
 	json::put(&cl_provider, "resolveProvider", true: json::value)?;
 	json::put(&caps, "codeLensProvider", cl_provider)?;
+	let ca_provider = json::newobject();
+	let ca_kinds: []json::value = [];
+	append(ca_kinds, strings::dup("source.organizeImports")?: json::value)?;
+	append(ca_kinds, strings::dup("quickfix")?: json::value)?;
+	json::put(&ca_provider, "codeActionKinds", ca_kinds: json::value)?;
+	json::put(&ca_provider, "resolveProvider", true: json::value)?;
+	json::put(&caps, "codeActionProvider", ca_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
