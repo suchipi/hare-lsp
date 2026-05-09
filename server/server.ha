@@ -71,6 +71,9 @@ export type server = struct {
 
 	// User-configured server settings.
 	config: config,
+
+	// Open documents, keyed by URI.
+	documents: []document,
 };
 
 // Tracks an outgoing request the server is waiting on a response for.
@@ -109,6 +112,7 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	next_registration_seq = 0,
 	client_capabilities = void,
 	config = default_config(),
+	documents = [],
 };
 
 // Releases resources held by the server. Does not close the underlying I/O
@@ -147,6 +151,10 @@ export fn finish(s: *server) void = {
 		json::finish(v);
 	};
 	finish_config(&s.config);
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		finish_document(&s.documents[i]);
+	};
+	free(s.documents);
 };
 
 // Runs the main message loop until the client sends `exit` (or EOF). Returns
@@ -290,6 +298,8 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_initialize(s, r);
 	case "shutdown" =>
 		handle_shutdown(s, r);
+	case "textDocument/willSaveWaitUntil" =>
+		handle_will_save_wait_until(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -316,6 +326,16 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 		handle_did_change_workspace_folders(s, n);
 	case "workspace/didChangeConfiguration" =>
 		handle_did_change_configuration(s, n);
+	case "textDocument/didOpen" =>
+		handle_did_open(s, n);
+	case "textDocument/didChange" =>
+		handle_did_change(s, n);
+	case "textDocument/didClose" =>
+		handle_did_close(s, n);
+	case "textDocument/didSave" =>
+		handle_did_save(s, n);
+	case "textDocument/willSave" =>
+		handle_will_save(s, n);
 	case =>
 		// Per LSP, unknown notifications are silently ignored.
 		void;
@@ -393,6 +413,18 @@ fn build_initialize_result() (json::value | nomem) = {
 	let caps = json::newobject();
 	let caps_ok = false;
 	defer if (!caps_ok) json::finish(caps);
+
+	// Text document sync: incremental, with willSave/willSaveWaitUntil/save.
+	let tds = json::newobject();
+	json::put(&tds, "openClose", true: json::value)?;
+	// 1 = Full, 2 = Incremental.
+	json::put(&tds, "change", 2: f64)?;
+	json::put(&tds, "willSave", true: json::value)?;
+	json::put(&tds, "willSaveWaitUntil", true: json::value)?;
+	let save_opts = json::newobject();
+	json::put(&save_opts, "includeText", true: json::value)?;
+	json::put(&tds, "save", save_opts)?;
+	json::put(&caps, "textDocumentSync", tds)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
