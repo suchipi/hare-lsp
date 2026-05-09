@@ -236,7 +236,7 @@ export fn handle_did_save(s: *server, n: lsp::notification) void = {
 		analysis::replace_all(&doc.buf, strings::toutf8(txt));
 	case void => void;
 	};
-	refresh_diagnostics(s, doc);
+	refresh_diagnostics_with_build(s, doc);
 };
 
 // Handles textDocument/willSave (notification). LSP allows the client to
