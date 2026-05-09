@@ -159,34 +159,15 @@ fn add_organize_imports_action(
 	*arr = cur;
 };
 
-fn params_obj_ca(p: (json::value | void)) (json::object | void) = {
-	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
-	};
-	return match (v) {
-	case let o: json::object => yield o;
-	case => yield void;
-	};
-};
+fn params_obj_ca(p: (json::value | void)) (json::object | void) =
+	lsp::params_object(p);
 
 fn object_string_ca(o: *json::object, key1: str, key2: str) (str | void) = {
-	const sub = match (json::get(o, key1)) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
-		};
-	case => return void;
+	const sub = match (lsp::json_obj(o, key1)) {
+	case let oo: json::object => yield oo;
+	case void => return void;
 	};
-	match (json::get(&sub, key2)) {
-	case let p: *json::value =>
-		match (*p) {
-		case let s: str => return s;
-		case => return void;
-		};
-	case => return void;
-	};
+	return lsp::json_str(&sub, key2);
 };
 
 fn send_array_ca(s: *server, id: lsp::id, arr: []json::value) void = {

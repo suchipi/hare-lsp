@@ -11,6 +11,88 @@
 use encoding::json;
 use strings;
 
+// --- shared json::object accessors ----------------------------------
+//
+// These deduplicate the "extract optional X from JSON object" boilerplate
+// that otherwise appears as 5+ lines of nested matches in every handler.
+//
+// Each returns a borrowed view of the input where possible; strings are
+// returned as-is from the json::value (no copies).
+
+// Returns the value at obj[key] as a string, or void if the key is
+// absent or the value isn't a string.
+export fn json_str(o: *json::object, key: str) (str | void) = {
+	const p = match (json::get(o, key)) {
+	case let p: *json::value => yield p;
+	case void => return void;
+	};
+	return match (*p) {
+	case let s: str => yield s;
+	case => yield void;
+	};
+};
+
+// Returns the value at obj[key] as a number, or void.
+export fn json_num(o: *json::object, key: str) (f64 | void) = {
+	const p = match (json::get(o, key)) {
+	case let p: *json::value => yield p;
+	case void => return void;
+	};
+	return match (*p) {
+	case let f: f64 => yield f;
+	case => yield void;
+	};
+};
+
+// Returns the value at obj[key] as an object, or void.
+export fn json_obj(o: *json::object, key: str) (json::object | void) = {
+	const p = match (json::get(o, key)) {
+	case let p: *json::value => yield p;
+	case void => return void;
+	};
+	return match (*p) {
+	case let oo: json::object => yield oo;
+	case => yield void;
+	};
+};
+
+// Returns the value at obj[key] as an array, or void.
+export fn json_arr(o: *json::object, key: str) ([]json::value | void) = {
+	const p = match (json::get(o, key)) {
+	case let p: *json::value => yield p;
+	case void => return void;
+	};
+	return match (*p) {
+	case let a: []json::value => yield a;
+	case => yield void;
+	};
+};
+
+// Returns the value at obj[key] as a bool, or void.
+export fn json_bool(o: *json::object, key: str) (bool | void) = {
+	const p = match (json::get(o, key)) {
+	case let p: *json::value => yield p;
+	case void => return void;
+	};
+	return match (*p) {
+	case let b: bool => yield b;
+	case => yield void;
+	};
+};
+
+// Unwraps `(json::value | void)` (the typical type of a request's
+// `params`) into a json::object, or returns void if it's not an object.
+export fn params_object(p: (json::value | void)) (json::object | void) = {
+	const v = match (p) {
+	case let v: json::value => yield v;
+	case void => return void;
+	};
+	return match (v) {
+	case let o: json::object => yield o;
+	case => yield void;
+	};
+};
+
 // --- Position --------------------------------------------------------
 
 export fn encode_position(p: position) (json::value | nomem) = {

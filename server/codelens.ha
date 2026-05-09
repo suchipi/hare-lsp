@@ -288,16 +288,8 @@ fn uri_from_cl(p: (json::value | void)) (str | void) = {
 	};
 };
 
-fn params_obj_cl(p: (json::value | void)) (json::object | void) = {
-	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
-	};
-	return match (v) {
-	case let o: json::object => yield o;
-	case => yield void;
-	};
-};
+fn params_obj_cl(p: (json::value | void)) (json::object | void) =
+	lsp::params_object(p);
 
 fn send_array_cl(s: *server, id: lsp::id, arr: []json::value) void = {
 	const v: json::value = arr;

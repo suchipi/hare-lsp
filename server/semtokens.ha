@@ -210,16 +210,8 @@ fn next_semantic_id(s: *server) str = {
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
-fn params_obj_st(p: (json::value | void)) (json::object | void) = {
-	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
-	};
-	return match (v) {
-	case let o: json::object => yield o;
-	case => yield void;
-	};
-};
+fn params_obj_st(p: (json::value | void)) (json::object | void) =
+	lsp::params_object(p);
 
 // Returns a flat []u32 of LSP-encoded token tuples for the given source.
 fn compute_semantic_tokens(s: *server, data: []u8) []u32 = {

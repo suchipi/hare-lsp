@@ -465,16 +465,8 @@ fn send_array_fmt(s: *server, id: lsp::id, arr: []json::value) void = {
 	};
 };
 
-fn params_obj_fmt(p: (json::value | void)) (json::object | void) = {
-	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
-	};
-	return match (v) {
-	case let o: json::object => yield o;
-	case => yield void;
-	};
-};
+fn params_obj_fmt(p: (json::value | void)) (json::object | void) =
+	lsp::params_object(p);
 
 // Post-processes unparse output to honour config.format_indent_style.
 // hare::unparse always emits tabs; if the user wants spaces, expand the

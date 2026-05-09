@@ -179,16 +179,8 @@ fn dirname_xc(path: str) str = {
 	};
 };
 
-fn params_obj_xc(p: (json::value | void)) (json::object | void) = {
-	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
-	};
-	return match (v) {
-	case let o: json::object => yield o;
-	case => yield void;
-	};
-};
+fn params_obj_xc(p: (json::value | void)) (json::object | void) =
+	lsp::params_object(p);
 
 fn send_null_xc(s: *server, id: lsp::id) void = {
 	const v: json::value = json::_null;

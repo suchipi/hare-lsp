@@ -523,38 +523,12 @@ fn parse_text_document_position_local(p: (json::value | void)) ((str, lsp::posit
 	return (uri, pos);
 };
 
-fn params_object_local(p: (json::value | void)) (json::object | void) = {
-	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
-	};
-	return match (v) {
-	case let o: json::object => yield o;
-	case => yield void;
-	};
-};
-
-fn object_field_object_local(o: *json::object, key: str) (json::object | void) = {
-	const p = match (json::get(o, key)) {
-	case let p: *json::value => yield p;
-	case void => return void;
-	};
-	return match (*p) {
-	case let o: json::object => yield o;
-	case => yield void;
-	};
-};
-
-fn object_string_local(o: *json::object, key: str) (str | void) = {
-	const p = match (json::get(o, key)) {
-	case let p: *json::value => yield p;
-	case void => return void;
-	};
-	return match (*p) {
-	case let s: str => yield s;
-	case => yield void;
-	};
-};
+fn params_object_local(p: (json::value | void)) (json::object | void) =
+	lsp::params_object(p);
+fn object_field_object_local(o: *json::object, key: str) (json::object | void) =
+	lsp::json_obj(o, key);
+fn object_string_local(o: *json::object, key: str) (str | void) =
+	lsp::json_str(o, key);
 
 fn encode_range_pos(start: analysis::position, end: analysis::position) json::value = {
 	let r = json::newobject();

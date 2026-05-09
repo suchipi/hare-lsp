@@ -463,47 +463,17 @@ fn send_result(s: *server, id: lsp::id, result: json::value) void = {
 };
 
 // --- json helpers ----------------------------------------------------
+// Thin aliases over the shared lsp::json_* helpers so this file's call
+// sites stay unchanged.
 
-fn params_object(p: (json::value | void)) (json::object | void) = {
-	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
-	};
-	return match (v) {
-	case let o: json::object => yield o;
-	case => yield void;
-	};
-};
+fn params_object(p: (json::value | void)) (json::object | void) =
+	lsp::params_object(p);
 
-fn object_field_object(o: *json::object, key: str) (json::object | void) = {
-	const p = match (json::get(o, key)) {
-	case let p: *json::value => yield p;
-	case void => return void;
-	};
-	return match (*p) {
-	case let o: json::object => yield o;
-	case => yield void;
-	};
-};
+fn object_field_object(o: *json::object, key: str) (json::object | void) =
+	lsp::json_obj(o, key);
 
-fn object_string(o: *json::object, key: str) (str | void) = {
-	const p = match (json::get(o, key)) {
-	case let p: *json::value => yield p;
-	case void => return void;
-	};
-	return match (*p) {
-	case let s: str => yield s;
-	case => yield void;
-	};
-};
+fn object_string(o: *json::object, key: str) (str | void) =
+	lsp::json_str(o, key);
 
-fn object_number(o: *json::object, key: str) (f64 | void) = {
-	const p = match (json::get(o, key)) {
-	case let p: *json::value => yield p;
-	case void => return void;
-	};
-	return match (*p) {
-	case let f: f64 => yield f;
-	case => yield void;
-	};
-};
+fn object_number(o: *json::object, key: str) (f64 | void) =
+	lsp::json_num(o, key);
