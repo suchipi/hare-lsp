@@ -191,3 +191,122 @@ fn encode_range(r: lsp::range) json::value = {
 export fn clear_diagnostics(s: *server, uri: str) void = {
 	publish_diagnostics(s, uri, 0, []);
 };
+
+// --- pull-model diagnostics -----------------------------------------
+
+// Handles textDocument/diagnostic. The client wants the current diagnostic
+// state for a single document.
+export fn handle_textdocument_diagnostic(s: *server, r: lsp::request) void = {
+	const obj = match (params_object_diag(r.params)) {
+	case let o: json::object => yield o;
+	case void =>
+		send_diag_full([], r);
+		send_to_client(s, r.id, full_report([]));
+		return;
+	};
+	const text_doc = match (object_field_object_diag(&obj, "textDocument")) {
+	case let o: json::object => yield o;
+	case void =>
+		send_to_client(s, r.id, full_report([]));
+		return;
+	};
+	const uri = match (object_string_diag(&text_doc, "uri")) {
+	case let s: str => yield s;
+	case void =>
+		send_to_client(s, r.id, full_report([]));
+		return;
+	};
+	const doc = match (find_document(s, uri)) {
+	case let p: *document => yield p;
+	case null =>
+		send_to_client(s, r.id, full_report([]));
+		return;
+	};
+	let diags = parse_diagnostics_for_doc(s, doc);
+	send_to_client(s, r.id, full_report(diags));
+};
+
+// Handles workspace/diagnostic. Returns a "full" report for every open
+// document. We keep this scoped to open documents for now; expanding to
+// the entire workspace lands when the workspace index does (step 15).
+export fn handle_workspace_diagnostic(s: *server, r: lsp::request) void = {
+	let items: []json::value = [];
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		let diags = parse_diagnostics_for_doc(s, &s.documents[i]);
+		let report = json::newobject();
+		json::set(&report, "kind", "full": json::value)!;
+		json::set(&report, "uri", s.documents[i].uri: json::value)!;
+		json::put(&report, "version", s.documents[i].version: f64)!;
+		json::put(&report, "items", diags: json::value)!;
+		append(items, report: json::value)!;
+	};
+	let result = json::newobject();
+	json::put(&result, "items", items: json::value)!;
+	send_to_client(s, r.id, result: json::value);
+};
+
+// Sends a workspace/diagnostic/refresh request to the client. Used after
+// the workspace index changes in a way that may have invalidated previous
+// reports.
+export fn request_diagnostic_refresh(s: *server) void = {
+	const id = next_outgoing_id(s);
+	if (!send_request(s, id, "workspace/diagnostic/refresh", json::_null)) {
+		return;
+	};
+	pending_remember(s, id, "workspace/diagnostic/refresh");
+};
+
+fn full_report(items: []json::value) json::value = {
+	let o = json::newobject();
+	json::set(&o, "kind", "full": json::value)!;
+	json::put(&o, "items", items: json::value)!;
+	return o;
+};
+
+fn send_to_client(s: *server, id: lsp::id, result: json::value) void = {
+	defer json::finish(result);
+	match (lsp::encode_response_result(s.out, id, result)) {
+	case size => void;
+	case let e: io::error =>
+		fmt::fprintln(os::stderr, "hare-lsp: pull diag response:",
+			io::strerror(e))!;
+	};
+};
+
+// Stub for the future async write — unused for now.
+fn send_diag_full(_items: []json::value, _r: lsp::request) void = void;
+
+// Local helpers (json::object navigation). Duplicated here to avoid
+// reaching into documents.ha's private helpers.
+fn params_object_diag(p: (json::value | void)) (json::object | void) = {
+	const v = match (p) {
+	case let v: json::value => yield v;
+	case void => return void;
+	};
+	return match (v) {
+	case let o: json::object => yield o;
+	case => yield void;
+	};
+};
+
+fn object_field_object_diag(o: *json::object, key: str) (json::object | void) = {
+	const p = match (json::get(o, key)) {
+	case let p: *json::value => yield p;
+	case void => return void;
+	};
+	return match (*p) {
+	case let o: json::object => yield o;
+	case => yield void;
+	};
+};
+
+fn object_string_diag(o: *json::object, key: str) (str | void) = {
+	const p = match (json::get(o, key)) {
+	case let p: *json::value => yield p;
+	case void => return void;
+	};
+	return match (*p) {
+	case let s: str => yield s;
+	case => yield void;
+	};
+};

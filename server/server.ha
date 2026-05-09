@@ -300,6 +300,10 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_shutdown(s, r);
 	case "textDocument/willSaveWaitUntil" =>
 		handle_will_save_wait_until(s, r);
+	case "textDocument/diagnostic" =>
+		handle_textdocument_diagnostic(s, r);
+	case "workspace/diagnostic" =>
+		handle_workspace_diagnostic(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -425,6 +429,13 @@ fn build_initialize_result() (json::value | nomem) = {
 	json::put(&save_opts, "includeText", true: json::value)?;
 	json::put(&tds, "save", save_opts)?;
 	json::put(&caps, "textDocumentSync", tds)?;
+
+	// Pull diagnostics support.
+	let diag_provider = json::newobject();
+	json::set(&diag_provider, "identifier", "hare-lsp": json::value)?;
+	json::put(&diag_provider, "interFileDependencies", true: json::value)?;
+	json::put(&diag_provider, "workspaceDiagnostics", true: json::value)?;
+	json::put(&caps, "diagnosticProvider", diag_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
