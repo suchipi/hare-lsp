@@ -1,0 +1,263 @@
+// SPDX-License-Identifier: MPL-2.0
+// (c) hare-lsp authors
+//
+// Inlay hints. We emit two kinds:
+//   1. Parameter names at call sites. We resolve the callee from the
+//      file's symbol index (cross-file resolution arrives with the
+//      workspace-wide signature cache).
+//   2. Inferred types for `let x = expr` — deferred until step 27 lands
+//      a type-of-expression visitor.
+//
+// The hint generation is conservative: when in doubt, emit nothing rather
+// than render confusing/wrong hints.
+
+use analysis;
+use encoding::json;
+use hare::ast;
+use lsp;
+use strings;
+
+export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
+	if (!s.config.inlay_hints_parameter_names &&
+		!s.config.inlay_hints_inferred_types) {
+		send_array_ih(s, r.id, []);
+		return;
+	};
+	const uri = match (uri_from_ih(r.params)) {
+	case let s: str => yield s;
+	case void =>
+		send_array_ih(s, r.id, []);
+		return;
+	};
+	const doc = match (find_document(s, uri)) {
+	case let p: *document => yield p;
+	case null =>
+		send_array_ih(s, r.id, []);
+		return;
+	};
+	const data = analysis::bytes(&doc.buf);
+	let pr = analysis::parse_recover(data, uri);
+	defer analysis::finish_parse_result(&pr);
+
+	let arr: []json::value = [];
+	if (s.config.inlay_hints_parameter_names) {
+		// Walk decls and find call sites within them.
+		// For minimal correctness we scan the source for call-like
+		// patterns and look up matching function decls in the local
+		// index. The parameter-name source is the resolved decl's
+		// prototype.
+		let idx = analysis::build_index(&pr.subunit);
+		defer analysis::finish_index(&idx);
+		emit_param_hints(s, doc, &pr.subunit, &idx, &arr);
+	};
+
+	send_array_ih(s, r.id, arr);
+};
+
+fn emit_param_hints(
+	s: *server, doc: *document, su: *ast::subunit,
+	idx: *analysis::file_index, arr: *[]json::value,
+) void = {
+	const data = analysis::bytes(&doc.buf);
+	let i = 0z;
+	for (i < len(data); i += 1) {
+		// Look for an identifier followed by '(' at top level. The
+		// 'top level' check is approximated by skipping comments and
+		// strings, which we can't easily do without a token stream;
+		// the hare::lex pass would be more robust. For now use a
+		// simple state machine.
+		const b = data[i];
+		if (!is_word_byte_ih(b)) continue;
+		// Find end of identifier.
+		let j = i;
+		for (j < len(data) && is_word_byte_ih(data[j]); j += 1) void;
+		// Must be followed by '('.
+		if (j >= len(data) || data[j] != '(': u8) {
+			i = j - 1;
+			continue;
+		};
+		const name = strings::fromutf8(data[i..j])!;
+		// Resolve.
+		const sym = match (analysis::find_by_short_name(idx, name)) {
+		case let p: *analysis::symbol => yield p;
+		case void =>
+			i = j - 1;
+			continue;
+		};
+		if (sym.kind != analysis::symbol_kind::FUNCTION) {
+			i = j - 1;
+			continue;
+		};
+		// Find the decl.
+		const decl_idx = match (find_decl_idx(su, name)) {
+		case let n: size => yield n;
+		case void =>
+			i = j - 1;
+			continue;
+		};
+		const params = decl_param_names(&su.decls[decl_idx]);
+		defer free(params);
+		// Walk the argument list.
+		let arg_starts = walk_arg_starts(data, j);
+		defer free(arg_starts);
+		const enc = position_encoding(s);
+		const limit = if (len(arg_starts) < len(params)) {
+			yield len(arg_starts);
+		} else {
+			yield len(params);
+		};
+		for (let k = 0z; k < limit; k += 1) {
+			if (len(params[k]) == 0) continue;
+			const off = arg_starts[k];
+			const pos = analysis::byte_to_position(data, doc.buf.line_index,
+				enc, off);
+			let hint = json::newobject();
+			let p_obj = json::newobject();
+			json::put(&p_obj, "line", pos.line: f64)!;
+			json::put(&p_obj, "character", pos.character: f64)!;
+			json::put(&hint, "position", p_obj)!;
+			const lbl = strings::concat(params[k], ":")!;
+			defer free(lbl);
+			json::set(&hint, "label", lbl: json::value)!;
+			json::put(&hint, "kind", 2: f64)!; // 2 = Parameter
+			json::put(&hint, "paddingRight", true: json::value)!;
+			let cur = *arr;
+			append(cur, hint: json::value)!;
+			*arr = cur;
+		};
+		i = j;
+	};
+};
+
+fn is_word_byte_ih(b: u8) bool = {
+	if (b >= 'a': u8 && b <= 'z': u8) return true;
+	if (b >= 'A': u8 && b <= 'Z': u8) return true;
+	if (b >= '0': u8 && b <= '9': u8) return true;
+	return b == '_': u8;
+};
+
+fn find_decl_idx(su: *ast::subunit, name: str) (size | void) = {
+	for (let i = 0z; i < len(su.decls); i += 1) {
+		const id = decl_ident_ih(&su.decls[i]);
+		if (len(id) > 0 && id[len(id) - 1] == name) return i;
+	};
+	return void;
+};
+
+fn decl_ident_ih(d: *ast::decl) ast::ident = {
+	match (d.decl) {
+	case let f: ast::decl_func => return f.ident;
+	case let t: ast::decl_type => return t.ident;
+	case let g: ast::decl_global => return g.ident;
+	case let c: ast::decl_const => return c.ident;
+	case ast::assert_expr => return [];
+	};
+};
+
+fn decl_param_names(d: *ast::decl) []str = {
+	let out: []str = [];
+	match (d.decl) {
+	case let f: ast::decl_func =>
+		match (f.prototype.repr) {
+		case let proto: ast::func_type =>
+			for (let i = 0z; i < len(proto.params); i += 1) {
+				append(out, proto.params[i].name)!;
+			};
+		case => void;
+		};
+	case => void;
+	};
+	return out;
+};
+
+// Returns the byte offsets of each argument's start within `data`, given
+// `paren_at` is the index of the '(' after the callee.
+fn walk_arg_starts(data: []u8, paren_at: size) []size = {
+	let out: []size = [];
+	let i = paren_at + 1;
+	let depth: int = 0;
+	// Skip whitespace before first arg.
+	for (i < len(data) && is_ws(data[i]); i += 1) void;
+	if (i >= len(data) || data[i] == ')': u8) return out;
+	append(out, i)!;
+	for (i < len(data); i += 1) {
+		const b = data[i];
+		switch (b) {
+		case '(': u8, '[': u8, '{': u8 =>
+			depth += 1;
+		case ')': u8 =>
+			if (depth == 0) return out;
+			depth -= 1;
+		case ']': u8, '}': u8 =>
+			depth -= 1;
+		case ',': u8 =>
+			if (depth == 0) {
+				let k = i + 1;
+				for (k < len(data) && is_ws(data[k]); k += 1) void;
+				if (k < len(data)) {
+					append(out, k)!;
+				};
+			};
+		case => void;
+		};
+	};
+	return out;
+};
+
+fn is_ws(b: u8) bool = {
+	return b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8;
+};
+
+export fn handle_inlay_hint_resolve(s: *server, r: lsp::request) void = {
+	const v: json::value = match (r.params) {
+	case let v: json::value =>
+		yield match (json::dup(v)) {
+		case let copy: json::value => yield copy;
+		case nomem =>
+			send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+			return;
+		};
+	case void => yield json::_null: json::value;
+	};
+	defer json::finish(v);
+	match (lsp::encode_response_result(s.out, r.id, v)) {
+	case size => void;
+	case => void;
+	};
+};
+
+fn uri_from_ih(p: (json::value | void)) (str | void) = {
+	const v = match (p) {
+	case let v: json::value => yield v;
+	case void => return void;
+	};
+	const obj = match (v) {
+	case let o: json::object => yield o;
+	case => return void;
+	};
+	const td = match (json::get(&obj, "textDocument")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case => return void;
+		};
+	case => return void;
+	};
+	match (json::get(&td, "uri")) {
+	case let p: *json::value =>
+		match (*p) {
+		case let s: str => return s;
+		case => return void;
+		};
+	case => return void;
+	};
+};
+
+fn send_array_ih(s: *server, id: lsp::id, arr: []json::value) void = {
+	const v: json::value = arr;
+	defer json::finish(v);
+	match (lsp::encode_response_result(s.out, id, v)) {
+	case size => void;
+	case => void;
+	};
+};

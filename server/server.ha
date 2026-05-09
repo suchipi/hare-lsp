@@ -378,6 +378,10 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_semantic_tokens_full_delta(s, r);
 	case "textDocument/semanticTokens/range" =>
 		handle_semantic_tokens_range(s, r);
+	case "textDocument/inlayHint" =>
+		handle_inlay_hint(s, r);
+	case "inlayHint/resolve" =>
+		handle_inlay_hint_resolve(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -571,6 +575,9 @@ fn build_initialize_result() (json::value | nomem) = {
 	json::put(&st_provider, "full", true: json::value)?;
 	json::put(&st_provider, "range", true: json::value)?;
 	json::put(&caps, "semanticTokensProvider", st_provider)?;
+	let ih_provider = json::newobject();
+	json::put(&ih_provider, "resolveProvider", true: json::value)?;
+	json::put(&caps, "inlayHintProvider", ih_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
