@@ -364,6 +364,8 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_completion(s, r);
 	case "completionItem/resolve" =>
 		handle_completion_resolve(s, r);
+	case "textDocument/signatureHelp" =>
+		handle_signature_help(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -538,6 +540,12 @@ fn build_initialize_result() (json::value | nomem) = {
 	append(triggers, strings::dup(".")?: json::value)?;
 	json::put(&comp_provider, "triggerCharacters", triggers: json::value)?;
 	json::put(&caps, "completionProvider", comp_provider)?;
+	let sh_provider = json::newobject();
+	let sh_triggers: []json::value = [];
+	append(sh_triggers, strings::dup("(")?: json::value)?;
+	append(sh_triggers, strings::dup(",")?: json::value)?;
+	json::put(&sh_provider, "triggerCharacters", sh_triggers: json::value)?;
+	json::put(&caps, "signatureHelpProvider", sh_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
