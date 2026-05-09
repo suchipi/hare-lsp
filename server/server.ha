@@ -372,6 +372,12 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_range_formatting(s, r);
 	case "textDocument/onTypeFormatting" =>
 		handle_on_type_formatting(s, r);
+	case "textDocument/semanticTokens/full" =>
+		handle_semantic_tokens_full(s, r);
+	case "textDocument/semanticTokens/full/delta" =>
+		handle_semantic_tokens_full_delta(s, r);
+	case "textDocument/semanticTokens/range" =>
+		handle_semantic_tokens_range(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -560,6 +566,11 @@ fn build_initialize_result() (json::value | nomem) = {
 	append(on_type_more, strings::dup(";")?: json::value)?;
 	json::put(&on_type_fmt, "moreTriggerCharacter", on_type_more: json::value)?;
 	json::put(&caps, "documentOnTypeFormattingProvider", on_type_fmt)?;
+	let st_provider = json::newobject();
+	json::put(&st_provider, "legend", token_legend())?;
+	json::put(&st_provider, "full", true: json::value)?;
+	json::put(&st_provider, "range", true: json::value)?;
+	json::put(&caps, "semanticTokensProvider", st_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
