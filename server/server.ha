@@ -320,6 +320,18 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_type_definition(s, r);
 	case "textDocument/implementation" =>
 		handle_implementation(s, r);
+	case "textDocument/documentSymbol" =>
+		handle_document_symbol(s, r);
+	case "textDocument/documentHighlight" =>
+		handle_document_highlight(s, r);
+	case "textDocument/foldingRange" =>
+		handle_folding_range(s, r);
+	case "textDocument/selectionRange" =>
+		handle_selection_range(s, r);
+	case "textDocument/documentLink" =>
+		handle_document_link(s, r);
+	case "documentLink/resolve" =>
+		handle_document_link_resolve(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -469,6 +481,13 @@ fn build_initialize_result() (json::value | nomem) = {
 	json::put(&caps, "declarationProvider", true: json::value)?;
 	json::put(&caps, "typeDefinitionProvider", true: json::value)?;
 	json::put(&caps, "implementationProvider", true: json::value)?;
+	json::put(&caps, "documentSymbolProvider", true: json::value)?;
+	json::put(&caps, "documentHighlightProvider", true: json::value)?;
+	json::put(&caps, "foldingRangeProvider", true: json::value)?;
+	json::put(&caps, "selectionRangeProvider", true: json::value)?;
+	let dl_provider = json::newobject();
+	json::put(&dl_provider, "resolveProvider", true: json::value)?;
+	json::put(&caps, "documentLinkProvider", dl_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
