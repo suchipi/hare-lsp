@@ -354,6 +354,12 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_incoming_calls(s, r);
 	case "callHierarchy/outgoingCalls" =>
 		handle_outgoing_calls(s, r);
+	case "textDocument/prepareTypeHierarchy" =>
+		handle_prepare_type_hierarchy(s, r);
+	case "typeHierarchy/supertypes" =>
+		handle_supertypes(s, r);
+	case "typeHierarchy/subtypes" =>
+		handle_subtypes(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -520,6 +526,7 @@ fn build_initialize_result() (json::value | nomem) = {
 	json::put(&rename_provider, "prepareProvider", true: json::value)?;
 	json::put(&caps, "renameProvider", rename_provider)?;
 	json::put(&caps, "callHierarchyProvider", true: json::value)?;
+	json::put(&caps, "typeHierarchyProvider", true: json::value)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
