@@ -54,6 +54,20 @@ export type server = struct {
 	// — handlers should consult this and abort early. Stored as a slice for
 	// simplicity; LSP rarely cancels more than a handful at once.
 	cancelled_ids: []lsp::id,
+
+	// Active workspace folders, populated from initialize and updated via
+	// workspace/didChangeWorkspaceFolders.
+	workspace_folders: []workspace_folder,
+
+	// Dynamic capability registrations issued via client/registerCapability.
+	registrations: []registration,
+	// Counter for synthesizing unique registration ids.
+	next_registration_seq: u64,
+
+	// Capabilities advertised by the client during initialize, kept in raw
+	// json form so feature handlers can consult them without depending on a
+	// parsed struct that grows with the spec.
+	client_capabilities: (json::value | void),
 };
 
 // Tracks an outgoing request the server is waiting on a response for.
@@ -87,6 +101,10 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	pending_requests = [],
 	cancelled_progress = [],
 	cancelled_ids = [],
+	workspace_folders = [],
+	registrations = [],
+	next_registration_seq = 0,
+	client_capabilities = void,
 };
 
 // Releases resources held by the server. Does not close the underlying I/O
@@ -109,6 +127,21 @@ export fn finish(s: *server) void = {
 		free(s.cancelled_progress[i]);
 	};
 	free(s.cancelled_progress);
+	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
+		free(s.workspace_folders[i].uri);
+		free(s.workspace_folders[i].name);
+	};
+	free(s.workspace_folders);
+	for (let i = 0z; i < len(s.registrations); i += 1) {
+		free(s.registrations[i].id);
+		free(s.registrations[i].method);
+	};
+	free(s.registrations);
+	match (s.client_capabilities) {
+	case void => void;
+	case let v: json::value =>
+		json::finish(v);
+	};
 };
 
 // Runs the main message loop until the client sends `exit` (or EOF). Returns
@@ -264,6 +297,8 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 		handle_set_trace(s, n);
 	case "window/workDoneProgress/cancel" =>
 		handle_progress_cancel(s, n);
+	case "workspace/didChangeWorkspaceFolders" =>
+		handle_did_change_workspace_folders(s, n);
 	case =>
 		// Per LSP, unknown notifications are silently ignored.
 		void;
@@ -297,33 +332,24 @@ fn handle_initialize(s: *server, r: lsp::request) void = {
 		return;
 	};
 
-	// Extract a few useful fields from params; full handling lands in later
-	// steps as we implement features that depend on the rest.
-	match (r.params) {
+	// Extract useful fields from params. The params are owned by the
+	// `request` and freed when the message is finished, so anything we
+	// want to retain must be deep-copied.
+	const params_obj = match (r.params) {
 	case let v: json::value =>
-		match (v) {
-		case let o: json::object =>
-			match (json::get(&o, "processId")) {
-			case let p: *json::value =>
-				match (*p) {
-				case let f: f64 =>
-					s.client_pid = f: i32;
-				case => void;
-				};
-			case => void;
-			};
-			match (json::get(&o, "trace")) {
-			case let p: *json::value =>
-				match (*p) {
-				case let str_val: str =>
-					s.trace = parse_trace(str_val);
-				case => void;
-				};
-			case => void;
-			};
-		case => void;
+		yield match (v) {
+		case let o: json::object => yield o: (json::object | void);
+		case => yield void;
 		};
+	case void => yield void;
+	};
+	match (params_obj) {
 	case void => void;
+	case let o: json::object =>
+		extract_init_param_pid(s, &o);
+		extract_init_param_trace(s, &o);
+		extract_init_param_capabilities(s, &o);
+		extract_init_param_workspace_folders(s, &o);
 	};
 
 	const result = match (build_initialize_result()) {
@@ -350,8 +376,18 @@ fn build_initialize_result() (json::value | nomem) = {
 	let caps = json::newobject();
 	let caps_ok = false;
 	defer if (!caps_ok) json::finish(caps);
-	// Capabilities are populated incrementally as features land. For now the
-	// server only supports the lifecycle methods, so capabilities is empty.
+
+	// Workspace capabilities — we support workspace folders.
+	let ws = json::newobject();
+	let ws_ok = false;
+	defer if (!ws_ok) json::finish(ws);
+	let folders_caps = json::newobject();
+	json::put(&folders_caps, "supported", true: json::value)?;
+	json::put(&folders_caps, "changeNotifications", true: json::value)?;
+	json::put(&ws, "workspaceFolders", folders_caps)?;
+	ws_ok = true;
+	json::put(&caps, "workspace", ws)?;
+
 	caps_ok = true;
 	json::put(&r, "capabilities", caps)?;
 
@@ -365,6 +401,70 @@ fn build_initialize_result() (json::value | nomem) = {
 
 	ok = true;
 	return r;
+};
+
+fn extract_init_param_pid(s: *server, o: *json::object) void = {
+	match (json::get(o, "processId")) {
+	case let p: *json::value =>
+		match (*p) {
+		case let f: f64 =>
+			s.client_pid = f: i32;
+		case => void;
+		};
+	case => void;
+	};
+};
+
+fn extract_init_param_trace(s: *server, o: *json::object) void = {
+	match (json::get(o, "trace")) {
+	case let p: *json::value =>
+		match (*p) {
+		case let str_val: str =>
+			s.trace = parse_trace(str_val);
+		case => void;
+		};
+	case => void;
+	};
+};
+
+fn extract_init_param_capabilities(s: *server, o: *json::object) void = {
+	const caps = match (json::get(o, "capabilities")) {
+	case let p: *json::value => yield *p;
+	case => return;
+	};
+	// Deep-copy via json::dup so we own the result independently of the
+	// request's lifetime.
+	const dup = match (json::dup(caps)) {
+	case let v: json::value => yield v;
+	case nomem => return;
+	};
+	s.client_capabilities = dup;
+};
+
+fn extract_init_param_workspace_folders(s: *server, o: *json::object) void = {
+	// Prefer workspaceFolders if present; fall back to rootUri / rootPath
+	// for older clients that haven't migrated.
+	match (json::get(o, "workspaceFolders")) {
+	case let p: *json::value =>
+		const folders = decode_workspace_folders(*p);
+		set_workspace_folders(s, folders);
+		return;
+	case => void;
+	};
+	const root_uri = match (json::get(o, "rootUri")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let s: str => yield s;
+		case => return;
+		};
+	case => return;
+	};
+	let folders: []workspace_folder = alloc([], 1)!;
+	append(folders, workspace_folder {
+		uri = strings::dup(root_uri)!,
+		name = strings::dup("")!,
+	})!;
+	set_workspace_folders(s, folders);
 };
 
 fn handle_shutdown(s: *server, r: lsp::request) void = {

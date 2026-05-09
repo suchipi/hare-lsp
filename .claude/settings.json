@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(hare version *)",
+      "Bash(hare help *)",
+      "Read(//usr/local/src/hare/stdlib/hare/**)",
+      "Bash(ls /usr/local/src/hare/src/ | head -20)",
+      "Read(//usr/local/src/hare/**)",
+      "WebFetch(domain:sr.ht)",
+      "WebFetch(domain:git.sr.ht)",
+      "Bash(hare run *)",
+      "Read(//usr/local/bin/**)",
+      "Bash(make)",
+      "Bash(./hare-lsp)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(chmod +x /Users/suchipi/Code/hare-lsp/.tmp/handshake-test.sh)",
+      "Bash(/Users/suchipi/Code/hare-lsp/.tmp/handshake-test.sh)",
+      "Bash(chmod +x /Users/suchipi/Code/hare-lsp/.tmp/error-test.sh)",
+      "Bash(/Users/suchipi/Code/hare-lsp/.tmp/error-test.sh)",
+      "Bash(HAREPATH=\"$\\(pwd\\):/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare test ./lsp)",
+      "Bash(HAREPATH=\"$\\(pwd\\):/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare test ./server)",
+      "Bash(HAREPATH=\"$\\(pwd\\):/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare test ./lsp ./server)",
+      "Bash(HAREPATH=\"$\\(pwd\\):/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare test)",
+      "Bash(make test *)",
+      "Bash(git config *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
