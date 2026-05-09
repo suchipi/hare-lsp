@@ -131,7 +131,7 @@ fn find_references_in_file_on_disk(path: str, target: str) []json::value = {
 	case let f: io::file => yield f;
 	case fs::error => return [];
 	};
-	defer io::close(f)!;
+	defer lsp::safe_close(f);
 	let buf: []u8 = [];
 	defer free(buf);
 	let chunk: [4096]u8 = [0...];

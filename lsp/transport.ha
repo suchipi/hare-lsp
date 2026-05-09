@@ -128,6 +128,16 @@ export fn read(r: *reader) ([]u8 | io::EOF | transport_error) = {
 	};
 };
 
+// Closes a handle, ignoring any error. Useful in `defer` cleanup where
+// the alternative `io::close(h)!` would abort the process on failure —
+// usually for failures we can't do anything about anyway.
+export fn safe_close(h: io::handle) void = {
+	match (io::close(h)) {
+	case void => void;
+	case io::error => void;
+	};
+};
+
 // Writes an LSP message to the given handle.
 //
 // The body is sent verbatim as the Content-Length-prefixed payload. Returns

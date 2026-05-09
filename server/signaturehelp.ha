@@ -203,7 +203,7 @@ fn count_params(d: *ast::decl) size = {
 
 fn render_decl_signature_local(d: *ast::decl) str = {
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer lsp::safe_close(&buf);
 	match (unparse::decl(&buf, &unparse::syn_nowrap, d)) {
 	case size => void;
 	case => return strings::dup("<unparse error>")!;

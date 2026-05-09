@@ -49,7 +49,7 @@ export fn type_of_expr_at(text: []u8, su: *ast::subunit, off: size) (str | void)
 
 fn render_type(t: *ast::_type) str = {
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer match (io::close(&buf)) { case => void; };
 	match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
 	case size => void;
 	case => return strings::dup("?")!;

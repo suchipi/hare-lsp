@@ -74,6 +74,7 @@ fn symbol_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 	case analysis::symbol_kind::CONST => return SK_CONSTANT;
 	case analysis::symbol_kind::GLOBAL => return SK_VARIABLE;
 	case analysis::symbol_kind::DEF => return SK_CONSTANT;
+	case => return SK_VARIABLE;
 	};
 };
 

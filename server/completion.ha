@@ -222,6 +222,7 @@ fn symbol_kind_to_completion(k: analysis::symbol_kind) f64 = {
 	case analysis::symbol_kind::CONST => return CIK_CONSTANT;
 	case analysis::symbol_kind::GLOBAL => return CIK_VARIABLE;
 	case analysis::symbol_kind::DEF => return CIK_CONSTANT;
+	case => return CIK_VARIABLE;
 	};
 };
 

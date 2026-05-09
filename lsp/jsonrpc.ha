@@ -267,7 +267,7 @@ fn free_id(i: id) void = {
 // (headers + blank line + body).
 export fn encode_response_result(out: io::handle, id: id, result: json::value) (size | io::error) = {
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer safe_close(&buf);
 	fmt::fprint(&buf, `{"jsonrpc":"2.0","id":`)?;
 	encode_id(&buf, id)?;
 	fmt::fprint(&buf, `,"result":`)?;
@@ -279,7 +279,7 @@ export fn encode_response_result(out: io::handle, id: id, result: json::value) (
 // Encodes and frames an error response.
 export fn encode_response_error(out: io::handle, msg_id: (id | void), err: response_error) (size | io::error) = {
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer safe_close(&buf);
 	fmt::fprint(&buf, `{"jsonrpc":"2.0","id":`)?;
 	match (msg_id) {
 	case void =>
@@ -302,7 +302,7 @@ export fn encode_response_error(out: io::handle, msg_id: (id | void), err: respo
 // Encodes and frames a notification.
 export fn encode_notification(out: io::handle, method: str, params: (json::value | void)) (size | io::error) = {
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer safe_close(&buf);
 	fmt::fprint(&buf, `{"jsonrpc":"2.0","method":`)?;
 	json::dump(&buf, method: json::value)?;
 	match (params) {
@@ -318,7 +318,7 @@ export fn encode_notification(out: io::handle, method: str, params: (json::value
 // Encodes and frames a server-initiated request to the client.
 export fn encode_request(out: io::handle, id: id, method: str, params: (json::value | void)) (size | io::error) = {
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer safe_close(&buf);
 	fmt::fprint(&buf, `{"jsonrpc":"2.0","id":`)?;
 	encode_id(&buf, id)?;
 	fmt::fprint(&buf, `,"method":`)?;

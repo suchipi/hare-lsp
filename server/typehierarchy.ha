@@ -273,7 +273,7 @@ fn read_file_bytes(path: str) ([]u8 | void) = {
 	case let f: io::file => yield f;
 	case fs::error => return void;
 	};
-	defer io::close(f)!;
+	defer lsp::safe_close(f);
 	let buf: []u8 = [];
 	let chunk: [4096]u8 = [0...];
 	for (true) {

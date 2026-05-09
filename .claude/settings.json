@@ -29,7 +29,8 @@
       "Bash(mkdir -p .cache)",
       "Bash(hare build *)",
       "Bash(chmod +x .tmp/build-diag-test.sh)",
-      "Bash(.tmp/build-diag-test.sh)"
+      "Bash(.tmp/build-diag-test.sh)",
+      "Bash(HAREPATH=\"$\\(cd ../.. && pwd\\):/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare run main.ha)"
     ]
   }
 }

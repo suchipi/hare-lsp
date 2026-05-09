@@ -45,7 +45,7 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	};
 
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer lsp::safe_close(&buf);
 	match (unparse::subunit(&buf, &unparse::syn_wrap, pr.subunit)) {
 	case size => void;
 	case =>
@@ -159,7 +159,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 	// Unparse the run of selected decls.
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer lsp::safe_close(&buf);
 	for (let i = first_idx: size; i <= last_idx: size; i += 1) {
 		match (unparse::decl(&buf, &unparse::syn_wrap, &pr.subunit.decls[i])) {
 		case size => void;

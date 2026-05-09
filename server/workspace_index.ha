@@ -138,6 +138,7 @@ fn workspace_entry_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 	case analysis::symbol_kind::CONST => return 14.0;
 	case analysis::symbol_kind::GLOBAL => return 13.0;
 	case analysis::symbol_kind::DEF => return 14.0;
+	case => return 13.0; // Variable, conservative fallback for new variants.
 	};
 };
 

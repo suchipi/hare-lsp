@@ -152,7 +152,7 @@ fn walk_dir(idx: *workspace_index, dir: str, count: *size) void = {
 		case let f: io::file => yield f;
 		case fs::error => continue;
 		};
-		defer io::close(f)!;
+		defer match (io::close(f)) { case => void; };
 		let buf: []u8 = [];
 		let chunk: [4096]u8 = [0...];
 		for (true) {

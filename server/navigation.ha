@@ -246,7 +246,7 @@ fn decl_ident(d: *ast::decl) ast::ident = {
 
 fn render_decl_signature(d: *ast::decl) str = {
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer lsp::safe_close(&buf);
 	match (unparse::decl(&buf, &unparse::syn_nowrap, d)) {
 	case size => void;
 	case => return strings::dup("<unparse error>")!;
@@ -256,7 +256,7 @@ fn render_decl_signature(d: *ast::decl) str = {
 
 fn build_hover_markdown(sig: str, docs: str) str = {
 	let buf = memio::dynamic();
-	defer io::close(&buf)!;
+	defer lsp::safe_close(&buf);
 	memio::concat(&buf, "```hare\n")!;
 	memio::concat(&buf, sig)!;
 	memio::concat(&buf, "\n```")!;
