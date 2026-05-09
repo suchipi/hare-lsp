@@ -360,6 +360,10 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_supertypes(s, r);
 	case "typeHierarchy/subtypes" =>
 		handle_subtypes(s, r);
+	case "textDocument/completion" =>
+		handle_completion(s, r);
+	case "completionItem/resolve" =>
+		handle_completion_resolve(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -527,6 +531,13 @@ fn build_initialize_result() (json::value | nomem) = {
 	json::put(&caps, "renameProvider", rename_provider)?;
 	json::put(&caps, "callHierarchyProvider", true: json::value)?;
 	json::put(&caps, "typeHierarchyProvider", true: json::value)?;
+	let comp_provider = json::newobject();
+	json::put(&comp_provider, "resolveProvider", true: json::value)?;
+	let triggers: []json::value = [];
+	append(triggers, strings::dup(":")?: json::value)?;
+	append(triggers, strings::dup(".")?: json::value)?;
+	json::put(&comp_provider, "triggerCharacters", triggers: json::value)?;
+	json::put(&caps, "completionProvider", comp_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
