@@ -140,6 +140,51 @@ fn sym_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(len(result) == 2);
 };
 
+@test fn document_link_resolve_fills_target_for_stdlib() void = {
+	let (s, scan, in_buf, out) = sym_test_server();
+	defer sym_test_cleanup(&s, scan, in_buf, out);
+	sym_open(&s, "file:///x.ha", "use io;\\n\\nexport fn main() void = void;\\n");
+
+	// Step 1: get the link list so we can grab its `data`.
+	const list_params = `{"textDocument":{"uri":"file:///x.ha"}}`;
+	let lpv = json::loadstr(list_params)!;
+	defer json::finish(lpv);
+	const list_req = lsp::request {
+		id = 10.0,
+		method = strings::dup("textDocument/documentLink")!,
+		params = lpv,
+	};
+	defer free(list_req.method);
+	handle_document_link(&s, list_req);
+	const list_v = sym_skip_to_response(out, 10.0);
+	defer json::finish(list_v);
+	const list_arr = *(json::get(&(list_v as json::object), "result") as *json::value) as []json::value;
+	assert(len(list_arr) >= 1);
+	// The first link should have a data field carrying ["io"].
+	const first = list_arr[0] as json::object;
+	assert(json::get(&first, "data") is *json::value);
+
+	// Step 2: send that link back as the resolve param.
+	const resolve_payload = json::dumpstr(list_arr[0]);
+	defer free(resolve_payload);
+	let rpv = json::loadstr(resolve_payload)!;
+	defer json::finish(rpv);
+	const resolve_req = lsp::request {
+		id = 11.0,
+		method = strings::dup("documentLink/resolve")!,
+		params = rpv,
+	};
+	defer free(resolve_req.method);
+	handle_document_link_resolve(&s, resolve_req);
+	const rv = sym_skip_to_response(out, 11.0);
+	defer json::finish(rv);
+	const ro = *(json::get(&(rv as json::object), "result") as *json::value) as json::object;
+	// Should now have a `target` field starting with file:///usr/local/src/hare/stdlib/io/.
+	const target = *(json::get(&ro, "target") as *json::value) as str;
+	assert(strings::hasprefix(target, "file:///usr/local/src/hare/stdlib/io/"));
+	assert(strings::hassuffix(target, ".ha"));
+};
+
 @test fn document_highlight_returns_decl_range() void = {
 	let (s, scan, in_buf, out) = sym_test_server();
 	defer sym_test_cleanup(&s, scan, in_buf, out);

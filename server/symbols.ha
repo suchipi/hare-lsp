@@ -7,6 +7,7 @@
 use analysis;
 use encoding::json;
 use hare::ast;
+use hare::module;
 use lsp;
 use strings;
 
@@ -312,7 +313,6 @@ export fn handle_document_link(s: *server, r: lsp::request) void = {
 			enc, imp.loc.end.off: size);
 		let item = json::newobject();
 		json::put(&item, "range", encode_range_pos(start_pos, end_pos))!;
-		// We carry the joined ident in `data` so resolve can pick it up.
 		let parts: []str = [];
 		defer free(parts);
 		for (let j = 0z; j < len(imp.ident); j += 1) {
@@ -320,30 +320,167 @@ export fn handle_document_link(s: *server, r: lsp::request) void = {
 		};
 		const joined = strings::join("::", parts...)!;
 		defer free(joined);
-		json::set(&item, "tooltip", strings::concat("module ", joined)!: json::value)!;
+		const tip = strings::concat("module ", joined)!;
+		defer free(tip);
+		json::set(&item, "tooltip", tip: json::value)!;
+		// Carry the parsed ident so documentLink/resolve can map it
+		// to a target file.
+		let ident_arr: []json::value = [];
+		for (let j = 0z; j < len(imp.ident); j += 1) {
+			append(ident_arr, strings::dup(imp.ident[j])!: json::value)!;
+		};
+		let link_data = json::newobject();
+		json::put(&link_data, "ident", ident_arr: json::value)!;
+		json::put(&item, "data", link_data)!;
 		// `target` left absent so the client triggers documentLink/resolve.
 		append(arr, item: json::value)!;
 	};
 	send_array_result(s, r.id, arr);
 };
 
-// Handles documentLink/resolve. Currently a no-op pass-through; will fill
-// in `target` once the workspace index can map a module ident to a path.
+// Handles documentLink/resolve. Reads the module ident carried in `data`,
+// resolves it via hare::module::find using each workspace folder as a
+// HAREPATH entry, and fills in the link's `target` field with a file://
+// URI pointing at the lexicographically first .ha file in the module.
 export fn handle_document_link_resolve(s: *server, r: lsp::request) void = {
-	match (r.params) {
+	const incoming = match (r.params) {
 	case let v: json::value =>
-		match (json::dup(v)) {
-		case let copy: json::value =>
-			match (lsp::encode_response_result(s.out, r.id, copy)) {
-			case size => void;
-			case => void;
-			};
-			json::finish(copy);
+		yield match (json::dup(v)) {
+		case let copy: json::value => yield copy;
 		case nomem =>
 			send_empty_array(s, r.id);
+			return;
 		};
 	case void =>
 		send_empty_array(s, r.id);
+		return;
+	};
+	defer json::finish(incoming);
+	let result = match (incoming) {
+	case let o: json::object => yield o;
+	case =>
+		// Wrong shape; just send back the input.
+		match (lsp::encode_response_result(s.out, r.id, incoming)) {
+		case size => void;
+		case => void;
+		};
+		return;
+	};
+
+	const data_obj = match (json::get(&result, "data")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case =>
+			send_response_obj(s, r.id, incoming);
+			return;
+		};
+	case =>
+		send_response_obj(s, r.id, incoming);
+		return;
+	};
+	const ident_arr = match (json::get(&data_obj, "ident")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let a: []json::value => yield a;
+		case =>
+			send_response_obj(s, r.id, incoming);
+			return;
+		};
+	case =>
+		send_response_obj(s, r.id, incoming);
+		return;
+	};
+	let ident: ast_ident_strs = [];
+	defer free(ident);
+	for (let i = 0z; i < len(ident_arr); i += 1) {
+		match (ident_arr[i]) {
+		case let str_val: str =>
+			append(ident, str_val)!;
+		case =>
+			send_response_obj(s, r.id, incoming);
+			return;
+		};
+	};
+
+	// Build a HAREPATH from the workspace folders. Fall back to the
+	// stdlib's known location at /usr/local/src/hare/stdlib so that
+	// `use io;`-style imports resolve.
+	const target = match (resolve_module_target(s, ident)) {
+	case let t: str => yield t;
+	case void =>
+		send_response_obj(s, r.id, incoming);
+		return;
+	};
+	defer free(target);
+	json::set(&result, "target", target: json::value)!;
+	send_response_obj(s, r.id, result);
+};
+
+// Internal alias to keep the imports in this file stable.
+type ast_ident_strs = []str;
+
+fn resolve_module_target(s: *server, ident: []str) (str | void) = {
+	// Build a colon-separated HAREPATH: workspace folder paths followed
+	// by the system stdlib + third-party dirs.
+	let parts: []str = [];
+	defer free(parts);
+	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
+		const path = strip_file_scheme(s.workspace_folders[i].uri);
+		append(parts, path)!;
+	};
+	append(parts, "/usr/local/src/hare/stdlib")!;
+	append(parts, "/usr/local/src/hare/third-party")!;
+	const harepath = strings::join(":", parts...)!;
+	defer free(harepath);
+
+	// Build the cache directory in our repo's .tmp/ rather than ~/.cache.
+	const ctx = module::context {
+		harepath = harepath,
+		harecache = "",
+		tags = [],
+	};
+
+	const result = match (module::find(&ctx, ident: ast::ident)) {
+	case let pair: (str, module::srcset) =>
+		yield pair;
+	case module::error =>
+		return void;
+	};
+	const (dir, sset) = result;
+	let owned_set = sset;
+	defer module::finish_srcset(&owned_set);
+	if (len(sset.ha) == 0) return void;
+
+	// Find the lexicographically smallest .ha file.
+	let best = sset.ha[0];
+	for (let i = 1z; i < len(sset.ha); i += 1) {
+		if (strings::compare(sset.ha[i], best) < 0) {
+			best = sset.ha[i];
+		};
+	};
+	// `best` may already be an absolute path; if not, prepend dir.
+	const full = if (strings::hasprefix(best, "/")) {
+		yield strings::dup(best)!;
+	} else {
+		yield strings::concat(dir, "/", best)!;
+	};
+	defer free(full);
+	return strings::concat("file://", full)!;
+};
+
+fn strip_file_scheme(uri: str) str = {
+	const prefix = "file://";
+	if (strings::hasprefix(uri, prefix)) {
+		return strings::sub(uri, len(prefix), strings::end);
+	};
+	return uri;
+};
+
+fn send_response_obj(s: *server, id: lsp::id, result: json::value) void = {
+	match (lsp::encode_response_result(s.out, id, result)) {
+	case size => void;
+	case => void;
 	};
 };
 
