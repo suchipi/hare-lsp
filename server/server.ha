@@ -342,6 +342,12 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_document_link(s, r);
 	case "documentLink/resolve" =>
 		handle_document_link_resolve(s, r);
+	case "textDocument/references" =>
+		handle_references(s, r);
+	case "textDocument/prepareRename" =>
+		handle_prepare_rename(s, r);
+	case "textDocument/rename" =>
+		handle_rename(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -503,6 +509,10 @@ fn build_initialize_result() (json::value | nomem) = {
 	let ws_sym_provider = json::newobject();
 	json::put(&ws_sym_provider, "resolveProvider", true: json::value)?;
 	json::put(&caps, "workspaceSymbolProvider", ws_sym_provider)?;
+	json::put(&caps, "referencesProvider", true: json::value)?;
+	let rename_provider = json::newobject();
+	json::put(&rename_provider, "prepareProvider", true: json::value)?;
+	json::put(&caps, "renameProvider", rename_provider)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
