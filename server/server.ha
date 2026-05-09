@@ -310,6 +310,16 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_will_rename_files(s, r);
 	case "workspace/willDeleteFiles" =>
 		handle_will_delete_files(s, r);
+	case "textDocument/hover" =>
+		handle_hover(s, r);
+	case "textDocument/definition" =>
+		handle_definition(s, r);
+	case "textDocument/declaration" =>
+		handle_declaration(s, r);
+	case "textDocument/typeDefinition" =>
+		handle_type_definition(s, r);
+	case "textDocument/implementation" =>
+		handle_implementation(s, r);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
 			fmt::asprintf("method not found: {}", r.method)!);
@@ -452,6 +462,13 @@ fn build_initialize_result() (json::value | nomem) = {
 	json::put(&diag_provider, "interFileDependencies", true: json::value)?;
 	json::put(&diag_provider, "workspaceDiagnostics", true: json::value)?;
 	json::put(&caps, "diagnosticProvider", diag_provider)?;
+
+	// Navigation features.
+	json::put(&caps, "hoverProvider", true: json::value)?;
+	json::put(&caps, "definitionProvider", true: json::value)?;
+	json::put(&caps, "declarationProvider", true: json::value)?;
+	json::put(&caps, "typeDefinitionProvider", true: json::value)?;
+	json::put(&caps, "implementationProvider", true: json::value)?;
 
 	// Workspace capabilities — we support workspace folders.
 	let ws = json::newobject();
