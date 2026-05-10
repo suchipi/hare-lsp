@@ -11,16 +11,20 @@ First release. Implements the full applicable surface of LSP 3.17:
   willSaveWaitUntil, didSave with includeText.
 - **Diagnostics**: push (publishDiagnostics) and pull (textDocument/diagnostic,
   workspace/diagnostic, refresh). In-process recovering parser plus
-  `hare build` integration on save.
+  `hare build` integration on save. Debounced per `hare.diagnostics.debounceMs`.
 - **Navigation**: hover, definition, type-definition, declaration,
   implementation, references, document highlight, prepareRename + rename,
-  document & workspace symbols, document links, call hierarchy
-  (prepare/incoming/outgoing), type hierarchy (prepare/super/sub).
+  document & workspace symbols, document links (target resolution via
+  hare::module::find), call hierarchy (prepare/incoming/outgoing), type
+  hierarchy (supertypes walk the underlying _type for named idents;
+  subtypes scan all workspace TYPE entries for reverse references).
 - **Editing**: completion + completionItem/resolve, signature help,
-  formatting (full / range / on-type), code actions
+  formatting (full / range / on-type reindent), code actions
   (source.organizeImports), code lens (run-test, N-references),
-  inlay hints (parameter names + inferred types), semantic tokens
-  (full/delta/range), folding ranges, selection ranges.
+  inlay hints (parameter names + inferred types via best-effort
+  analysis::type_of_expr_at), semantic tokens (full + range; delta
+  with per-document result-id caching + coarse first/last-difference
+  diff), folding ranges, selection ranges.
 - **Workspace**: workspaceFolders + didChangeWorkspaceFolders,
   configuration + didChangeConfiguration, didChangeWatchedFiles,
   willCreate/Rename/DeleteFiles, didCreate/Rename/DeleteFiles,
@@ -30,8 +34,16 @@ First release. Implements the full applicable surface of LSP 3.17:
   workDoneProgress create/cancel, $/progress.
 - **Workspace indexing**: walks each root for *.ha and builds a flat
   index of declarations; updates incrementally on watcher events.
+- **Configuration**: every `hare.*` key is live — `path`, `tags`,
+  `diagnostics.{debounceMs,enableBuild}`, `format.{indentStyle,
+  indentWidth,trimFinalNewlines,insertFinalNewline}`, and
+  `inlayHints.{parameterNames,inferredTypes}`. No reserved/dormant keys.
 
-Out of scope (not advertised): documentColor, inlineValue, moniker,
-linkedEditingRange, telemetry, notebookDocument.
+In-tree VSCode extension under [editors/vscode/](editors/vscode/) with
+its own TextMate grammar, language configuration, and
+vscode-languageclient wrapper. Install with `make vscode-install`.
 
-136 unit tests passing.
+Out of scope (not advertised, not implemented): documentColor,
+inlineValue, moniker, linkedEditingRange, telemetry, notebookDocument.
+
+158 unit tests passing.
