@@ -183,6 +183,18 @@ export fn lookup_by_short_name(idx: *workspace_index, name: str) []workspace_ent
 	return out;
 };
 
+// Returns a borrowed pointer to the first entry whose short_name matches,
+// or void if none exists. Used by navigation features (hover, definition,
+// etc.) that take "any" hit when falling back from per-file resolution.
+export fn find_first_by_short_name(idx: *workspace_index, name: str) (*workspace_entry | void) = {
+	for (let i = 0z; i < len(idx.entries); i += 1) {
+		if (idx.entries[i].short_name == name) {
+			return &idx.entries[i];
+		};
+	};
+	return void;
+};
+
 // Returns indices into idx.entries whose short names contain the query
 // substring (case-insensitive, ASCII fold).
 export fn fuzzy_search(idx: *workspace_index, query: str) []size = {

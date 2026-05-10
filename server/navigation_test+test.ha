@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 
+use analysis;
 use bufio;
 use bytes;
 use encoding::json;
+use fs;
 use io;
 use lsp;
 use memio;
+use os;
 use strconv;
 use strings;
 
@@ -196,4 +199,97 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer json::finish(v);
 	const result = *(json::get(&(v as json::object), "result") as *json::value);
 	assert(result is json::_null);
+};
+
+@test fn definition_falls_back_to_workspace_index_for_cross_file() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// Put a "defines fn target" fixture on disk and index it.
+	const def_path = ".tmp/hare-lsp-nav-crossfile.ha";
+	const def_text = "export fn target() void = void;\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool => yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path,
+		strings::toutf8(def_text));
+
+	// Open a separate buffer that calls `target()` — its file-local
+	// index doesn't know about `target`.
+	nav_open(&s, "file:///caller.ha",
+		"fn caller() void = target();\\n");
+
+	// Cursor on `target` in caller.ha.
+	const params = `{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":0,"character":22}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 400.0,
+		method = strings::dup("textDocument/definition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_definition(&s, r);
+
+	const v = skip_to_response(out, 400.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const uri = *(json::get(&result, "uri") as *json::value) as str;
+	// Should point at the on-disk file, not caller.ha.
+	assert(strings::hassuffix(uri, "hare-lsp-nav-crossfile.ha"));
+};
+
+@test fn hover_falls_back_to_workspace_index_for_cross_file() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const def_path = ".tmp/hare-lsp-nav-hover-crossfile.ha";
+	const def_text = "// the answer\nexport fn answer() int = 42;\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool => yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path,
+		strings::toutf8(def_text));
+
+	nav_open(&s, "file:///caller.ha",
+		"fn caller() void = { let n = answer(); };\\n");
+
+	// Position on `answer` — char index roughly 29.
+	const params = `{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":0,"character":31}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 401.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 401.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	// Hover markdown should contain the cross-file decl signature.
+	assert(strings::contains(value, "answer"));
+};
+
+// --- fixture helpers ---
+
+fn nav_write(path: str, text: str) (bool | fs::error) = {
+	const f = os::create(path, 0o644)?;
+	defer io::close(f)!;
+	io::writeall(f, strings::toutf8(text))!;
+	return true;
+};
+
+fn nav_rm(path: str) void = {
+	match (os::remove(path)) {
+	case => void;
+	};
 };
