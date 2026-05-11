@@ -71,6 +71,16 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		case void => void;
 		};
 	};
+	if (!found_local && len(qualifier_peek) == 0) {
+		match (find_local_binding(&cache.pr.subunit, ident_str,
+				ident_range.0)) {
+		case let rendered: str =>
+			sig = rendered;
+			docs = strings::dup("")!;
+			found_local = true;
+		case void => void;
+		};
+	};
 	if (!found_local) {
 		match (workspace_hover(s, doc, data, ident_range.0, ident_str)) {
 		case let r: (str, str) =>
@@ -492,4 +502,155 @@ fn send_with_finish(s: *server, id: lsp::id, v: json::value) void = {
 	case size => void;
 	case => void;
 	};
+};
+
+// Renders a hover signature for an unqualified identifier that refers to a
+// local `let` / `const` / function-parameter binding. Walks the body of the
+// containing function decl. Returns void if no matching binding is in
+// scope at `off`. Caller frees the result.
+fn find_local_binding(su: *ast::subunit, name: str, off: size) (str | void) = {
+	for (let i = 0z; i < len(su.decls); i += 1) {
+		const d = &su.decls[i];
+		if (off < d.loc.start.off: size) continue;
+		if (off > d.loc.end.off: size) continue;
+		const f = match (d.decl) {
+		case let f: ast::decl_func => yield f;
+		case => continue;
+		};
+		// Function parameter?
+		match (f.prototype.repr) {
+		case let proto: ast::func_type =>
+			for (let j = 0z; j < len(proto.params); j += 1) {
+				if (proto.params[j].name != name) continue;
+				return render_param_binding(&proto.params[j]);
+			};
+		case => void;
+		};
+		const body = match (f.body) {
+		case let e: *ast::expr => yield e;
+		case null => return void;
+		};
+		// Innermost wins: walk recursively, tracking the best (deepest
+		// containing) hit.
+		match (walk_for_local(body, name, off)) {
+		case let s: str => return s;
+		case void => return void;
+		};
+	};
+	return void;
+};
+
+// Recurses through the common expression forms looking for a `let`/`const`
+// binding of `name` whose textual range encloses `off`. Returns the
+// rendered signature or void.
+fn walk_for_local(e: *ast::expr, name: str, off: size) (str | void) = {
+	// We never early-return on range mismatch: for compound bodies,
+	// preceding sibling bindings are still in scope at `off`.
+	match (e.expr) {
+	case let b: ast::binding_expr =>
+		// Only consider bindings declared lexically before `off`.
+		// `e.end.off` is the end of the whole `let foo = bar;`
+		// statement; anything past it is in scope.
+		for (let i = 0z; i < len(b.bindings); i += 1) {
+			const bd = &b.bindings[i];
+			for (let j = 0z; j < len(bd.names); j += 1) {
+				if (bd.names[j] != name) continue;
+				return render_local_binding(b.kind, bd);
+			};
+		};
+		// Also walk into the init expression in case it contains
+		// nested bindings (rare but valid).
+		return walk_for_local(b.bindings[0].init, name, off);
+	case let c: ast::compound_expr =>
+		// Visit in order so an inner shadowing binding wins.
+		let hit: (str | void) = void;
+		for (let i = 0z; i < len(c.exprs); i += 1) {
+			const child = c.exprs[i];
+			if (child.loc.start.off: size > off) break;
+			match (walk_for_local(child, name, off)) {
+			case let s: str =>
+				match (hit) {
+				case let prev: str => free(prev);
+				case void => void;
+				};
+				hit = s;
+			case void => void;
+			};
+		};
+		return hit;
+	case let i: ast::if_expr =>
+		match (walk_for_local(i.tbranch, name, off)) {
+		case let s: str => return s;
+		case void => void;
+		};
+		match (i.fbranch) {
+		case let e2: *ast::expr =>
+			return walk_for_local(e2, name, off);
+		case null => return void;
+		};
+	case let fr: ast::for_expr =>
+		match (fr.bindings) {
+		case let b: *ast::expr =>
+			match (walk_for_local(b, name, off)) {
+			case let s: str => return s;
+			case void => void;
+			};
+		case null => void;
+		};
+		return walk_for_local(fr.body, name, off);
+	case => return void;
+	};
+};
+
+fn render_local_binding(kind: ast::binding_kind, b: *ast::binding) str = {
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	const kw = switch (kind) {
+	case ast::binding_kind::LET => yield "let ";
+	case ast::binding_kind::CONST => yield "const ";
+	case ast::binding_kind::DEF => yield "def ";
+	};
+	match (memio::concat(&buf, kw)) {
+	case size => void;
+	case => return strings::dup("<binding>")!;
+	};
+	for (let i = 0z; i < len(b.names); i += 1) {
+		if (i > 0) {
+			match (memio::concat(&buf, ", ")) {
+			case size => void;
+			case => void;
+			};
+		};
+		match (memio::concat(&buf, b.names[i])) {
+		case size => void;
+		case => void;
+		};
+	};
+	match (b._type) {
+	case let t: *ast::_type =>
+		match (memio::concat(&buf, ": ")) {
+		case size => void;
+		case => void;
+		};
+		match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
+		case size => void;
+		case => void;
+		};
+	case null => void;
+	};
+	return strings::dup(memio::string(&buf)!)!;
+};
+
+fn render_param_binding(p: *ast::func_param) str = {
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	match (memio::concat(&buf, "(parameter) ", p.name, ": ")) {
+	case size => void;
+	case => return strings::dup("(parameter)")!;
+	};
+	match (unparse::_type(&buf, &unparse::syn_nowrap, p._type)) {
+	case size => void;
+	case => void;
+	};
+	return strings::dup(memio::string(&buf)!)!;
 };

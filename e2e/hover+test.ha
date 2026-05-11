@@ -17,6 +17,90 @@ export fn answer() int = 42;
 export fn ask() int = answer();
 `;
 
+// Hover on a local `let` binding inside a function body. Before this was
+// supported, the handler only looked at top-level decls and returned null.
+@test fn e2e_hover_on_local_let_binding() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `export fn main() void = {
+	let scan: int = 42;
+	let _ = scan;
+};
+`;
+	const did_open = build_did_open("file:///local_hover.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `scan` in `let _ = scan`. Line 2 (0-indexed), char 9.
+	const hover_req = `{"jsonrpc":"2.0","id":200,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///local_hover.ha"},"position":{"line":2,"character":9}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 200.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value => yield *p;
+	case void =>
+		fmt::fatalf("e2e: local hover response missing result: {}", text);
+	};
+	const result_obj = match (result) {
+	case let o: json::object => yield o;
+	case =>
+		fmt::fatalf("e2e: local hover returned null. body={}", text);
+	};
+	const contents = (*(json::get(&result_obj, "contents") as *json::value)) as json::object;
+	const md = (*(json::get(&contents, "value") as *json::value)) as str;
+	assert(strings::contains(md, "let scan"),
+		"hover on local should render `let scan` binding");
+	assert(strings::contains(md, "int"),
+		"hover on local should render the binding's type");
+};
+
+// Hover on a function parameter — same mechanism as local bindings but the
+// scope is the function's prototype, not its body.
+@test fn e2e_hover_on_function_parameter() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `export fn echo(n: int) int = {
+	return n;
+};
+`;
+	const did_open = build_did_open("file:///param_hover.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `n` in `return n`. Line 1, char 8.
+	const hover_req = `{"jsonrpc":"2.0","id":300,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///param_hover.ha"},"position":{"line":1,"character":8}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 300.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = (*(json::get(&obj, "result") as *json::value)) as json::object;
+	const contents = (*(json::get(&result, "contents") as *json::value)) as json::object;
+	const md = (*(json::get(&contents, "value") as *json::value)) as str;
+	assert(strings::contains(md, "(parameter)"),
+		"hover on parameter should mark it as a parameter");
+	assert(strings::contains(md, "int"),
+		"hover on parameter should include its type");
+};
+
 // Reproduces the call-site hover scenario the user reported: hovering on a
 // qualified workspace identifier (e.g. `server::new`). The `server` module is
 // in this workspace, so the server should resolve it via the workspace
