@@ -116,6 +116,12 @@ export fn parse_recover(text: []u8, path: str) parse_result = {
 	res.completely_failed = len(res.subunit.imports) == 0
 		&& len(res.subunit.decls) == 0
 		&& len(res.errors) > 0;
+	// hare::lex stores `loc.off` as a rune index, but every
+	// downstream consumer (byte_to_position, source slicing,
+	// documentLink, etc.) treats it as a byte offset. Translate
+	// the entire AST to byte offsets here so callers don't need
+	// to know about the underlying rune-vs-byte distinction.
+	fixup_parse_result(&res, text);
 	return res;
 };
 
