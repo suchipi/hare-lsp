@@ -154,6 +154,7 @@ export fn handle_did_change_workspace_folders(s: *server, n: lsp::notification) 
 	// Drop index entries for any removed folder.
 	for (let i = 0z; i < len(removed_paths); i += 1) {
 		drop_index_entries_under(s, removed_paths[i]);
+		file_parse_cache_drop_under(&s.file_parse_cache, removed_paths[i]);
 	};
 
 	// Then additions.

@@ -167,6 +167,9 @@ fn extract_query(p: (json::value | void)) (str | void) = {
 export fn workspace_handle_file_event(s: *server, uri: str, event_type: int) void = {
 	const path = uri_to_local_path(uri);
 	defer free(path);
+	// Invalidate the on-disk parse cache for this path regardless of
+	// event type — any change makes the cached parse stale.
+	file_parse_cache_drop_path(&s.file_parse_cache, path);
 	switch (event_type) {
 	case 3 =>
 		// Deleted.

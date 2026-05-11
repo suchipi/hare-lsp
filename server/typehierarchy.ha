@@ -15,11 +15,8 @@
 
 use analysis;
 use encoding::json;
-use fs;
 use hare::ast;
-use io;
 use lsp;
-use os;
 use strings;
 
 export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
@@ -67,19 +64,18 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	};
 	defer free_type_item(item);
 
-	// Re-parse the source file to get the AST.
-	const text = match (load_file_text(s, item.uri)) {
-	case let t: []u8 => yield t;
+	// Look up the file's AST. Prefer the open-document parse cache when
+	// we have it; otherwise hit the shared on-disk file_parse_cache so
+	// repeated supertype queries against the same file don't re-parse.
+	const su = match (load_subunit(s, item.uri)) {
+	case let su: *ast::subunit => yield su;
 	case void =>
 		send_array_th(s, r.id, []);
 		return;
 	};
-	defer free(text);
-	let pr = analysis::parse_recover(text, item.uri);
-	defer analysis::finish_parse_result(&pr);
 
 	// Find the matching type decl.
-	const decl = match (find_type_decl(&pr.subunit, item.name)) {
+	const decl = match (find_type_decl(su, item.name)) {
 	case let d: *ast::decl => yield d;
 	case void =>
 		send_array_th(s, r.id, []);
@@ -105,6 +101,24 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 		emit_workspace_type_items(s, short, &arr);
 	};
 	send_array_th(s, r.id, arr);
+};
+
+// Returns a borrowed pointer to the subunit for a URI. Prefers the
+// open-document parse cache when the URI matches an open doc;
+// otherwise consults the on-disk file_parse_cache.
+fn load_subunit(s: *server, uri: str) (*ast::subunit | void) = {
+	match (find_document(s, uri)) {
+	case let d: *document =>
+		return &parse_of(d).pr.subunit;
+	case null => void;
+	};
+	const path = uri_to_path_th(uri);
+	defer free(path);
+	const fpe = match (file_parse_cache_get(&s.file_parse_cache, path)) {
+	case let p: *file_parse_entry => yield p;
+	case null => return void;
+	};
+	return &fpe.pr.subunit;
 };
 
 // Returns the typeHierarchy subtypes for the given item: every workspace
@@ -133,18 +147,15 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 		if (str_in(seen_paths, e.path)) continue;
 		append(seen_paths, e.path)!;
 
-		const text = match (read_file_bytes(e.path)) {
-		case let t: []u8 => yield t;
-		case void => continue;
+		const fpe = match (file_parse_cache_get(&s.file_parse_cache, e.path)) {
+		case let p: *file_parse_entry => yield p;
+		case null => continue;
 		};
-		defer free(text);
-		let pr = analysis::parse_recover(text, e.path);
-		defer analysis::finish_parse_result(&pr);
 
 		// For each type decl in this file, check whether its underlying
 		// type references item.name.
-		for (let j = 0z; j < len(pr.subunit.decls); j += 1) {
-			const d = &pr.subunit.decls[j];
+		for (let j = 0z; j < len(fpe.pr.subunit.decls); j += 1) {
+			const d = &fpe.pr.subunit.decls[j];
 			match (d.decl) {
 			case ast::decl_type =>
 				void;
@@ -173,7 +184,7 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 			const sp_off = d.loc.start.off: size;
 			const ep_off = d.loc.end.off: size;
 			append(arr, build_type_item_for_path(s, e.path,
-				e.uri, short, sp_off, ep_off, text))!;
+				e.uri, short, sp_off, ep_off, fpe.text))!;
 		};
 	};
 	send_array_th(s, r.id, arr);
@@ -254,43 +265,6 @@ fn decl_type_short_name(d: *ast::decl) str = {
 	};
 };
 
-fn load_file_text(s: *server, uri: str) ([]u8 | void) = {
-	// Prefer an open document if we have one (more up-to-date than disk).
-	match (find_document(s, uri)) {
-	case let d: *document =>
-		const cur = analysis::bytes(&d.buf);
-		let copy: []u8 = alloc([], len(cur))!;
-		append(copy, cur...)!;
-		return copy;
-	case null => void;
-	};
-	// Strip file:// and read from disk.
-	const path = uri_to_path_th(uri);
-	defer free(path);
-	return read_file_bytes(path);
-};
-
-fn read_file_bytes(path: str) ([]u8 | void) = {
-	const f = match (os::open(path)) {
-	case let f: io::file => yield f;
-	case fs::error => return void;
-	};
-	defer lsp::safe_close(f);
-	let buf: []u8 = [];
-	let chunk: [4096]u8 = [0...];
-	for (true) {
-		match (io::read(f, chunk[..])) {
-		case let n: size =>
-			append(buf, chunk[..n]...)!;
-		case io::EOF =>
-			break;
-		case io::error =>
-			break;
-		};
-	};
-	return buf;
-};
-
 fn uri_to_path_th(uri: str) str = {
 	const prefix = "file://";
 	if (strings::hasprefix(uri, prefix)) {
@@ -314,12 +288,16 @@ fn emit_workspace_type_items(s: *server, name: str, arr: *[]json::value) void = 
 		const e = &s.workspace_index.entries[i];
 		if (e.kind != analysis::symbol_kind::TYPE) continue;
 		if (e.short_name != name) continue;
-		// Prefer an open document's text if one exists for this URI.
-		const text = match (load_file_text(s, e.uri)) {
-		case let t: []u8 => yield t;
-		case void => continue;
+		// Prefer an open document's bytes if one exists for this URI;
+		// otherwise use the shared on-disk parse cache.
+		const text = match (find_document(s, e.uri)) {
+		case let d: *document => yield analysis::bytes(&d.buf);
+		case null =>
+			yield match (file_parse_cache_get(&s.file_parse_cache, e.path)) {
+			case let p: *file_parse_entry => yield p.text;
+			case null => continue;
+			};
 		};
-		defer free(text);
 		append(cur, build_type_item_for_path(s, e.path, e.uri,
 			name, e.start_off: size, e.end_off: size, text))!;
 	};

@@ -86,6 +86,13 @@ export type server = struct {
 
 	// Workspace-wide symbol index.
 	workspace_index: analysis::workspace_index,
+
+	// LRU cache of disk-file parses, used by cross-file features
+	// (workspace_hover, type-hierarchy subtypes, references workspace
+	// scan, rename workspace scan) so a cursor that triggers repeated
+	// cross-file work doesn't re-read and re-parse the same files on
+	// each keystroke.
+	file_parse_cache: file_parse_cache,
 };
 
 // Tracks an outgoing request the server is waiting on a response for.
@@ -128,6 +135,7 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	negotiated_encoding = analysis::encoding::UTF16,
 	documents = [],
 	workspace_index = analysis::new_workspace_index(),
+	file_parse_cache = new_file_parse_cache(),
 };
 
 // Releases resources held by the server. Does not close the underlying I/O
@@ -171,6 +179,7 @@ export fn finish(s: *server) void = {
 	};
 	free(s.documents);
 	analysis::finish_workspace_index(&s.workspace_index);
+	finish_file_parse_cache(&s.file_parse_cache);
 };
 
 // Runs the main message loop until the client sends `exit` (or EOF). Returns

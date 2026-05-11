@@ -9,13 +9,10 @@
 
 use analysis;
 use encoding::json;
-use fs;
 use hare::ast;
 use hare::unparse;
-use io;
 use lsp;
 use memio;
-use os;
 use strings;
 
 // Handles textDocument/hover. Returns a MarkupContent with the symbol's
@@ -234,16 +231,16 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 };
 
 // Emits a Location response for a workspace_entry without needing the file
-// open. We read the file fresh to build a line index and convert byte
-// offsets into LSP positions.
+// open. We fetch the file via the shared parse cache so repeated jumps to
+// the same file don't keep re-reading it from disk.
 fn send_location_for_entry(s: *server, id: lsp::id, e: *analysis::workspace_entry) void = {
-	const text = match (read_workspace_file(e.path)) {
-	case let t: []u8 => yield t;
-	case void =>
+	const fpe = match (file_parse_cache_get(&s.file_parse_cache, e.path)) {
+	case let p: *file_parse_entry => yield p;
+	case null =>
 		send_null(s, id);
 		return;
 	};
-	defer free(text);
+	const text = fpe.text;
 	const line_index = analysis::build_line_index(text);
 	defer free(line_index);
 	const enc = position_encoding(s);
@@ -273,8 +270,10 @@ fn send_location_for_entry(s: *server, id: lsp::id, e: *analysis::workspace_entr
 };
 
 // Looks for ident_str in the workspace index using module-aware
-// disambiguation. If found, re-parses the owning file, locates the
-// matching decl, and returns (sig, docs) — both freshly allocated.
+// disambiguation. If found, fetches the owning file's parse (via the
+// shared file_parse_cache so repeated hovers don't re-parse the same
+// file), locates the matching decl, and returns (sig, docs) — both
+// freshly allocated.
 // Returns void if no workspace entry matches or the file can't be read.
 fn workspace_hover(s: *server, doc: *document, data: []u8,
 		ident_start: size, ident_str: str) ((str, str) | void) = {
@@ -282,39 +281,17 @@ fn workspace_hover(s: *server, doc: *document, data: []u8,
 	case let e: *analysis::workspace_entry => yield e;
 	case void => return void;
 	};
-	const text = match (read_workspace_file(entry.path)) {
-	case let t: []u8 => yield t;
-	case void => return void;
+	const fpe = match (file_parse_cache_get(&s.file_parse_cache, entry.path)) {
+	case let p: *file_parse_entry => yield p;
+	case null => return void;
 	};
-	defer free(text);
-	let pr = analysis::parse_recover(text, entry.path);
-	defer analysis::finish_parse_result(&pr);
-	const decl_idx = match (find_decl_by_name(&pr.subunit, ident_str)) {
+	const decl_idx = match (find_decl_by_name(&fpe.pr.subunit, ident_str)) {
 	case let i: size => yield i;
 	case void => return void;
 	};
-	const sig = render_decl_signature(&pr.subunit.decls[decl_idx]);
-	const docs = strings::dup(pr.subunit.decls[decl_idx].docs)!;
+	const sig = render_decl_signature(&fpe.pr.subunit.decls[decl_idx]);
+	const docs = strings::dup(fpe.pr.subunit.decls[decl_idx].docs)!;
 	return (sig, docs);
-};
-
-fn read_workspace_file(path: str) ([]u8 | void) = {
-	const f = match (os::open(path)) {
-	case let f: io::file => yield f;
-	case fs::error => return void;
-	};
-	defer lsp::safe_close(f);
-	let buf: []u8 = [];
-	let chunk: [4096]u8 = [0...];
-	for (true) {
-		match (io::read(f, chunk[..])) {
-		case let n: size =>
-			append(buf, chunk[..n]...)!;
-		case io::EOF => break;
-		case io::error => break;
-		};
-	};
-	return buf;
 };
 
 fn send_location(s: *server, id: lsp::id, uri: str, loc: ast::location, doc: *document) void = {
