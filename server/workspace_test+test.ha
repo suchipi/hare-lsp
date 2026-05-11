@@ -4,9 +4,11 @@
 use analysis;
 use bufio;
 use encoding::json;
+use fs;
 use io;
 use lsp;
 use memio;
+use os;
 use strings;
 
 @test fn decode_workspace_folders_handles_array() void = {
@@ -242,4 +244,74 @@ use strings;
 	handle_initialize(&s, r);
 
 	assert(s.negotiated_encoding == analysis::encoding::UTF16);
+};
+
+@test fn did_change_workspace_folders_indexes_added_drops_removed() void = {
+	let out = memio::dynamic();
+	defer io::close(&out)!;
+	let in_buf = alloc(memio::fixed([]))!;
+	defer free(in_buf);
+	let scan = alloc(bufio::newscanner(in_buf))!;
+	defer { bufio::finish(scan); free(scan); };
+	let s = new(scan, &out);
+	defer finish(&s);
+
+	// Set up two folders on disk, each with a .ha file declaring a symbol.
+	const dir_x = ".tmp/lspwsfx";
+	const dir_y = ".tmp/lspwsfy";
+	const path_x = ".tmp/lspwsfx/init.ha";
+	const path_y = ".tmp/lspwsfy/init.ha";
+	wsfx_mkdir(dir_x);
+	wsfx_mkdir(dir_y);
+	wsfx_write(path_x, "export fn xfunc() void = void;\n");
+	wsfx_write(path_y, "export fn yfunc() void = void;\n");
+	defer { wsfx_rm(path_x); wsfx_rm(path_y); };
+
+	// Initialize with folder x.
+	let init: []workspace_folder = [];
+	append(init, workspace_folder {
+		uri = strings::dup("file://.tmp/lspwsfx")!,
+		name = strings::dup("x")!,
+	})!;
+	set_workspace_folders(&s, init);
+	const _ = analysis::index_directory(&s.workspace_index, dir_x);
+	// xfunc should be in the index.
+	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "xfunc")) == 1);
+	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "yfunc")) == 0);
+
+	// Send didChangeWorkspaceFolders: add y, remove x.
+	const params_str = `{"event":{"added":[{"uri":"file://.tmp/lspwsfy","name":"y"}],"removed":[{"uri":"file://.tmp/lspwsfx","name":"x"}]}}`;
+	let pv = json::loadstr(params_str)!;
+	defer json::finish(pv);
+	const n = lsp::notification {
+		method = strings::dup("workspace/didChangeWorkspaceFolders")!,
+		params = pv,
+	};
+	defer free(n.method);
+	handle_did_change_workspace_folders(&s, n);
+
+	// xfunc should be gone, yfunc should be present.
+	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "xfunc")) == 0);
+	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "yfunc")) == 1);
+};
+
+fn wsfx_mkdir(path: str) void = {
+	match (os::mkdir(path, 0o755)) {
+	case => void;
+	};
+};
+
+fn wsfx_write(path: str, text: str) void = {
+	const f = match (os::create(path, 0o644)) {
+	case let h: io::file => yield h;
+	case fs::error => return;
+	};
+	defer io::close(f)!;
+	io::writeall(f, strings::toutf8(text))!;
+};
+
+fn wsfx_rm(path: str) void = {
+	match (os::remove(path)) {
+	case => void;
+	};
 };
