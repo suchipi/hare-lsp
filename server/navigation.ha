@@ -885,9 +885,9 @@ fn render_local_binding(srv: *server, doc: *document, data: []u8,
 //   - direct call expressions (workspace + stdlib callee return type)
 //   - cast expressions
 //   - struct/array/tuple literals (renders the literal type only)
-//   - `?` / `!` wrappers, by recursing into the inner expression. The
-//     reported type still includes any `| error` variants since we have
-//     no type-resolver to strip them.
+//   - `?` / `!` wrappers, by recursing into the inner expression and
+//     stripping any error-flagged variants from the resulting type
+//     (matching Hare's actual semantics for propagate / error-assert).
 // Other forms return void; the caller falls back to echoing the source.
 fn infer_type_from_init(srv: *server, doc: *document,
 		init: *ast::expr) (str | void) = {
@@ -905,11 +905,30 @@ fn infer_type_from_init(srv: *server, doc: *document,
 		};
 		return strings::dup(memio::string(&buf)!)!;
 	case let p: ast::propagate_expr =>
-		return infer_type_from_init(srv, doc, p: *ast::expr);
+		return infer_unwrapped_init(srv, doc, p: *ast::expr);
 	case let p: ast::error_assert_expr =>
-		return infer_type_from_init(srv, doc, p: *ast::expr);
+		return infer_unwrapped_init(srv, doc, p: *ast::expr);
 	case => return void;
 	};
+};
+
+// Infers the type of an init expression after stripping any error-flagged
+// variants from its resulting type. Used for the inner expression of `?` and
+// `!`, which both yield the non-error component of the inner type.
+fn infer_unwrapped_init(srv: *server, doc: *document,
+		inner: *ast::expr) (str | void) = {
+	const result_t = match (inner.expr) {
+	case let c: ast::call_expr =>
+		yield match (infer_call_return_type_node(srv, doc, &c)) {
+		case let t: *ast::_type => yield t;
+		case void =>
+			// Fall back to the un-stripped string form so the user
+			// at least sees something useful.
+			return infer_type_from_init(srv, doc, inner);
+		};
+	case => return infer_type_from_init(srv, doc, inner);
+	};
+	return render_type_without_errors(srv, doc, result_t);
 };
 
 fn type_label_for_literal(l: ast::literal_expr) (str | void) = {
@@ -1007,6 +1026,181 @@ fn render_func_result(d: *ast::decl) (str | void) = {
 	case => return void;
 	};
 	return strings::dup(memio::string(&buf)!)!;
+};
+
+// Like [[infer_call_return_type]] but returns the result type's AST node so
+// callers can post-process it (e.g. strip error variants for `?` / `!`).
+fn infer_call_return_type_node(srv: *server, doc: *document,
+		c: *ast::call_expr) (*ast::_type | void) = {
+	const callee_ident = match (c.lvalue.expr) {
+	case let a: ast::access_expr =>
+		yield match (a) {
+		case let id: ast::access_identifier => yield id;
+		case => return void;
+		};
+	case => return void;
+	};
+	if (len(callee_ident) == 0) return void;
+	const callee_name = callee_ident[len(callee_ident) - 1];
+	const entry = match (lookup_callee(srv, doc, callee_ident)) {
+	case let e: *analysis::workspace_entry => yield e;
+	case void => return void;
+	};
+	const fpe = match (cached_parse_or_drop_stale(srv, entry.path)) {
+	case let p: *file_parse_entry => yield p;
+	case null => return void;
+	};
+	const idx = match (find_decl_by_name(&fpe.pr.subunit, callee_name)) {
+	case let i: size => yield i;
+	case void => return void;
+	};
+	const f = match (fpe.pr.subunit.decls[idx].decl) {
+	case let f: ast::decl_func => yield f;
+	case => return void;
+	};
+	const ft = match (f.prototype.repr) {
+	case let proto: ast::func_type => yield proto;
+	case => return void;
+	};
+	return ft.result;
+};
+
+// Renders `t` with all error-flagged variants stripped — the result of `?`
+// or `!` applied to an expression of type `t`. Returns void if every
+// component of `t` was an error (nothing meaningful to show).
+fn render_type_without_errors(srv: *server, doc: *document,
+		t: *ast::_type) (str | void) = {
+	match (t.repr) {
+	case ast::error_type =>
+		return void;
+	case let tag: ast::tagged_type =>
+		let kept: []*ast::_type = [];
+		defer free(kept);
+		for (let i = 0z; i < len(tag); i += 1) {
+			if (type_is_error(srv, doc, tag[i].0, 0)) continue;
+			append(kept, tag[i].0)!;
+		};
+		if (len(kept) == 0) return void;
+		if (len(kept) == 1) return render_type_plain(kept[0]);
+		let buf = memio::dynamic();
+		defer lsp::safe_close(&buf);
+		match (memio::concat(&buf, "(")) {
+		case size => void;
+		case => return void;
+		};
+		for (let i = 0z; i < len(kept); i += 1) {
+			if (i > 0) {
+				match (memio::concat(&buf, " | ")) {
+				case size => void;
+				case => return void;
+				};
+			};
+			match (unparse::_type(&buf, &unparse::syn_nowrap, kept[i])) {
+			case size => void;
+			case => return void;
+			};
+		};
+		match (memio::concat(&buf, ")")) {
+		case size => void;
+		case => return void;
+		};
+		return strings::dup(memio::string(&buf)!)!;
+	case =>
+		return render_type_plain(t);
+	};
+};
+
+fn render_type_plain(t: *ast::_type) (str | void) = {
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
+	case size => void;
+	case => return void;
+	};
+	return strings::dup(memio::string(&buf)!)!;
+};
+
+// True when `t` is an error type, either directly (`!T`) or through alias
+// resolution (`type myerr = !T`, possibly chained). `depth` guards against
+// pathological alias cycles.
+fn type_is_error(srv: *server, doc: *document,
+		t: *ast::_type, depth: int) bool = {
+	if (depth >= 8) return false;
+	match (t.repr) {
+	case ast::error_type =>
+		return true;
+	case let a: ast::alias_type =>
+		const d = match (lookup_decl_by_ident(srv, doc, a)) {
+		case let d: *ast::decl => yield d;
+		case void => return false;
+		};
+		const u = match (analysis::type_decl_underlying(d)) {
+		case let u: *ast::_type => yield u;
+		case void => return false;
+		};
+		return type_is_error(srv, doc, u, depth + 1);
+	case => return false;
+	};
+};
+
+// Resolves an ident to its `decl` by searching the local subunit, the
+// workspace index (qualified or via imports), and the indexed stdlib.
+// Mirrors [[lookup_callee]] but returns the decl directly.
+fn lookup_decl_by_ident(srv: *server, doc: *document,
+		id: ast::ident) (*ast::decl | void) = {
+	if (len(id) == 0) return void;
+	const name = id[len(id) - 1];
+	if (len(id) >= 2) {
+		const qualifier = id[len(id) - 2];
+		match (analysis::find_in_module(&srv.workspace_index,
+				qualifier, name)) {
+		case let e: *analysis::workspace_entry =>
+			return decl_from_workspace_entry(srv, e, name);
+		case void => void;
+		};
+		const cache = parse_of(doc);
+		const full = full_module_for_qualifier(&cache.pr.subunit, qualifier);
+		defer free(full);
+		const mod_to_index = if (len(full) > 0) full else qualifier;
+		if (ensure_stdlib_module_indexed(srv, mod_to_index)) {
+			match (analysis::find_in_module(&srv.stdlib_index,
+					qualifier, name)) {
+			case let e: *analysis::workspace_entry =>
+				return decl_from_workspace_entry(srv, e, name);
+			case void => return void;
+			};
+		};
+		return void;
+	};
+	const cache = parse_of(doc);
+	match (find_decl_by_name(&cache.pr.subunit, name)) {
+	case let i: size => return &cache.pr.subunit.decls[i];
+	case void => void;
+	};
+	const imports = collect_imported_module_names(&cache.pr.subunit);
+	defer free_str_slice_nav(imports);
+	match (analysis::find_in_imports(&srv.workspace_index, imports, name)) {
+	case let e: *analysis::workspace_entry =>
+		return decl_from_workspace_entry(srv, e, name);
+	case void => void;
+	};
+	match (analysis::find_first_by_short_name(&srv.workspace_index, name)) {
+	case let e: *analysis::workspace_entry =>
+		return decl_from_workspace_entry(srv, e, name);
+	case void => return void;
+	};
+};
+
+fn decl_from_workspace_entry(srv: *server, e: *analysis::workspace_entry,
+		name: str) (*ast::decl | void) = {
+	const fpe = match (cached_parse_or_drop_stale(srv, e.path)) {
+	case let p: *file_parse_entry => yield p;
+	case null => return void;
+	};
+	match (find_decl_by_name(&fpe.pr.subunit, name)) {
+	case let i: size => return &fpe.pr.subunit.decls[i];
+	case void => return void;
+	};
 };
 
 // True when at least one expression in `exprs` textually encloses `off`.

@@ -279,7 +279,7 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(value, "answer"));
 };
 
-@test fn hover_on_let_binding_with_propagate_shows_callee_return_type() void = {
+@test fn hover_on_let_binding_with_propagate_strips_error_variants() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
@@ -313,10 +313,51 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
-	// Should show `let t: (int | myerr)`, not the echoed init source.
+	// After `?`, the result should be just `int` — the alias `myerr`
+	// resolves to `!void`, so its variant is stripped from the union.
 	assert(strings::contains(value, "let t"));
 	assert(strings::contains(value, "int"));
-	assert(strings::contains(value, "myerr"));
+	assert(!strings::contains(value, "myerr"));
+	assert(!strings::contains(value, "want()"));
+};
+
+@test fn hover_on_let_binding_with_error_assert_strips_error_variants() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const def_path = ".tmp/hare-lsp-nav-hover-bang.ha";
+	const def_text = "export type myerr = !void;\nexport fn want() (int | myerr) = 0;\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool => yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path,
+		strings::toutf8(def_text));
+
+	// `let t = want()!;` — hover on `t` (line 0, char 25).
+	nav_open(&s, "file:///caller_bang.ha",
+		"fn caller() void = { let t = want()!; };\\n");
+
+	const params = `{"textDocument":{"uri":"file:///caller_bang.ha"},"position":{"line":0,"character":25}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 461.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 461.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "let t"));
+	assert(strings::contains(value, "int"));
+	assert(!strings::contains(value, "myerr"));
 	assert(!strings::contains(value, "want()"));
 };
 
