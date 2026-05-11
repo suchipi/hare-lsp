@@ -118,47 +118,108 @@ type call_context = struct {
 	active_param: size,
 };
 
-// Walks backward from `off` to find the enclosing call expression's '('
-// and counts commas to determine the active parameter.
+// Scans forward from the start of the buffer to `off`, tracking paren
+// depth and remembering the most recent enclosing '(' (the one whose
+// closing ')' has not yet been seen at the cursor). Skips strings,
+// runes, raw strings, and line/block comments so commas inside them
+// don't get counted as argument separators.
+//
+// Implementation note: walking forward (rather than backward from the
+// cursor as a naïve version would) is necessary to make string/comment
+// skipping correct — the lexer state at position `i` depends on what
+// came before.
 fn find_call_context(data: []u8, off: size) (call_context | void) = {
-	let depth: int = 0;
-	let active: size = 0;
-	let i = off;
-	if (i > len(data)) i = len(data);
-	for (i > 0; i -= 1) {
-		const b = data[i - 1];
+	const limit = if (off > len(data)) len(data) else off;
+	// A stack of (open_paren_offset, active_param_count) — one entry per
+	// currently-unmatched '('. The top of the stack is the enclosing
+	// call.
+	let stack: [](size, size) = [];
+	defer free(stack);
+	let i = 0z;
+	for (i < limit) {
+		const b = data[i];
 		switch (b) {
-		case ')': u8, ']': u8, '}': u8 =>
-			depth += 1;
-		case '(': u8 =>
-			if (depth == 0) {
-				// Found the enclosing '(' at index i - 1.
-				const open_at = i - 1;
-				// The callee name ends just before open_at,
-				// possibly preceded by spaces.
-				let e = open_at;
-				for (e > 0 && (data[e - 1] == ' ': u8 || data[e - 1] == '\t': u8); e -= 1) void;
-				let s = e;
-				for (s > 0; s -= 1) {
-					const cb = data[s - 1];
-					if (!is_ident_byte_sh(cb)) break;
+		case '/': u8 =>
+			if (i + 1 < limit && data[i + 1] == '/': u8) {
+				i += 2;
+				for (i < limit && data[i] != '\n': u8; i += 1) void;
+			} else if (i + 1 < limit && data[i + 1] == '*': u8) {
+				i += 2;
+				for (i + 1 < limit; i += 1) {
+					if (data[i] == '*': u8 && data[i + 1] == '/': u8) {
+						i += 2;
+						break;
+					};
 				};
-				if (s == e) return void;
-				const name = strings::dup(strings::fromutf8(data[s..e])!)!;
-				return call_context {
-					callee_name = name,
-					active_param = active,
+				if (i + 1 >= limit) i = limit;
+			} else {
+				i += 1;
+			};
+		case '"': u8 =>
+			i += 1;
+			for (i < limit; i += 1) {
+				if (data[i] == '\\': u8 && i + 1 < limit) {
+					i += 1;
+					continue;
+				};
+				if (data[i] == '"': u8) {
+					i += 1;
+					break;
 				};
 			};
-			depth -= 1;
-		case '[': u8, '{': u8 =>
-			depth -= 1;
+		case '\'': u8 =>
+			i += 1;
+			for (i < limit; i += 1) {
+				if (data[i] == '\\': u8 && i + 1 < limit) {
+					i += 1;
+					continue;
+				};
+				if (data[i] == '\'': u8) {
+					i += 1;
+					break;
+				};
+			};
+		case '`': u8 =>
+			i += 1;
+			for (i < limit; i += 1) {
+				if (data[i] == '`': u8) {
+					i += 1;
+					break;
+				};
+			};
+		case '(': u8 =>
+			append(stack, (i, 0z))!;
+			i += 1;
+		case ')': u8 =>
+			if (len(stack) > 0) {
+				delete(stack[len(stack) - 1]);
+			};
+			i += 1;
 		case ',': u8 =>
-			if (depth == 0) active += 1;
-		case => void;
+			if (len(stack) > 0) {
+				stack[len(stack) - 1].1 += 1;
+			};
+			i += 1;
+		case => i += 1;
 		};
 	};
-	return void;
+	if (len(stack) == 0) return void;
+	const (open_at, active) = stack[len(stack) - 1];
+	// The callee name ends just before open_at, possibly preceded by
+	// spaces.
+	let e = open_at;
+	for (e > 0 && (data[e - 1] == ' ': u8 || data[e - 1] == '\t': u8); e -= 1) void;
+	let ns = e;
+	for (ns > 0; ns -= 1) {
+		const cb = data[ns - 1];
+		if (!is_ident_byte_sh(cb)) break;
+	};
+	if (ns == e) return void;
+	const name = strings::dup(strings::fromutf8(data[ns..e])!)!;
+	return call_context {
+		callee_name = name,
+		active_param = active,
+	};
 };
 
 fn is_ident_byte_sh(b: u8) bool = {
