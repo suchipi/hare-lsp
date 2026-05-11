@@ -37,6 +37,14 @@ npm run watch          # incremental TypeScript compile
 
 Open this folder in VSCode and press F5 to launch a development host.
 
+## Publishing
+
+The `publisher` field in [package.json](./package.json) is set to
+`"local"`, which is fine for `code --install-extension` from a local
+`.vsix` but blocks publication to the VS Code Marketplace. Before
+publishing, register a publisher with `vsce create-publisher <name>`
+and update `package.json` to match.
+
 ## License
 
 MPL-2.0 — same as the language server and Hare itself.

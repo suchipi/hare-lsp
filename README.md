@@ -6,9 +6,9 @@ A Language Server Protocol implementation for the [Hare programming language](ht
 
 ## Features
 
-- **Diagnostics** (push and pull): an in-process recovering parser produces diagnostics on every change; on save, `hare build` runs and its type-check errors are merged in. The in-process parser is the standalone fallback when `hare build` is disabled or unavailable.
-- **Navigation**: hover, definition, type-definition, declaration, implementation, references, document highlight, prepare-rename + rename, document & workspace symbols, document links (with target resolution to module files), call hierarchy, type hierarchy.
-- **Editing**: completion, signature help, formatting (full / range / on-type with reindent), code actions (organize imports), code lens (run test, N references), inlay hints (parameter names + inferred types), semantic tokens (full + range + delta), folding ranges, selection ranges.
+- **Diagnostics** (push and pull): an in-process recovering parser produces diagnostics on every change. On save, `hare build` adds type-check errors. Toggle build via `diagnostics.enableBuild`.
+- **Navigation**: hover, definition, type-definition, declaration, implementation, references, document highlight, prepare-rename + rename, document & workspace symbols, document links (target resolution for workspace imports — stdlib imports resolve only when `HAREPATH` overlaps a workspace folder), call hierarchy, type hierarchy.
+- **Editing**: completion, signature help, formatting (full / range / on-type with reindent), code actions (organize imports), code lens (run test, N references), inlay hints (parameter names + inferred types — best-effort: literals and declared types today), semantic tokens (full + range + delta), folding ranges, selection ranges.
 - **Workspace**: multi-root workspace folders, configuration pull, file watchers, will/did create/rename/delete, executeCommand (`hare-lsp.runTest`, `hare-lsp.runModule`).
 - **Window**: showMessage, showMessageRequest, logMessage, showDocument, work-done progress.
 - **Lifecycle**: initialize, initialized, shutdown, exit, $/cancelRequest, $/setTrace, $/logTrace, dynamic capability registration.

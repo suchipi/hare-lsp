@@ -3,7 +3,7 @@
   "displayName": "Hare LSP",
   "description": "Language support for Hare via the hare-lsp language server.",
   "version": "0.0.1",
-  "publisher": "hare-lsp",
+  "publisher": "local",
   "license": "MPL-2.0",
   "engines": {
     "vscode": "^1.75.0"
