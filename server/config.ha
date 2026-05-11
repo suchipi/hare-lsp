@@ -111,7 +111,13 @@ export fn apply_configuration_response(s: *server, result: json::value) void = {
 	case => return;
 	};
 	if (len(arr) == 0) return;
+	const old_debounce = s.config.diagnostics_debounce_ms;
+	const old_enable_build = s.config.enable_build_diagnostics;
+	const old_ih_params = s.config.inlay_hints_parameter_names;
+	const old_ih_inferred = s.config.inlay_hints_inferred_types;
 	apply_settings(s, arr[0]);
+	refresh_after_config_change(s, old_debounce, old_enable_build,
+		old_ih_params, old_ih_inferred);
 };
 
 // Handles the workspace/didChangeConfiguration notification.
@@ -144,6 +150,13 @@ export fn handle_did_change_configuration(s: *server, n: lsp::notification) void
 		request_configuration(s);
 		return;
 	};
+
+	// Snapshot the fields whose change should trigger downstream refresh.
+	const old_debounce = s.config.diagnostics_debounce_ms;
+	const old_enable_build = s.config.enable_build_diagnostics;
+	const old_ih_params = s.config.inlay_hints_parameter_names;
+	const old_ih_inferred = s.config.inlay_hints_inferred_types;
+
 	// If it has a "hare" key, drill in; otherwise treat the value itself
 	// as the hare section.
 	match (settings) {
@@ -151,12 +164,42 @@ export fn handle_did_change_configuration(s: *server, n: lsp::notification) void
 		match (json::get(&o, "hare")) {
 		case let p: *json::value =>
 			apply_settings(s, *p);
+			refresh_after_config_change(s,
+				old_debounce, old_enable_build,
+				old_ih_params, old_ih_inferred);
 			return;
 		case => void;
 		};
 	case => void;
 	};
 	apply_settings(s, settings);
+	refresh_after_config_change(s, old_debounce, old_enable_build,
+		old_ih_params, old_ih_inferred);
+};
+
+// Re-publishes diagnostics and sends inlayHint/refresh when the
+// corresponding settings actually changed.
+fn refresh_after_config_change(
+	s: *server,
+	old_debounce: u32, old_enable_build: bool,
+	old_ih_params: bool, old_ih_inferred: bool,
+) void = {
+	const diag_changed = (old_debounce != s.config.diagnostics_debounce_ms) ||
+		(old_enable_build != s.config.enable_build_diagnostics);
+	const ih_changed = (old_ih_params != s.config.inlay_hints_parameter_names) ||
+		(old_ih_inferred != s.config.inlay_hints_inferred_types);
+
+	if (diag_changed) {
+		// Republish parse diagnostics for every open doc immediately
+		// (bypassing the debounce — the user explicitly asked to
+		// change diagnostics behavior).
+		for (let i = 0z; i < len(s.documents); i += 1) {
+			refresh_diagnostics(s, &s.documents[i]);
+		};
+	};
+	if (ih_changed) {
+		request_inlay_hint_refresh(s);
+	};
 };
 
 // Applies a settings value (the "hare" section) into the server's config.

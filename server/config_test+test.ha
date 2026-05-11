@@ -151,6 +151,83 @@ fn cleanup_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out
 	assert(*(json::get(&item, "section") as *json::value) as str == "hare");
 };
 
+@test fn did_change_configuration_with_enable_build_change_refreshes_diagnostics() void = {
+	let (s, scan, in_buf, out) = fresh_server();
+	defer cleanup_server(&s, scan, in_buf, out);
+
+	// Open a doc so there's something to refresh.
+	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;\n"}}`;
+	let opv = json::loadstr(open)!;
+	const op = lsp::notification {
+		method = strings::dup("textDocument/didOpen")!,
+		params = opv,
+	};
+	defer { free(op.method); json::finish(opv); };
+	handle_did_open(&s, op);
+
+	// Snapshot the wire to count publishDiagnostics emissions so far.
+	const before_len = len(memio::buffer(out));
+
+	// Flip enableBuild from true to false.
+	const params = `{"settings":{"hare":{"diagnostics":{"enableBuild":false}}}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const n = lsp::notification {
+		method = strings::dup("workspace/didChangeConfiguration")!,
+		params = pv,
+	};
+	defer free(n.method);
+	handle_did_change_configuration(&s, n);
+
+	assert(!s.config.enable_build_diagnostics);
+	// After the config change we should have written more to the wire.
+	const after_len = len(memio::buffer(out));
+	assert(after_len > before_len);
+	// And the new bytes include a publishDiagnostics for our open file.
+	const new_text = strings::fromutf8(memio::buffer(out)[before_len..])!;
+	assert(strings::contains(new_text, "textDocument/publishDiagnostics"));
+};
+
+@test fn did_change_configuration_with_inlay_hints_change_emits_refresh() void = {
+	let (s, scan, in_buf, out) = fresh_server();
+	defer cleanup_server(&s, scan, in_buf, out);
+
+	// Flip parameterNames from true to false.
+	const params = `{"settings":{"hare":{"inlayHints":{"parameterNames":false}}}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const n = lsp::notification {
+		method = strings::dup("workspace/didChangeConfiguration")!,
+		params = pv,
+	};
+	defer free(n.method);
+	handle_did_change_configuration(&s, n);
+
+	assert(!s.config.inlay_hints_parameter_names);
+	// Should have sent a workspace/inlayHint/refresh.
+	const text = strings::fromutf8(memio::buffer(out))!;
+	assert(strings::contains(text, "workspace/inlayHint/refresh"));
+};
+
+@test fn did_change_configuration_with_no_change_is_quiet() void = {
+	let (s, scan, in_buf, out) = fresh_server();
+	defer cleanup_server(&s, scan, in_buf, out);
+
+	const before_len = len(memio::buffer(out));
+	// Send the same defaults — no actual change.
+	const params = `{"settings":{"hare":{"diagnostics":{"debounceMs":300}}}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const n = lsp::notification {
+		method = strings::dup("workspace/didChangeConfiguration")!,
+		params = pv,
+	};
+	defer free(n.method);
+	handle_did_change_configuration(&s, n);
+	// Wire unchanged: no refreshes needed.
+	assert(len(memio::buffer(out)) == before_len);
+};
+
 // Helper inlined to avoid pulling bytes:: into the test header.
 fn bytes_index_of(data: []u8, needle: str) size = {
 	const n = strings::toutf8(needle);

@@ -257,6 +257,16 @@ export fn request_diagnostic_refresh(s: *server) void = {
 	pending_remember(s, id, "workspace/diagnostic/refresh");
 };
 
+// Sends a workspace/inlayHint/refresh request to the client. Used after
+// a settings change that affects which hints are produced.
+export fn request_inlay_hint_refresh(s: *server) void = {
+	const id = next_outgoing_id(s);
+	if (!send_request(s, id, "workspace/inlayHint/refresh", json::_null)) {
+		return;
+	};
+	pending_remember(s, id, "workspace/inlayHint/refresh");
+};
+
 fn full_report(items: []json::value) json::value = {
 	let o = json::newobject();
 	json::set(&o, "kind", "full": json::value)!;
