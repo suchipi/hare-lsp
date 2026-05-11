@@ -69,7 +69,23 @@ fn execute_run_test(s: *server, r: lsp::request, args: []json::value) void = {
 	const path = uri_to_path_xc(uri);
 	defer free(path);
 	const dir = dirname_xc(path);
-	run_hare_command(s, "test", dir, []);
+	// Optional 2nd argument: the test function name. When present
+	// pass it as a `[path] [test]` filter to `hare test` so only the
+	// matching @test runs.
+	let extra: []str = [];
+	defer free(extra);
+	if (len(args) >= 2) {
+		match (args[1]) {
+		case let name: str =>
+			// `hare test <path> <test...>` — the directory is the
+			// path arg; the test name is the glob. We chdir'd to
+			// `dir` already so pass "." as the path.
+			append(extra, ".")!;
+			append(extra, name)!;
+		case => void;
+		};
+	};
+	run_hare_command(s, "test", dir, extra);
 	send_null_xc(s, r.id);
 };
 

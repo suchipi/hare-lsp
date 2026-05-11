@@ -6,17 +6,24 @@
 
 use analysis;
 use encoding::json;
+use fmt;
 use fs;
 use io;
 use lsp;
+use memio;
 use os;
 use strings;
 
 // Walks every known workspace folder and populates the workspace index.
-// Called from `initialized`. Sends a $/progress reporter so editors that
-// surface progress (Neovim, Helix, Emacs eglot) show indexing.
+// Called from `initialized`. The walk is synchronous (the LSP dispatcher
+// is single-threaded), so a very large monorepo will block the main
+// loop for the duration. We log start + completion via
+// window/logMessage so the user can see why the editor seems
+// momentarily stalled on first open.
 export fn scan_workspace_folders(s: *server) void = {
 	if (len(s.workspace_folders) == 0) return;
+
+	log_info(s, "hare-lsp: indexing workspace...");
 
 	let total: size = 0;
 	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
@@ -25,8 +32,20 @@ export fn scan_workspace_folders(s: *server) void = {
 		total += analysis::index_directory(&s.workspace_index, path);
 	};
 
+	const msg = fmt_indexed_summary(total, len(s.workspace_folders));
+	defer free(msg);
+	log_info(s, msg);
+
 	// Notify clients that workspace symbols / diagnostics may be stale.
 	request_diagnostic_refresh(s);
+};
+
+fn fmt_indexed_summary(files: size, folders: size) str = {
+	let buf = memio::dynamic();
+	defer io::close(&buf)!;
+	fmt::fprintf(&buf, "hare-lsp: indexed {} file(s) across {} folder(s)",
+		files, folders)!;
+	return strings::dup(memio::string(&buf)!)!;
 };
 
 fn uri_to_local_path(uri: str) str = lsp::uri_decode_path(uri);

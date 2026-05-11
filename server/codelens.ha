@@ -56,12 +56,19 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 		append(arr, lens: json::value)!;
 	};
 
-	// Run-test lens: lex the file looking for `@test` attributes.
-	const test_offsets = find_test_offsets(data);
-	defer free(test_offsets);
-	for (let i = 0z; i < len(test_offsets); i += 1) {
-		const off = test_offsets[i];
-		const sp = analysis::byte_to_position(data, doc.buf.line_index, enc, off);
+	// Run-test lens: lex the file looking for `@test` attributes and
+	// capture the function name that follows so the lens can ask the
+	// test runner to filter to just that test.
+	const tests = find_tests(data);
+	defer {
+		for (let i = 0z; i < len(tests); i += 1) {
+			free(tests[i].name);
+		};
+		free(tests);
+	};
+	for (let i = 0z; i < len(tests); i += 1) {
+		const t = tests[i];
+		const sp = analysis::byte_to_position(data, doc.buf.line_index, enc, t.off);
 		let lens = json::newobject();
 		let r_obj = json::newobject();
 		let s_obj = json::newobject();
@@ -75,10 +82,19 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 		json::put(&lens, "range", r_obj)!;
 		// Eager command (no resolve needed for run-test).
 		let cmd = json::newobject();
-		json::set(&cmd, "title", "▶ Run test": json::value)!;
+		const title = if (len(t.name) > 0) {
+			yield strings::concat("▶ Run test: ", t.name)!;
+		} else {
+			yield strings::dup("▶ Run test")!;
+		};
+		defer free(title);
+		json::set(&cmd, "title", title: json::value)!;
 		json::set(&cmd, "command", "hare-lsp.runTest": json::value)!;
 		let args: []json::value = [];
-		append(args, uri: json::value)!;
+		append(args, strings::dup(uri)!: json::value)!;
+		if (len(t.name) > 0) {
+			append(args, strings::dup(t.name)!: json::value)!;
+		};
 		json::put(&cmd, "arguments", args: json::value)!;
 		json::put(&lens, "command", cmd)!;
 		append(arr, lens: json::value)!;
@@ -195,13 +211,22 @@ fn is_word_byte_cl(b: u8) bool = {
 	return b == '_': u8;
 };
 
-fn find_test_offsets(data: []u8) []size = {
-	let out: []size = [];
+// A @test attribute paired with the function name immediately
+// following it. `name` is empty if the lexer couldn't find an
+// identifier after the @test (e.g. malformed source).
+type test_marker = struct {
+	off: size,
+	name: str,
+};
+
+fn find_tests(data: []u8) []test_marker = {
+	let out: []test_marker = [];
 	let src = memio::fixed(data);
 	let scan = bufio::newscanner(&src);
 	defer bufio::finish(&scan);
 	let lexer = lex::init(&scan, "<doc>");
 	defer lex::finish(&lexer);
+	let pending: (size | void) = void;
 	for (true) {
 		const tok = match (lex::lex(&lexer)) {
 		case let t: lex::token => yield t;
@@ -209,8 +234,35 @@ fn find_test_offsets(data: []u8) []size = {
 		};
 		if (tok.0 == ltok::EOF) break;
 		if (tok.0 == ltok::ATTR_TEST) {
-			append(out, tok.2.off: size)!;
+			pending = tok.2.off: size;
+			continue;
 		};
+		// After @test we expect `fn <name>(...) ...`. The first NAME
+		// token following the attribute is the function name.
+		match (pending) {
+		case let off: size =>
+			if (tok.0 == ltok::NAME) {
+				const n = match (tok.1) {
+				case let s: str => yield strings::dup(s)!;
+				case => yield strings::dup("")!;
+				};
+				append(out, test_marker {
+					off = off,
+					name = n,
+				})!;
+				pending = void;
+			};
+		case void => void;
+		};
+	};
+	// If a final @test had no name, still record it without one.
+	match (pending) {
+	case let off: size =>
+		append(out, test_marker {
+			off = off,
+			name = strings::dup("")!,
+		})!;
+	case void => void;
 	};
 	return out;
 };
