@@ -885,6 +885,9 @@ fn render_local_binding(srv: *server, doc: *document, data: []u8,
 //   - direct call expressions (workspace + stdlib callee return type)
 //   - cast expressions
 //   - struct/array/tuple literals (renders the literal type only)
+//   - `?` / `!` wrappers, by recursing into the inner expression. The
+//     reported type still includes any `| error` variants since we have
+//     no type-resolver to strip them.
 // Other forms return void; the caller falls back to echoing the source.
 fn infer_type_from_init(srv: *server, doc: *document,
 		init: *ast::expr) (str | void) = {
@@ -901,6 +904,10 @@ fn infer_type_from_init(srv: *server, doc: *document,
 		case => return void;
 		};
 		return strings::dup(memio::string(&buf)!)!;
+	case let p: ast::propagate_expr =>
+		return infer_type_from_init(srv, doc, p: *ast::expr);
+	case let p: ast::error_assert_expr =>
+		return infer_type_from_init(srv, doc, p: *ast::expr);
 	case => return void;
 	};
 };
