@@ -31,6 +31,10 @@ export type build_diagnostic = struct {
 	path: str,
 	line: u32,
 	col: u32,
+	// "error", "syntax error", or "warning" — preserved verbatim from
+	// the compiler line, used by build_diag_to_lsp to set severity and
+	// the LSP `code` field.
+	kind: str,
 	message: str,
 };
 
@@ -38,6 +42,7 @@ export type build_diagnostic = struct {
 export fn finish_build_diagnostics(d: []build_diagnostic) void = {
 	for (let i = 0z; i < len(d); i += 1) {
 		free(d[i].path);
+		free(d[i].kind);
 		free(d[i].message);
 	};
 	free(d);
@@ -219,6 +224,7 @@ fn parse_diagnostic_line(line: str, cwd: str) (build_diagnostic | void) = {
 		path = abs_path,
 		line = lineno,
 		col = colno,
+		kind = strings::dup(kind_str)!,
 		message = strings::dup(message)!,
 	};
 };
@@ -232,6 +238,12 @@ fn path_is_absolute(p: str) bool = {
 // Converts a build_diagnostic into a json::value LSP Diagnostic. Range is
 // (line-1, col-1) -> (line-1, col) since the compiler reports a single
 // caret position.
+//
+// Severity is 1 (Error) for "error" and "syntax error", 2 (Warning) for
+// "warning". The compiler's `kind` is also emitted as the LSP `code` so
+// clients can filter/suppress per category. When the message looks like
+// an unused-import diagnostic, the `Unnecessary` (1) tag is added so
+// editors grey it out.
 export fn build_diag_to_lsp(d: build_diagnostic) json::value = {
 	let o = json::newobject();
 	let s_obj = json::newobject();
@@ -244,9 +256,21 @@ export fn build_diag_to_lsp(d: build_diagnostic) json::value = {
 	json::put(&r_obj, "start", s_obj)!;
 	json::put(&r_obj, "end", e_obj)!;
 	json::put(&o, "range", r_obj)!;
-	json::put(&o, "severity", 1: f64)!;
+	const severity: f64 = if (d.kind == "warning") 2.0 else 1.0;
+	json::put(&o, "severity", severity)!;
 	json::set(&o, "source", "hare-lsp/build": json::value)!;
+	json::set(&o, "code", d.kind: json::value)!;
 	json::set(&o, "message", d.message: json::value)!;
+
+	// Tag unused-related diagnostics as Unnecessary so clients can grey
+	// out the code span. Deprecated tags would come from compiler attrs
+	// we don't currently surface.
+	if (strings::contains(d.message, "unused") ||
+		strings::contains(d.message, "unreachable")) {
+		let tags: []json::value = [];
+		append(tags, 1.0: json::value)!;
+		json::put(&o, "tags", tags: json::value)!;
+	};
 	return o;
 };
 

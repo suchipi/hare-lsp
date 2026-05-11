@@ -62,6 +62,7 @@ use encoding::json;
 		path = "/x/a.ha",
 		line = 5,
 		col = 10,
+		kind = "error",
 		message = "boom",
 	};
 	let v = build_diag_to_lsp(d);
@@ -76,5 +77,50 @@ use encoding::json;
 	assert(*(json::get(&end, "character") as *json::value) as f64 == 10.0);
 	assert(*(json::get(&o, "severity") as *json::value) as f64 == 1.0);
 	assert(*(json::get(&o, "source") as *json::value) as str == "hare-lsp/build");
+	assert(*(json::get(&o, "code") as *json::value) as str == "error");
 	assert(*(json::get(&o, "message") as *json::value) as str == "boom");
+};
+
+@test fn build_diag_warning_severity_and_no_tag() void = {
+	const d = build_diagnostic {
+		path = "/x/a.ha",
+		line = 1,
+		col = 1,
+		kind = "warning",
+		message = "be careful",
+	};
+	let v = build_diag_to_lsp(d);
+	defer json::finish(v);
+	const o = v as json::object;
+	assert(*(json::get(&o, "severity") as *json::value) as f64 == 2.0);
+	assert(*(json::get(&o, "code") as *json::value) as str == "warning");
+	// No "tags" field for a non-unused-related message.
+	match (json::get(&o, "tags")) {
+	case *json::value => abort("expected no tags");
+	case void => void;
+	};
+};
+
+@test fn build_diag_unused_message_gets_unnecessary_tag() void = {
+	const d = build_diagnostic {
+		path = "/x/a.ha",
+		line = 1,
+		col = 1,
+		kind = "warning",
+		message = "import is unused",
+	};
+	let v = build_diag_to_lsp(d);
+	defer json::finish(v);
+	const o = v as json::object;
+	const tags = *(json::get(&o, "tags") as *json::value) as []json::value;
+	assert(len(tags) == 1);
+	assert(tags[0] as f64 == 1.0);
+};
+
+@test fn parse_compiler_output_records_kind() void = {
+	const out = "main.ha:1:1: warning: unused import foo\n";
+	let diags = parse_compiler_output(out, "/w");
+	defer finish_build_diagnostics(diags);
+	assert(len(diags) == 1);
+	assert(diags[0].kind == "warning");
 };

@@ -141,6 +141,7 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 		}))!;
 		json::put(&d, "severity", 1: f64)!;
 		json::set(&d, "source", "hare-lsp/parse": json::value)!;
+		json::set(&d, "code", "parse-error": json::value)!;
 		json::set(&d, "message", e.message: json::value)!;
 		append(arr, d: json::value)!;
 	};
