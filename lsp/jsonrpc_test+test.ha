@@ -124,3 +124,33 @@ use strings;
 	assert(strings::hasprefix(out, "Content-Length: "));
 	assert(strings::contains(out, `"method":"window/logMessage"`));
 };
+
+@test fn uri_decode_path_basic() void = {
+	const p = uri_decode_path("file:///abs/path.ha");
+	defer free(p);
+	assert(p == "/abs/path.ha");
+};
+
+@test fn uri_decode_path_space() void = {
+	const p = uri_decode_path("file:///a/My%20Project/x.ha");
+	defer free(p);
+	assert(p == "/a/My Project/x.ha");
+};
+
+@test fn uri_decode_path_utf8() void = {
+	const p = uri_decode_path("file:///%C3%B1.ha");
+	defer free(p);
+	assert(p == "/ñ.ha");
+};
+
+@test fn uri_decode_path_invalid_hex_passes_through() void = {
+	const p = uri_decode_path("file:///x/%ZZ/a.ha");
+	defer free(p);
+	assert(p == "/x/%ZZ/a.ha");
+};
+
+@test fn uri_decode_path_non_file_scheme_passes_through() void = {
+	const p = uri_decode_path("untitled:foo");
+	defer free(p);
+	assert(p == "untitled:foo");
+};

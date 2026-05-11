@@ -229,6 +229,55 @@ export fn encode_diagnostic(d: diagnostic) (json::value | nomem) = {
 	return o;
 };
 
+// --- URI handling -----------------------------------------------------
+
+// Strips the "file://" scheme prefix from `uri` and percent-decodes the
+// rest. Returns a freshly-allocated string the caller owns.
+//
+// Per RFC 3986 file URIs may contain `%XX` triplets for any byte not in
+// the unreserved set — spaces become `%20`, parentheses become `%28`/
+// `%29`, non-ASCII bytes are UTF-8-then-percent-encoded. The naïve
+// `strings::sub(uri, len("file://"), end)` is wrong for any path that
+// passed through a browser, a percent-encoding LSP client (most of
+// them), or contains non-ASCII characters.
+//
+// Invalid `%XX` sequences (non-hex digits, truncated at end of input)
+// are passed through verbatim; the caller will get a non-existent path
+// and io::open will fail, which is the right failure mode.
+export fn uri_decode_path(uri: str) str = {
+	const scheme = "file://";
+	const rest = if (strings::hasprefix(uri, scheme)) {
+		yield strings::sub(uri, len(scheme), strings::end);
+	} else {
+		yield uri;
+	};
+	const src = strings::toutf8(rest);
+	let out: []u8 = [];
+	let i = 0z;
+	for (i < len(src)) {
+		const b = src[i];
+		if (b == '%': u8 && i + 2 < len(src)) {
+			const h1 = hex_digit(src[i + 1]);
+			const h2 = hex_digit(src[i + 2]);
+			if (h1 >= 0 && h2 >= 0) {
+				append(out, ((h1 << 4) | h2): u8)!;
+				i += 3;
+				continue;
+			};
+		};
+		append(out, b)!;
+		i += 1;
+	};
+	return strings::fromutf8(out)!;
+};
+
+fn hex_digit(b: u8) int = {
+	if (b >= '0': u8 && b <= '9': u8) return (b - '0': u8): int;
+	if (b >= 'a': u8 && b <= 'f': u8) return (b - 'a': u8 + 10): int;
+	if (b >= 'A': u8 && b <= 'F': u8) return (b - 'A': u8 + 10): int;
+	return -1;
+};
+
 // --- Errors -----------------------------------------------------------
 
 // Errors raised during decoding. Always recoverable; the dispatcher converts

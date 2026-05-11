@@ -161,13 +161,7 @@ fn first_arg_str(args: []json::value) (str | void) = {
 	};
 };
 
-fn uri_to_path_xc(uri: str) str = {
-	const prefix = "file://";
-	if (strings::hasprefix(uri, prefix)) {
-		return strings::dup(strings::sub(uri, len(prefix), strings::end))!;
-	};
-	return strings::dup(uri)!;
-};
+fn uri_to_path_xc(uri: str) str = lsp::uri_decode_path(uri);
 
 fn dirname_xc(path: str) str = {
 	const idx = strings::rindex(path, '/');

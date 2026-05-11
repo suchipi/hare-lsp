@@ -273,12 +273,7 @@ export fn path_to_uri(p: str) str = {
 	return strings::dup(p)!;
 };
 
-// Translates a file:// URI back into a filesystem path. Returns the input
-// unchanged if it doesn't start with "file://".
-export fn uri_to_path(uri: str) str = {
-	const prefix = "file://";
-	if (strings::hasprefix(uri, prefix)) {
-		return strings::sub(uri, len(prefix), strings::end);
-	};
-	return uri;
-};
+// Translates a file:// URI back into a filesystem path. Strips the
+// scheme and percent-decodes the rest. Returns a freshly-allocated
+// string; caller frees.
+export fn uri_to_path(uri: str) str = lsp::uri_decode_path(uri);

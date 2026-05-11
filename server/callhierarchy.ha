@@ -70,7 +70,12 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 		free(more);
 	};
 	const seen = collect_seen_paths(s);
-	defer free(seen);
+	defer {
+		for (let i = 0z; i < len(seen); i += 1) {
+			free(seen[i]);
+		};
+		free(seen);
+	};
 	for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
 		const path = s.workspace_index.indexed_files[i];
 		if (str_in_slice(seen, path)) continue;
@@ -359,13 +364,12 @@ fn scan_calls_static(data: []u8, uri: str, line_index: []size, name: str) []json
 	return arr;
 };
 
+// Returns percent-decoded filesystem paths for every open document.
+// Caller frees each element and the slice.
 fn collect_seen_paths(s: *server) []str = {
 	let out: []str = [];
 	for (let i = 0z; i < len(s.documents); i += 1) {
-		const u = s.documents[i].uri;
-		if (strings::hasprefix(u, "file://")) {
-			append(out, strings::sub(u, len("file://"), strings::end))!;
-		};
+		append(out, lsp::uri_decode_path(s.documents[i].uri))!;
 	};
 	return out;
 };

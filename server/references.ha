@@ -57,7 +57,7 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 		free(more);
 	};
 	const seen = collect_open_paths(s);
-	defer free(seen);
+	defer finish_open_paths(seen);
 	if (!cancelled) for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
 		if (i % 32 == 0 && check_cancel(s, r.id)) {
 			cancelled = true;
@@ -111,13 +111,22 @@ fn extract_include_decl(p: (json::value | void)) bool = {
 	};
 };
 
+// Returns a freshly-allocated slice of paths corresponding to each
+// open document's URI (percent-decoded). Caller must call
+// [[finish_open_paths]] to free both the slice and its elements.
 fn collect_open_paths(s: *server) []str = {
 	let out: []str = [];
 	for (let i = 0z; i < len(s.documents); i += 1) {
-		const path = uri_strip_scheme(s.documents[i].uri);
-		append(out, path)!;
+		append(out, lsp::uri_decode_path(s.documents[i].uri))!;
 	};
 	return out;
+};
+
+fn finish_open_paths(paths: []str) void = {
+	for (let i = 0z; i < len(paths); i += 1) {
+		free(paths[i]);
+	};
+	free(paths);
 };
 
 fn is_in_open_paths(open_paths: []str, path: str) bool = {
@@ -125,13 +134,6 @@ fn is_in_open_paths(open_paths: []str, path: str) bool = {
 		if (open_paths[i] == path) return true;
 	};
 	return false;
-};
-
-fn uri_strip_scheme(uri: str) str = {
-	if (strings::hasprefix(uri, "file://")) {
-		return strings::sub(uri, len("file://"), strings::end);
-	};
-	return uri;
 };
 
 fn find_references_in_doc(
@@ -322,7 +324,7 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 		free(more);
 	};
 	const seen = collect_open_paths(s);
-	defer free(seen);
+	defer finish_open_paths(seen);
 	if (!cancelled) for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
 		if (i % 32 == 0 && check_cancel(s, r.id)) {
 			cancelled = true;

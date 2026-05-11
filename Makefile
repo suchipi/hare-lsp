@@ -29,11 +29,11 @@ check-deps:
 
 hare-lsp: $(shell find cmd lsp server analysis -name '*.ha' 2>/dev/null)
 	mkdir -p .cache
-	HAREPATH="$(HAREPATH)" $(HARE) build $(HAREFLAGS) -o hare-lsp ./cmd/hare-lsp
+	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) build $(HAREFLAGS) -o hare-lsp ./cmd/hare-lsp
 
 test:
 	mkdir -p .cache
-	HAREPATH="$(HAREPATH)" $(HARE) test $(HAREFLAGS)
+	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS)
 
 clean:
 	rm -rf hare-lsp .cache

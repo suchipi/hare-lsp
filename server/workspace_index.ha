@@ -29,13 +29,7 @@ export fn scan_workspace_folders(s: *server) void = {
 	request_diagnostic_refresh(s);
 };
 
-fn uri_to_local_path(uri: str) str = {
-	const prefix = "file://";
-	if (strings::hasprefix(uri, prefix)) {
-		return strings::dup(strings::sub(uri, len(prefix), strings::end))!;
-	};
-	return strings::dup(uri)!;
-};
+fn uri_to_local_path(uri: str) str = lsp::uri_decode_path(uri);
 
 // Maximum number of symbols returned in a single workspace/symbol
 // response. When the available match set exceeds this, the response

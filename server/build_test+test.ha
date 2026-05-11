@@ -54,7 +54,32 @@ use encoding::json;
 	defer free(u);
 	assert(u == "file:///abs/path.ha");
 	const p = uri_to_path(u);
+	defer free(p);
 	assert(p == "/abs/path.ha");
+};
+
+@test fn uri_to_path_decodes_percent_escapes() void = {
+	// Space → %20
+	const p1 = uri_to_path("file:///Users/me/My%20Project/foo.ha");
+	defer free(p1);
+	assert(p1 == "/Users/me/My Project/foo.ha");
+
+	// Parens → %28 / %29
+	const p2 = uri_to_path("file:///x/%28paren%29/a.ha");
+	defer free(p2);
+	assert(p2 == "/x/(paren)/a.ha");
+
+	// Bytes that aren't valid hex are passed through literally — caller
+	// gets an io::open failure, which is the right symptom.
+	const p3 = uri_to_path("file:///x/%ZZ/a.ha");
+	defer free(p3);
+	assert(p3 == "/x/%ZZ/a.ha");
+
+	// UTF-8 percent-encoded (ё = C3 ABCD-something... here just verify
+	// round-trip of a 2-byte sequence: "ñ" = C3 B1).
+	const p4 = uri_to_path("file:///x/%C3%B1.ha");
+	defer free(p4);
+	assert(p4 == "/x/ñ.ha");
 };
 
 @test fn build_diag_to_lsp_translates_range() void = {

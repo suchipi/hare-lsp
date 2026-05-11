@@ -265,13 +265,7 @@ fn decl_type_short_name(d: *ast::decl) str = {
 	};
 };
 
-fn uri_to_path_th(uri: str) str = {
-	const prefix = "file://";
-	if (strings::hasprefix(uri, prefix)) {
-		return strings::dup(strings::sub(uri, len(prefix), strings::end))!;
-	};
-	return strings::dup(uri)!;
-};
+fn uri_to_path_th(uri: str) str = lsp::uri_decode_path(uri);
 
 fn str_in(slice: []str, needle: str) bool = {
 	for (let i = 0z; i < len(slice); i += 1) {

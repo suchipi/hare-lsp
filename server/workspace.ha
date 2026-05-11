@@ -173,15 +173,10 @@ export fn handle_did_change_workspace_folders(s: *server, n: lsp::notification) 
 	};
 };
 
-// Strips the "file://" scheme to yield a directory path. Workspace
-// folder URIs use this scheme exclusively in practice.
-fn uri_to_dir_path(uri: str) str = {
-	const prefix = "file://";
-	if (strings::hasprefix(uri, prefix)) {
-		return strings::dup(strings::sub(uri, len(prefix), strings::end))!;
-	};
-	return strings::dup(uri)!;
-};
+// Strips the "file://" scheme and percent-decodes to yield a
+// directory path. Workspace folder URIs use this scheme exclusively
+// in practice.
+fn uri_to_dir_path(uri: str) str = lsp::uri_decode_path(uri);
 
 // Drops every workspace_index entry whose path is under `root_dir`.
 // Used when a workspace folder is removed.

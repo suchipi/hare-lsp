@@ -454,9 +454,17 @@ fn resolve_module_target(s: *server, ident: []str) (str | void) = {
 	// Build a colon-separated HAREPATH: workspace folder paths followed
 	// by the system stdlib + third-party dirs.
 	let parts: []str = [];
-	defer free(parts);
+	let owned_parts: []str = []; // parts allocated by us, freed at end
+	defer {
+		free(parts);
+		for (let i = 0z; i < len(owned_parts); i += 1) {
+			free(owned_parts[i]);
+		};
+		free(owned_parts);
+	};
 	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
-		const path = strip_file_scheme(s.workspace_folders[i].uri);
+		const path = lsp::uri_decode_path(s.workspace_folders[i].uri);
+		append(owned_parts, path)!;
 		append(parts, path)!;
 	};
 	append(parts, "/usr/local/src/hare/stdlib")!;
@@ -499,13 +507,6 @@ fn resolve_module_target(s: *server, ident: []str) (str | void) = {
 	return strings::concat("file://", full)!;
 };
 
-fn strip_file_scheme(uri: str) str = {
-	const prefix = "file://";
-	if (strings::hasprefix(uri, prefix)) {
-		return strings::sub(uri, len(prefix), strings::end);
-	};
-	return uri;
-};
 
 fn send_response_obj(s: *server, id: lsp::id, result: json::value) void = {
 	match (lsp::encode_response_result(s.out, id, result)) {
