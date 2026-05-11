@@ -39,7 +39,12 @@
       "Bash(echo \"exit=$?\")",
       "Bash(HAREPATH=\"/usr/local/src/hare/stdlib\" HARECACHE=/Users/suchipi/Code/hare-lsp/.cache hare run /Users/suchipi/Code/hare-lsp/.tmp/scan-debug/scan-debug.ha)",
       "Bash(hare test *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(unzip -l hare-lsp-0.0.1.vsix)",
+      "Bash(./node_modules/.bin/tsc --noEmit -p .)",
+      "Bash(node -e \"const c=require\\('./package.json'\\).contributes.configuration; console.log\\(JSON.stringify\\(c[0],null,2\\)\\)\")",
+      "Bash(node .tmp/probe-lsp-spawn.mjs)",
+      "Bash(wait)"
     ]
   }
 }
