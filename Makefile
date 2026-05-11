@@ -31,9 +31,14 @@ hare-lsp: $(shell find cmd lsp server analysis -name '*.ha' 2>/dev/null)
 	mkdir -p .cache
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) build $(HAREFLAGS) -o hare-lsp ./cmd/hare-lsp
 
-test:
+# Unit tests run from any reachable module under HAREPATH. The e2e tests
+# (under ./e2e) spawn the actual binary and exchange real LSP messages
+# over OS pipes — they catch regressions unit tests can't (e.g. the
+# buffered-stdout flush bug), but require the binary to exist first.
+test: hare-lsp
 	mkdir -p .cache
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS)
+	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS) e2e
 
 clean:
 	rm -rf hare-lsp .cache

@@ -4,5 +4,4 @@ src/**
 .gitignore
 .vscodeignore
 tsconfig.json
-node_modules/**
 out/**.map
