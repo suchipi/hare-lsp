@@ -170,16 +170,35 @@ fn find_references_in_file_on_disk(path: str, target: str) []json::value = {
 };
 
 // Scans a buffer for ident-token occurrences of `target` and returns a
-// new []json::value with the corresponding Location objects.
+// new []json::value with the corresponding Location objects. Skips over
+// string literals, char literals, raw strings, line comments, and block
+// comments so a match inside text/prose doesn't produce a false-positive
+// reference (which would otherwise let a rename silently rewrite a doc
+// comment).
 fn scan_text_for_ident_static(
 	data: []u8, uri: str, line_index: []size, target: str,
 ) []json::value = {
 	let arr: []json::value = [];
 	const t = strings::toutf8(target);
+	const limit = len(data);
 	let i = 0z;
-	for (i + len(t) <= len(data); i += 1) {
-		if (i > 0 && is_word_byte(data[i - 1])) continue;
-		if (i + len(t) < len(data) && is_word_byte(data[i + len(t)])) continue;
+	for (i + len(t) <= limit) {
+		// Skip past any non-code region starting at `i` (string,
+		// rune, raw string, comment). When token_skip_noncode
+		// advances, we continue from the new position.
+		const after = analysis::token_skip_noncode(data, i, limit);
+		if (after > i) {
+			i = after;
+			continue;
+		};
+		if (i > 0 && analysis::is_ident_byte(data[i - 1])) {
+			i += 1;
+			continue;
+		};
+		if (i + len(t) < limit && analysis::is_ident_byte(data[i + len(t)])) {
+			i += 1;
+			continue;
+		};
 		let ok = true;
 		for (let j = 0z; j < len(t); j += 1) {
 			if (data[i + j] != t[j]) {
@@ -187,7 +206,10 @@ fn scan_text_for_ident_static(
 				break;
 			};
 		};
-		if (!ok) continue;
+		if (!ok) {
+			i += 1;
+			continue;
+		};
 		const start_pos = analysis::byte_to_position(data, line_index,
 			analysis::encoding::UTF16, i);
 		const end_pos = analysis::byte_to_position(data, line_index,
@@ -205,16 +227,9 @@ fn scan_text_for_ident_static(
 		json::put(&r, "end", e_obj)!;
 		json::put(&loc, "range", r)!;
 		append(arr, loc: json::value)!;
-		i += len(t) - 1;
+		i += len(t);
 	};
 	return arr;
-};
-
-fn is_word_byte(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '_': u8;
 };
 
 // Handles textDocument/prepareRename. Returns the identifier's range (so
@@ -412,7 +427,7 @@ fn is_valid_hare_ident(name: str) bool = {
 	if (len(b) == 0) return false;
 	if (!is_ident_first(b[0])) return false;
 	for (let i = 1z; i < len(b); i += 1) {
-		if (!is_word_byte(b[i])) return false;
+		if (!analysis::is_ident_byte(b[i])) return false;
 	};
 	// Check against keywords.
 	switch (name) {

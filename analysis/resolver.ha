@@ -49,7 +49,7 @@ export fn ident_at(text: []u8, off: size) ((size, size) | void) = {
 	return (s, e);
 };
 
-fn is_ident_byte(b: u8) bool = {
+export fn is_ident_byte(b: u8) bool = {
 	if (ascii::isalnum(b: rune)) return true;
 	return b == '_': u8;
 };

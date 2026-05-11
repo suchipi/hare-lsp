@@ -168,3 +168,29 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const e0 = edits[0] as json::object;
 	assert(*(json::get(&e0, "newText") as *json::value) as str == "renamed");
 };
+
+@test fn references_skip_matches_inside_comments_and_strings() void = {
+	let (s, scan, in_buf, out) = ref_test_server();
+	defer ref_test_cleanup(&s, scan, in_buf, out);
+	// Buffer has 'target' as a decl name and also inside a //-comment,
+	// inside a string literal, and inside a /* */ block comment.
+	// Only the decl and the actual call site should match.
+	const src = "fn target() void = void;\\n// target referenced in a comment\\nfn caller() void = {\\n\\tconst note = \\\"call target with this\\\";\\n\\t/* target in block comment */\\n\\ttarget();\\n};\\n";
+	ref_open(&s, "file:///cmt.ha", src);
+
+	const params = `{"textDocument":{"uri":"file:///cmt.ha"},"position":{"line":0,"character":4},"context":{"includeDeclaration":true}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 5.0,
+		method = strings::dup("textDocument/references")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_references(&s, r);
+	const v = ref_skip_to_response(out, 5.0);
+	defer json::finish(v);
+	const arr = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	// Decl + call site = 2 hits exactly. Comments/strings must NOT match.
+	assert(len(arr) == 2);
+};

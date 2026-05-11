@@ -137,71 +137,25 @@ fn find_call_context(data: []u8, off: size) (call_context | void) = {
 	defer free(stack);
 	let i = 0z;
 	for (i < limit) {
-		const b = data[i];
-		switch (b) {
-		case '/': u8 =>
-			if (i + 1 < limit && data[i + 1] == '/': u8) {
-				i += 2;
-				for (i < limit && data[i] != '\n': u8; i += 1) void;
-			} else if (i + 1 < limit && data[i + 1] == '*': u8) {
-				i += 2;
-				for (i + 1 < limit; i += 1) {
-					if (data[i] == '*': u8 && data[i + 1] == '/': u8) {
-						i += 2;
-						break;
-					};
-				};
-				if (i + 1 >= limit) i = limit;
-			} else {
-				i += 1;
-			};
-		case '"': u8 =>
-			i += 1;
-			for (i < limit; i += 1) {
-				if (data[i] == '\\': u8 && i + 1 < limit) {
-					i += 1;
-					continue;
-				};
-				if (data[i] == '"': u8) {
-					i += 1;
-					break;
-				};
-			};
-		case '\'': u8 =>
-			i += 1;
-			for (i < limit; i += 1) {
-				if (data[i] == '\\': u8 && i + 1 < limit) {
-					i += 1;
-					continue;
-				};
-				if (data[i] == '\'': u8) {
-					i += 1;
-					break;
-				};
-			};
-		case '`': u8 =>
-			i += 1;
-			for (i < limit; i += 1) {
-				if (data[i] == '`': u8) {
-					i += 1;
-					break;
-				};
-			};
+		const after = analysis::token_skip_noncode(data, i, limit);
+		if (after > i) {
+			i = after;
+			continue;
+		};
+		switch (data[i]) {
 		case '(': u8 =>
 			append(stack, (i, 0z))!;
-			i += 1;
 		case ')': u8 =>
 			if (len(stack) > 0) {
 				delete(stack[len(stack) - 1]);
 			};
-			i += 1;
 		case ',': u8 =>
 			if (len(stack) > 0) {
 				stack[len(stack) - 1].1 += 1;
 			};
-			i += 1;
-		case => i += 1;
+		case => void;
 		};
+		i += 1;
 	};
 	if (len(stack) == 0) return void;
 	const (open_at, active) = stack[len(stack) - 1];
