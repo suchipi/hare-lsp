@@ -8,6 +8,14 @@
 // keystroke that triggers one of these handlers re-reads and re-parses
 // the same target file from scratch.
 //
+// Concurrency: the LSP dispatcher is single-threaded today, and this
+// cache is unsynchronized. The borrowed pointer returned by
+// file_parse_cache_get is valid only until the next call on the same
+// cache — a concurrent reader could see a freed entry after eviction.
+// Introducing any background work (async indexing, subprocess polling
+// from a sibling task, etc.) requires adding a mutex around the cache
+// or restructuring access through a per-task copy.
+//
 // Strategy:
 //   - Bounded LRU keyed by absolute file path.
 //   - On lookup, stat() the path; if mtime differs from the cached
@@ -192,6 +200,17 @@ fn read_path_bytes(path: str) ([]u8 | void) = {
 // or deleted — the cached parse is no longer valid.
 export fn file_parse_cache_drop_path(c: *file_parse_cache, path: str) void = {
 	drop_path(c, path);
+};
+
+// True if the most recent file_parse_cache_get for the given path
+// failed because the path doesn't exist (as opposed to other I/O
+// errors). Callers use this to self-heal a stale workspace_index
+// entry — see [[get_or_drop_stale]] in workspace_index.ha.
+export fn file_path_missing(path: str) bool = {
+	match (os::stat(path)) {
+	case fs::filestat => return false;
+	case fs::error => return true;
+	};
 };
 
 // Drops every cached entry whose path is at or under `root_dir`.

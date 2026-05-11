@@ -50,6 +50,25 @@ fn fmt_indexed_summary(files: size, folders: size) str = {
 
 fn uri_to_local_path(uri: str) str = lsp::uri_decode_path(uri);
 
+// Fetches a file_parse_cache entry; on miss, if the underlying file
+// has gone missing on disk, drops the matching workspace_index
+// entries in passing. This self-heals stale entries left behind by
+// a delete that the watcher hasn't reported yet (delete-before-
+// watcher-event is a common race on macOS/FSEvents). Returns null
+// in either failure mode.
+export fn cached_parse_or_drop_stale(
+	s: *server, path: str,
+) nullable *file_parse_entry = {
+	match (file_parse_cache_get(&s.file_parse_cache, path)) {
+	case let p: *file_parse_entry => return p;
+	case null =>
+		if (file_path_missing(path)) {
+			analysis::drop_file(&s.workspace_index, path);
+		};
+		return null;
+	};
+};
+
 // Maximum number of symbols returned in a single workspace/symbol
 // response. When the available match set exceeds this, the response
 // is flagged `isIncomplete: true` (via WorkspaceSymbolList shape) so

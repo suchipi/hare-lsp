@@ -198,6 +198,12 @@ export fn run(s: *server) int = {
 			log_stderr("client closed connection without exit");
 			return EXIT_ERROR;
 		case let e: lsp::transport_error =>
+			// Try to surface the error to the client as a JSON-RPC
+			// PARSE_ERROR response with id=null. After a transport-
+			// level failure we can't trust the byte stream for
+			// further framing, so we still exit. Best-effort: the
+			// send may itself fail if the peer also closed its end.
+			send_error(s, void, lsp::PARSE_ERROR, lsp::strerror(e));
 			log_stderr_strerror("transport error", lsp::strerror(e));
 			return EXIT_ERROR;
 		};

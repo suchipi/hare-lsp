@@ -234,7 +234,7 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 // open. We fetch the file via the shared parse cache so repeated jumps to
 // the same file don't keep re-reading it from disk.
 fn send_location_for_entry(s: *server, id: lsp::id, e: *analysis::workspace_entry) void = {
-	const fpe = match (file_parse_cache_get(&s.file_parse_cache, e.path)) {
+	const fpe = match (cached_parse_or_drop_stale(s, e.path)) {
 	case let p: *file_parse_entry => yield p;
 	case null =>
 		send_null(s, id);
@@ -281,7 +281,7 @@ fn workspace_hover(s: *server, doc: *document, data: []u8,
 	case let e: *analysis::workspace_entry => yield e;
 	case void => return void;
 	};
-	const fpe = match (file_parse_cache_get(&s.file_parse_cache, entry.path)) {
+	const fpe = match (cached_parse_or_drop_stale(s, entry.path)) {
 	case let p: *file_parse_entry => yield p;
 	case null => return void;
 	};

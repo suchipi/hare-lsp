@@ -347,6 +347,32 @@ fn wsfx_rm(path: str) void = {
 	assert(strings::contains(text, `"hello"`));
 };
 
+@test fn cached_parse_or_drop_stale_removes_index_for_missing_file() void = {
+	let out = memio::dynamic();
+	defer io::close(&out)!;
+	let in_buf = alloc(memio::fixed([]))!;
+	defer free(in_buf);
+	let scan = alloc(bufio::newscanner(in_buf))!;
+	defer { bufio::finish(scan); free(scan); };
+	let s = new(scan, &out);
+	defer finish(&s);
+
+	// Write a real file, index it, then delete it on disk and ask
+	// for its parse via cached_parse_or_drop_stale. The handler
+	// should return null AND remove the index entry.
+	const path = ".tmp/lspstale.ha";
+	wsfx_write(path, "export fn ghost() void = void;\n");
+	analysis::index_file(&s.workspace_index, path,
+		strings::toutf8("export fn ghost() void = void;\n"));
+	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "ghost")) == 1);
+
+	wsfx_rm(path);
+	const got = cached_parse_or_drop_stale(&s, path);
+	assert(got is null);
+	// Self-healed.
+	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "ghost")) == 0);
+};
+
 @test fn workspace_symbol_isincomplete_when_truncated() void = {
 	let out = memio::dynamic();
 	defer io::close(&out)!;

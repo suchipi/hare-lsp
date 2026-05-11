@@ -43,6 +43,11 @@ export type document = struct {
 	// Cached parse + index of the current buffer contents. Null when
 	// the buffer has been mutated since the last parse. Acquire via
 	// [[parse_of]] which lazy-fills on demand.
+	//
+	// Concurrency: unsynchronized; safe today because the dispatcher
+	// runs in a single thread. Any future background work that
+	// observes documents needs to lock or copy this pointer before
+	// the next mutation can free the underlying entry.
 	parse_cache: nullable *parse_cache_entry,
 };
 

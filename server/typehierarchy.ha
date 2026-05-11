@@ -114,7 +114,7 @@ fn load_subunit(s: *server, uri: str) (*ast::subunit | void) = {
 	};
 	const path = uri_to_path_th(uri);
 	defer free(path);
-	const fpe = match (file_parse_cache_get(&s.file_parse_cache, path)) {
+	const fpe = match (cached_parse_or_drop_stale(s, path)) {
 	case let p: *file_parse_entry => yield p;
 	case null => return void;
 	};
@@ -147,7 +147,7 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 		if (str_in(seen_paths, e.path)) continue;
 		append(seen_paths, e.path)!;
 
-		const fpe = match (file_parse_cache_get(&s.file_parse_cache, e.path)) {
+		const fpe = match (cached_parse_or_drop_stale(s, e.path)) {
 		case let p: *file_parse_entry => yield p;
 		case null => continue;
 		};
@@ -287,7 +287,7 @@ fn emit_workspace_type_items(s: *server, name: str, arr: *[]json::value) void = 
 		const text = match (find_document(s, e.uri)) {
 		case let d: *document => yield analysis::bytes(&d.buf);
 		case null =>
-			yield match (file_parse_cache_get(&s.file_parse_cache, e.path)) {
+			yield match (cached_parse_or_drop_stale(s, e.path)) {
 			case let p: *file_parse_entry => yield p.text;
 			case null => continue;
 			};
