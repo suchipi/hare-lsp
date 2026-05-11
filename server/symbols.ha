@@ -225,26 +225,62 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 				line = pos.line, character = pos.character,
 			});
 		const enc = position_encoding(s);
-		// Innermost: the ident at the cursor (if any).
-		const ident_rng = analysis::ident_at(data, off);
-		// Outer: the containing decl span (if any).
-		const sym = analysis::symbol_at(&cache.idx, off);
+		// Build the expansion chain from innermost to outermost. The
+		// LSP SelectionRange shape is recursive — each level has an
+		// optional `parent` field that wraps the next-outer level.
+		// We collect candidate ranges first, dedup adjacent equal
+		// ones, then build the linked structure.
+		let levels: [](size, size) = [];
+		defer free(levels);
 
-		let outer_obj: (json::value | void) = void;
-		match (sym) {
-		case let p: *analysis::symbol =>
-			const sp = analysis::byte_to_position(data, doc.buf.line_index,
-				enc, p.span.start.off: size);
-			const ep = analysis::byte_to_position(data, doc.buf.line_index,
-				enc, p.span.end.off: size);
-			let o = json::newobject();
-			json::put(&o, "range", encode_range_pos(sp, ep))!;
-			outer_obj = o: json::value;
+		// L0: ident at cursor (if any).
+		match (analysis::ident_at(data, off)) {
+		case let rng: (size, size) =>
+			append(levels, rng)!;
 		case void => void;
 		};
 
-		let inner: json::value = match (ident_rng) {
-		case let rng: (size, size) =>
+		// L1: the line containing the cursor (without trailing newline).
+		const line_rng = line_range_around(data, off);
+		append(levels, line_rng)!;
+
+		// L2: containing decl (if any).
+		match (analysis::symbol_at(&cache.idx, off)) {
+		case let p: *analysis::symbol =>
+			append(levels, (p.span.start.off: size,
+				p.span.end.off: size))!;
+		case void => void;
+		};
+
+		// L3: whole subunit — start = 0, end = len(data).
+		append(levels, (0z, len(data)))!;
+
+		// Dedup adjacent equal ranges so we don't emit a chain with
+		// no expansion between two levels.
+		let unique: [](size, size) = [];
+		defer free(unique);
+		for (let j = 0z; j < len(levels); j += 1) {
+			if (len(unique) > 0 &&
+				unique[len(unique) - 1].0 == levels[j].0 &&
+				unique[len(unique) - 1].1 == levels[j].1) {
+				continue;
+			};
+			// Each outer level must strictly contain the previous one.
+			if (len(unique) > 0) {
+				const prev = unique[len(unique) - 1];
+				if (levels[j].0 > prev.0 || levels[j].1 < prev.1) {
+					continue;
+				};
+			};
+			append(unique, levels[j])!;
+		};
+
+		if (len(unique) == 0) continue;
+
+		// Build the outermost object first, then nest each inner level.
+		let outer_obj: (json::value | void) = void;
+		for (let j = len(unique); j > 0; j -= 1) {
+			const rng = unique[j - 1];
 			const sp = analysis::byte_to_position(data, doc.buf.line_index,
 				enc, rng.0);
 			const ep = analysis::byte_to_position(data, doc.buf.line_index,
@@ -254,23 +290,28 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 			match (outer_obj) {
 			case let v: json::value =>
 				json::put(&o, "parent", v)!;
-				outer_obj = void;
 			case void => void;
 			};
-			yield o: json::value;
-		case void =>
-			match (outer_obj) {
-			case let v: json::value =>
-				outer_obj = void;
-				yield v;
-			case void =>
-				// No selection range available for this position.
-				continue;
-			};
+			outer_obj = o: json::value;
 		};
-		append(arr, inner)!;
+		match (outer_obj) {
+		case let v: json::value =>
+			append(arr, v)!;
+		case void => void;
+		};
 	};
 	send_array_result(s, r.id, arr);
+};
+
+// Returns the [start, end) byte range of the line containing `off`,
+// without the trailing newline. If `off` is beyond the buffer, clamps.
+fn line_range_around(data: []u8, off: size) (size, size) = {
+	const o = if (off > len(data)) len(data) else off;
+	let s = o;
+	for (s > 0 && data[s - 1] != '\n': u8; s -= 1) void;
+	let e = o;
+	for (e < len(data) && data[e] != '\n': u8; e += 1) void;
+	return (s, e);
 };
 
 // Handles textDocument/documentLink. Emits one DocumentLink per import

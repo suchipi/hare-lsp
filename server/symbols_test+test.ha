@@ -205,3 +205,38 @@ fn sym_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) >= 1);
 };
+
+@test fn selection_range_expands_through_levels() void = {
+	let (s, scan, in_buf, out) = sym_test_server();
+	defer sym_test_cleanup(&s, scan, in_buf, out);
+	// A two-line file: a decl on line 0, blank on line 1.
+	sym_open(&s, "file:///sel.ha", "fn target() void = void;\\n\\n");
+
+	// Cursor on the 't' of "target".
+	const params = `{"textDocument":{"uri":"file:///sel.ha"},"positions":[{"line":0,"character":4}]}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 50.0,
+		method = strings::dup("textDocument/selectionRange")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_selection_range(&s, r);
+	const v = sym_skip_to_response(out, 50.0);
+	defer json::finish(v);
+	const arr = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	assert(len(arr) == 1);
+	// Walk the parent chain — should be at least 3 deep (ident → line/decl → file).
+	let depth = 0u32;
+	let cur = arr[0] as json::object;
+	for (true) {
+		depth += 1;
+		match (json::get(&cur, "parent")) {
+		case let p: *json::value =>
+			cur = *p as json::object;
+		case void => break;
+		};
+	};
+	assert(depth >= 3);
+};
