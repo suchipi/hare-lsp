@@ -6,8 +6,8 @@
 // borrowed reference back to the AST node for richer use later (signature
 // rendering, etc.).
 //
-// The resolver layer (see resolver.ha) uses this index plus the workspace
-// index (step 15) to answer go-to-definition / hover queries.
+// The resolver layer (see resolver.ha) uses this index plus
+// analysis::workspace_index to answer go-to-definition / hover queries.
 
 use hare::ast;
 use hare::lex;

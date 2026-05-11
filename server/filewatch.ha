@@ -6,7 +6,7 @@
 // We use the LSP dynamic registration mechanism to ask the client to watch
 // `**/*.ha` (and `**/*.s`) under each workspace folder, then handle the
 // resulting workspace/didChangeWatchedFiles notifications by invalidating
-// the workspace index (step 15) and republishing diagnostics.
+// the workspace index and republishing diagnostics.
 //
 // The will/did-Create/Rename/Delete notifications carry file URIs; we use
 // them to (a) update our document store for renamed files that we have open,
@@ -57,9 +57,10 @@ export fn register_file_watchers(s: *server) (i64 | void) = {
 };
 
 // Handles workspace/didChangeWatchedFiles. The notification carries an array
-// of {uri, type} where type is 1=Created, 2=Changed, 3=Deleted. For now we
-// simply log; in step 15 the workspace index uses these events to refresh
-// individual files.
+// of {uri, type} where type is 1=Created, 2=Changed, 3=Deleted. Each event
+// is logged at the configured trace level and forwarded to
+// workspace_handle_file_event which refreshes the index entry on the
+// affected file.
 export fn handle_did_change_watched_files(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
 	case let v: json::value => yield v;
@@ -124,15 +125,15 @@ export fn handle_will_create_files(s: *server, r: lsp::request) void = {
 	send_workspace_edit_or_null(s, r.id, void);
 };
 
-// workspace/didCreateFiles notification. Trigger a workspace re-index for
-// the affected modules (lands in step 15); for now we accept silently.
+// workspace/didCreateFiles notification. The workspace index picks up
+// new files lazily on the next watcher event for them; nothing to do here.
 export fn handle_did_create_files(s: *server, n: lsp::notification) void = void;
 
-// workspace/willRenameFiles request. Returns a WorkspaceEdit that updates
-// any `use` import paths whose target was moved. The renames array contains
-// {oldUri, newUri} entries. For files that aren't part of a module path,
-// the empty edit is fine. Full implementation lives next to the workspace
-// index in step 15; for now we return null.
+// workspace/willRenameFiles request. The LSP spec lets us return a
+// WorkspaceEdit that updates `use` import paths whose target was moved.
+// We don't currently rewrite imports — module paths are determined by
+// directory layout, so a single-file rename usually leaves imports
+// intact. Returns null so the client proceeds with the rename.
 export fn handle_will_rename_files(s: *server, r: lsp::request) void = {
 	send_workspace_edit_or_null(s, r.id, void);
 };
@@ -191,9 +192,9 @@ fn rename_open_document(s: *server, old_uri: str, new_uri: str) void = {
 	};
 };
 
-// workspace/willDeleteFiles request. Returns a WorkspaceEdit with
-// modifications to dependent files. We return null for now; step 15 will
-// surface broken-import diagnostics on the affected modules.
+// workspace/willDeleteFiles request. Could return a WorkspaceEdit with
+// modifications to dependent files; for now returns null. Affected
+// modules will show broken-import diagnostics on the next parse.
 export fn handle_will_delete_files(s: *server, r: lsp::request) void = {
 	send_workspace_edit_or_null(s, r.id, void);
 };

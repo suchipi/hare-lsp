@@ -78,8 +78,10 @@ fn symbol_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 	};
 };
 
-// Handles textDocument/documentHighlight. For now we highlight the symbol
-// definition only; full reference walking lands in step 16.
+// Handles textDocument/documentHighlight. Highlights the symbol's
+// declaration span. Highlighting every reference in the file would
+// duplicate handle_references' work; the LSP spec lets the client fall
+// back to references for occurrence highlighting when it wants more.
 export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position_local(r.params)) {
 	case let v: (str, lsp::position) => yield v;
@@ -283,11 +285,10 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 	send_array_result(s, r.id, arr);
 };
 
-// Handles textDocument/documentLink. Emits links for `use foo::bar;`
-// imports — pointing back at the import's target. The actual resolution
-// (mapping use path -> file URI) lands with the workspace index in step 15;
-// for now we emit links with no `target` and rely on documentLink/resolve
-// to fill them in if requested.
+// Handles textDocument/documentLink. Emits one DocumentLink per import
+// statement; the link carries a `data: {ident: [...]}` carrier that
+// handle_document_link_resolve uses to fill in `target` via
+// hare::module::find.
 export fn handle_document_link(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_textdoc_request(r.params)) {
 	case let s: str => yield s;

@@ -818,7 +818,7 @@ fn send_error(s: *server, id: (lsp::id | void), code: lsp::error_code, msg: str)
 };
 
 // Logs a message to stderr. Used for unrecoverable transport-level errors;
-// most user-visible logging goes through window/logMessage (added in step 2).
+// user-visible logging goes through window/logMessage (see server::window).
 fn log_stderr(msg: str) void = {
 	fmt::fprintln(os::stderr, "hare-lsp:", msg)!;
 };

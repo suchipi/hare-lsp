@@ -227,8 +227,9 @@ export fn handle_textdocument_diagnostic(s: *server, r: lsp::request) void = {
 };
 
 // Handles workspace/diagnostic. Returns a "full" report for every open
-// document. We keep this scoped to open documents for now; expanding to
-// the entire workspace lands when the workspace index does (step 15).
+// document. Scope is intentionally open documents only — pulling
+// diagnostics for every file in the workspace on demand would parse
+// each one and is rarely what clients actually want.
 export fn handle_workspace_diagnostic(s: *server, r: lsp::request) void = {
 	let items: []json::value = [];
 	for (let i = 0z; i < len(s.documents); i += 1) {

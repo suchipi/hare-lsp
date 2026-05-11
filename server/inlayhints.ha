@@ -3,13 +3,12 @@
 //
 // Inlay hints. We emit two kinds:
 //   1. Parameter names at call sites. We resolve the callee from the
-//      file's symbol index (cross-file resolution arrives with the
-//      workspace-wide signature cache).
-//   2. Inferred types for `let x = expr` — deferred until step 27 lands
-//      a type-of-expression visitor.
+//      file's symbol index.
+//   2. Inferred types for `let x = expr` — best-effort via
+//      analysis::type_of_expr_at: literals and declared types today.
 //
-// The hint generation is conservative: when in doubt, emit nothing rather
-// than render confusing/wrong hints.
+// The hint generation is conservative: when in doubt, emit nothing
+// rather than render confusing/wrong hints.
 
 use analysis;
 use encoding::json;

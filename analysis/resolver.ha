@@ -10,8 +10,8 @@
 //   * "What identifier text is at this offset?"  ident_at(text, off)
 //   * "Does the file declare a symbol named X?"  find_by_short_name
 //
-// Cross-file resolution (use-import lookup, qualified `mod::name`) lands
-// in step 15 alongside the workspace index.
+// Cross-file resolution lives in server/navigation.ha (which falls back
+// to analysis::workspace_index when this file's index has no match).
 
 use ascii;
 

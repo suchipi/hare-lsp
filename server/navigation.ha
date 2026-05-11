@@ -3,8 +3,9 @@
 //
 // Navigation handlers: hover, definition, type-definition, declaration,
 // implementation. Each tries the open file's symbol index first, then
-// falls back to a workspace-wide lookup. Workspace hits require
-// re-reading and re-parsing the target file (no per-file AST cache yet).
+// falls back to analysis::workspace_index for cross-file targets.
+// Workspace hits read and re-parse the target file on demand (there is
+// no per-file AST cache yet).
 
 use analysis;
 use encoding::json;

@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 //
-// Code actions. Currently provides:
+// Code actions. Provides:
 //   - source.organizeImports: sort + dedupe `use` statements.
-//   - quickfix auto-import: when a diagnostic mentions an unresolved
-//     name that matches a workspace symbol, propose adding `use mod;`.
-//
-// Refactor extract-function and inline-variable are scaffolded out (see
-// the plan) but require expression-level rewriting that depends on
-// step 27's type pass.
 
 use analysis;
 use encoding::json;
