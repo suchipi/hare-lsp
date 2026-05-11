@@ -261,16 +261,7 @@ export fn build_diag_to_lsp(d: build_diagnostic) json::value = {
 	json::set(&o, "source", "hare-lsp/build": json::value)!;
 	json::set(&o, "code", d.kind: json::value)!;
 	json::set(&o, "message", d.message: json::value)!;
-
-	// Tag unused-related diagnostics as Unnecessary so clients can grey
-	// out the code span. Deprecated tags would come from compiler attrs
-	// we don't currently surface.
-	if (strings::contains(d.message, "unused") ||
-		strings::contains(d.message, "unreachable")) {
-		let tags: []json::value = [];
-		append(tags, 1.0: json::value)!;
-		json::put(&o, "tags", tags: json::value)!;
-	};
+	apply_unnecessary_tag_if_match(&o, d.message);
 	return o;
 };
 

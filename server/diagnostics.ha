@@ -143,9 +143,31 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 		json::set(&d, "source", "hare-lsp/parse": json::value)!;
 		json::set(&d, "code", "parse-error": json::value)!;
 		json::set(&d, "message", e.message: json::value)!;
+		apply_unnecessary_tag_if_match(&d, e.message);
 		append(arr, d: json::value)!;
 	};
 	return arr;
+};
+
+// LSP DiagnosticTag values.
+def DIAG_TAG_UNNECESSARY: f64 = 1.0;
+
+// Attaches a `tags: [Unnecessary]` field to a diagnostic object when
+// its message looks like an unused / unreachable / dead-code report.
+// Shared between the build path and the parse path so editors grey
+// out the span consistently regardless of which producer emitted it.
+//
+// We don't currently emit `relatedInformation`: doing so well requires
+// the producer (parser or compiler) to carry secondary source
+// locations alongside each diagnostic, which neither does today. A
+// future revision can plumb that through when the structure exists.
+export fn apply_unnecessary_tag_if_match(d: *json::object, message: str) void = {
+	if (strings::contains(message, "unused") ||
+		strings::contains(message, "unreachable")) {
+		let tags: []json::value = [];
+		append(tags, DIAG_TAG_UNNECESSARY: json::value)!;
+		json::put(d, "tags", tags: json::value)!;
+	};
 };
 
 // Sends textDocument/publishDiagnostics. `diagnostics` is consumed: ownership

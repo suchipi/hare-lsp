@@ -37,7 +37,17 @@ fn uri_to_local_path(uri: str) str = {
 	return strings::dup(uri)!;
 };
 
-// Handles workspace/symbol. Performs a fuzzy substring match on the index.
+// Maximum number of symbols returned in a single workspace/symbol
+// response. When the available match set exceeds this, the response
+// is flagged `isIncomplete: true` (via WorkspaceSymbolList shape) so
+// the client knows to refine.
+def WORKSPACE_SYMBOL_CAP: size = 200;
+
+// Handles workspace/symbol. Performs a fuzzy substring match on the
+// index. The result shape is a WorkspaceSymbolList so we can carry
+// `isIncomplete` when the matches were capped. Polls cancellation
+// every 32 result-building iterations so the user can abandon a slow
+// query.
 export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 	const query_str = match (extract_query(r.params)) {
 	case let s: str => yield s;
@@ -53,29 +63,44 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 		free(arr);
 	};
 
+	let total: size = 0;
+	let cap: size = 0;
+	let cancelled = false;
 	if (len(query_str) == 0) {
-		// Empty query: return everything (cap at 200 to keep responses
-		// snappy).
-		const cap = if (len(s.workspace_index.entries) < 200z) {
-			yield len(s.workspace_index.entries);
-		} else {
-			yield 200z;
-		};
+		total = len(s.workspace_index.entries);
+		cap = if (total < WORKSPACE_SYMBOL_CAP) total else WORKSPACE_SYMBOL_CAP;
 		for (let i = 0z; i < cap; i += 1) {
+			if (i % 32 == 0 && check_cancel(s, r.id)) {
+				cancelled = true;
+				break;
+			};
 			append(arr, encode_workspace_symbol(&s.workspace_index.entries[i]))!;
 		};
 	} else {
 		const matches = analysis::fuzzy_search(&s.workspace_index, query_str);
 		defer free(matches);
-		const cap = if (len(matches) < 200z) len(matches) else 200z;
+		total = len(matches);
+		cap = if (total < WORKSPACE_SYMBOL_CAP) total else WORKSPACE_SYMBOL_CAP;
 		for (let i = 0z; i < cap; i += 1) {
+			if (i % 32 == 0 && check_cancel(s, r.id)) {
+				cancelled = true;
+				break;
+			};
 			append(arr, encode_workspace_symbol(
 				&s.workspace_index.entries[matches[i]]))!;
 		};
 	};
+	if (cancelled) return;
 
-	const result_v: json::value = arr;
+	// Build the WorkspaceSymbolList: { isIncomplete, items }. The list
+	// shape was added in LSP 3.17 and is preferred over the bare-array
+	// response when the server may truncate.
+	let result_obj = json::newobject();
+	json::put(&result_obj, "isIncomplete",
+		(total > cap): json::value)!;
+	json::put(&result_obj, "items", arr: json::value)!;
 	arr_owned = false;
+	const result_v: json::value = result_obj;
 	defer json::finish(result_v);
 	match (lsp::encode_response_result(s.out, r.id, result_v)) {
 	case size => void;

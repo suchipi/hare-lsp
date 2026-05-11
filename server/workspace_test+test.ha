@@ -315,3 +315,74 @@ fn wsfx_rm(path: str) void = {
 	case => void;
 	};
 };
+
+@test fn workspace_symbol_returns_list_shape() void = {
+	let out = memio::dynamic();
+	defer io::close(&out)!;
+	let in_buf = alloc(memio::fixed([]))!;
+	defer free(in_buf);
+	let scan = alloc(bufio::newscanner(in_buf))!;
+	defer { bufio::finish(scan); free(scan); };
+	let s = new(scan, &out);
+	defer finish(&s);
+
+	// Index one fake entry.
+	analysis::index_file(&s.workspace_index, "/x/foo.ha",
+		strings::toutf8("export fn hello() void = void;\n"));
+
+	const r = lsp::request {
+		id = 90.0,
+		method = strings::dup("workspace/symbol")!,
+		params = json::loadstr(`{"query":""}`)!,
+	};
+	defer { free(r.method); json::finish(r.params as json::value); };
+	handle_workspace_symbol(&s, r);
+
+	// Find the response in the output stream.
+	const data = memio::buffer(&out);
+	const text = strings::fromutf8(data)!;
+	// Reply shape carries isIncomplete + items keys.
+	assert(strings::contains(text, `"isIncomplete":false`));
+	assert(strings::contains(text, `"items":`));
+	assert(strings::contains(text, `"hello"`));
+};
+
+@test fn workspace_symbol_isincomplete_when_truncated() void = {
+	let out = memio::dynamic();
+	defer io::close(&out)!;
+	let in_buf = alloc(memio::fixed([]))!;
+	defer free(in_buf);
+	let scan = alloc(bufio::newscanner(in_buf))!;
+	defer { bufio::finish(scan); free(scan); };
+	let s = new(scan, &out);
+	defer finish(&s);
+
+	// Manually inject 250 entries to exceed the 200 cap.
+	for (let i = 0z; i < 250; i += 1) {
+		append(s.workspace_index.entries, analysis::workspace_entry {
+			uri = strings::dup("file:///x.ha")!,
+			path = strings::dup("/x.ha")!,
+			short_name = strings::dup("s")!,
+			full_name = strings::dup("s")!,
+			kind = analysis::symbol_kind::FUNCTION,
+			start_off = 0,
+			end_off = 1,
+			docs = strings::dup("")!,
+			exported = true,
+			module = strings::dup("")!,
+			param_names = [],
+		})!;
+	};
+
+	const r = lsp::request {
+		id = 91.0,
+		method = strings::dup("workspace/symbol")!,
+		params = json::loadstr(`{"query":""}`)!,
+	};
+	defer { free(r.method); json::finish(r.params as json::value); };
+	handle_workspace_symbol(&s, r);
+
+	const data = memio::buffer(&out);
+	const text = strings::fromutf8(data)!;
+	assert(strings::contains(text, `"isIncomplete":true`));
+};

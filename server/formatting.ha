@@ -34,8 +34,8 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
+	const cache = parse_of(doc);
+	const pr = &cache.pr;
 
 	// If parse had errors, we don't attempt formatting; better to leave
 	// the user's source alone than emit a broken rewrite.
@@ -117,8 +117,8 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
+	const cache = parse_of(doc);
+	const pr = &cache.pr;
 	if (len(pr.errors) > 0) {
 		send_array_fmt(s, r.id, []);
 		return;
