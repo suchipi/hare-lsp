@@ -3,7 +3,7 @@
 //
 // Thin VSCode language-client wrapper around the hare-lsp binary.
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 import {
@@ -27,25 +27,51 @@ export function activate(context: vscode.ExtensionContext): void {
       .getConfiguration("hare-lsp")
       .get<string>("trace.server") ?? "off";
 
-  // `hare.path` (the `hare` binary used by the server) is forwarded via
-  // workspace/configuration; the extension itself only needs `hare-lsp.path`
-  // to locate the language server binary.
-  const serverOptions: ServerOptions = {
-    run: {
-      command: serverPath,
-      transport: TransportKind.stdio,
-    },
-    debug: {
-      command: serverPath,
-      transport: TransportKind.stdio,
-    },
-  };
-
   const traceOutputChannel = vscode.window.createOutputChannel("Hare LSP");
   context.subscriptions.push(traceOutputChannel);
   traceOutputChannel.appendLine(
     `[hare-lsp] activate() — serverPath=${serverPath} traceServer=${getTraceServer()}`,
   );
+
+  // Spawn the server ourselves rather than letting vscode-languageclient do
+  // it via the `Executable` shape. That lets us attach explicit listeners on
+  // stderr and the exit event so any crash, abort message, or runtime error
+  // shows up in the Hare LSP output channel instead of being lost to the
+  // ether — vscode's "server crashed N times" message is otherwise useless
+  // for diagnosis.
+  // `hare.path` (the `hare` binary used internally by the server) is
+  // forwarded via workspace/configuration; the extension only needs
+  // `hare-lsp.path` to locate the server binary itself.
+  const serverOptions: ServerOptions = () =>
+    new Promise((resolve, reject) => {
+      const child = spawn(serverPath, [], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      child.on("error", (err) => {
+        traceOutputChannel.appendLine(
+          `[hare-lsp] spawn error: ${err.message}`,
+        );
+        reject(err);
+      });
+      child.stderr?.on("data", (chunk: Buffer | string) => {
+        const text = typeof chunk === "string"
+          ? chunk
+          : chunk.toString("utf8");
+        // Server stderr lines come without our [hare-lsp] prefix; tag
+        // them so they're distinguishable from extension-side logs and
+        // from vscode-languageclient's [Trace - ...] entries.
+        for (const line of text.split(/\r?\n/)) {
+          if (line.length === 0) continue;
+          traceOutputChannel.appendLine(`[server-stderr] ${line}`);
+        }
+      });
+      child.on("exit", (code, signal) => {
+        traceOutputChannel.appendLine(
+          `[hare-lsp] server process exited code=${code} signal=${signal}`,
+        );
+      });
+      resolve(child);
+    });
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
