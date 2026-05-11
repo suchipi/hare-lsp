@@ -89,6 +89,28 @@ export function activate(context: vscode.ExtensionContext): void {
       // uses workspace/configuration.
       hare: vscode.workspace.getConfiguration("hare"),
     },
+    middleware: {
+      // The server emits `[[name]]` doc-comment refs as markdown links
+      // whose href is a `command:hare-lsp.openLocation?...` URI. VSCode
+      // refuses to invoke `command:` URIs from hover content unless the
+      // MarkdownString is marked trusted, so re-wrap the contents here.
+      provideHover: async (document, position, token, next) => {
+        const hover = await next(document, position, token);
+        if (!hover) return hover;
+        const trust = (
+          c: vscode.MarkdownString | vscode.MarkedString,
+        ): vscode.MarkdownString | vscode.MarkedString => {
+          if (c instanceof vscode.MarkdownString) {
+            const md = new vscode.MarkdownString(c.value, c.supportThemeIcons);
+            md.isTrusted = { enabledCommands: ["hare-lsp.openLocation"] };
+            md.supportHtml = c.supportHtml;
+            return md;
+          }
+          return c;
+        };
+        return new vscode.Hover(hover.contents.map(trust), hover.range);
+      },
+    },
     outputChannel: traceOutputChannel,
     traceOutputChannel,
   };
@@ -176,6 +198,23 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.Uri.parse(uri),
           new vscode.Position(position.line, position.character),
           vsLocations,
+        );
+      },
+    ),
+    // Invoked from `[[name]]` markdown links in hover content. The server
+    // resolved the ref to a (uri, position) and encoded that as JSON in
+    // the command's query string; we open the file and reveal the range.
+    vscode.commands.registerCommand(
+      "hare-lsp.openLocation",
+      async (uri: string, position: { line: number; character: number }) => {
+        const target = vscode.Uri.parse(uri);
+        const pos = new vscode.Position(position.line, position.character);
+        const editor = await vscode.window.showTextDocument(target, {
+          selection: new vscode.Range(pos, pos),
+        });
+        editor.revealRange(
+          new vscode.Range(pos, pos),
+          vscode.TextEditorRevealType.InCenterIfOutsideViewport,
         );
       },
     ),

@@ -64,7 +64,9 @@ export fn parse_recover(text: []u8, path: str) parse_result = {
 	let src = memio::fixed(text);
 	let scan = bufio::newscanner(&src);
 	defer bufio::finish(&scan);
-	let lexer = lex::init(&scan, path);
+	// COMMENTS so doc comments above decls populate ast::decl.docs;
+	// hover renders them below the signature.
+	let lexer = lex::init(&scan, path, lex::flag::COMMENTS);
 	defer lex::finish(&lexer);
 
 	// Phase 1: imports.

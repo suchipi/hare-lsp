@@ -456,6 +456,288 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(uri, "lspmodd"));
 };
 
+@test fn hover_on_type_reference_shows_doc_comment() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// `build_diagnostic` is declared with a doc comment, then referenced
+	// in another decl as `d: build_diagnostic`. Hovering on the reference
+	// should show the type's doc comment, not just the signature.
+	const src = "// One diagnostic emitted by the compiler.\\nexport type build_diagnostic = struct { x: int };\\nfn f(d: build_diagnostic) void = void;\\n";
+	nav_open(&s, "file:///bd.ha", src);
+
+	// Line 2 is `fn f(d: build_diagnostic) void = void;`. The token
+	// `build_diagnostic` starts at column 8.
+	const params = `{"textDocument":{"uri":"file:///bd.ha"},"position":{"line":2,"character":12}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 470.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 470.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "build_diagnostic"));
+	assert(strings::contains(value, "One diagnostic emitted by the compiler."));
+};
+
+@test fn hover_doc_comment_renders_resolved_ref_as_command_link() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// `target` references `[[helper]]` in its doc comment. Both decls
+	// live in the same file, so resolution should hit the local index
+	// and emit a markdown link with a `command:hare-lsp.openLocation` URI.
+	const src = "// See [[helper]] for the implementation.\\nexport fn target() void = void;\\nexport fn helper() void = void;\\n";
+	nav_open(&s, "file:///r.ha", src);
+
+	const params = `{"textDocument":{"uri":"file:///r.ha"},"position":{"line":1,"character":12}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 480.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 480.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "[helper](command:hare-lsp.openLocation?"));
+	// The link's URI argument should encode the open document's URI.
+	assert(strings::contains(value, "file%3A%2F%2F%2Fr.ha"));
+};
+
+@test fn hover_doc_comment_renders_unresolved_ref_as_code() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// `nowhere` is not declared anywhere; the ref should fall back to
+	// inline code rather than a broken link.
+	const src = "// See [[nowhere]] for details.\\nexport fn target() void = void;\\n";
+	nav_open(&s, "file:///u.ha", src);
+
+	const params = `{"textDocument":{"uri":"file:///u.ha"},"position":{"line":1,"character":12}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 481.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 481.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "`nowhere`"));
+	assert(!strings::contains(value, "command:"));
+};
+
+@test fn hover_const_match_init_uses_yielded_case_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// Mirrors `const c1 = match (...) { case let i: size => yield i;
+	// case => return void; };`. Only the size case yields a value; the
+	// default diverges, so the inferred type is just `size`.
+	const src = "fn caller() void = { const c1 = match (2z: (size | void)) { case let i: size => yield i; case => return; }; };\\n";
+	nav_open(&s, "file:///mb.ha", src);
+
+	// Position on `c1` (line 0, column 27 -> just after "const ").
+	const params = `{"textDocument":{"uri":"file:///mb.ha"},"position":{"line":0,"character":28}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 490.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 490.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "const c1"));
+	assert(strings::contains(value, ": size"));
+	// The diverging default case must not contribute `void` to the type.
+	assert(!strings::contains(value, "size | void"));
+	// The init source must NOT be echoed when the type was successfully
+	// inferred — we want a clean "const c1: size", not "const c1 = match ...".
+	assert(!strings::contains(value, "match"));
+};
+
+@test fn hover_const_match_init_unions_multiple_yields() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// Two cases each yield a different type. Result should be the union.
+	const src = "fn caller() void = { const c2 = match (2z: (size | void)) { case let i: size => yield i; case => yield 0; }; };\\n";
+	nav_open(&s, "file:///mu.ha", src);
+
+	const params = `{"textDocument":{"uri":"file:///mu.ha"},"position":{"line":0,"character":28}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 491.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 491.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "const c2"));
+	assert(strings::contains(value, "size"));
+	assert(strings::contains(value, "int"));
+	// Either order is fine, but it must look like a union.
+	assert(strings::contains(value, "|"));
+};
+
+@test fn hover_on_use_module_shows_readme() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// `bufio` is a stdlib module with a README at
+	// /usr/local/src/hare/stdlib/bufio/README. Hovering on the module
+	// name in a `use` statement should show its contents.
+	nav_open(&s, "file:///mb1.ha", "use bufio;\\nfn f() void = void;\\n");
+
+	const params = `{"textDocument":{"uri":"file:///mb1.ha"},"position":{"line":0,"character":6}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 500.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 500.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "module bufio"));
+	// The README starts with "bufio: buffered I/O primitives" — assert
+	// the descriptive text from the actual file is present.
+	assert(strings::contains(value, "buffered I/O primitives"));
+};
+
+@test fn hover_on_double_colon_acts_like_first_segment() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// `use unix::poll;` — hovering on the `::` should resolve to
+	// `unix` (the first segment), not `unix::poll`.
+	nav_open(&s, "file:///mb2.ha",
+		"use unix::poll;\\nfn f() void = void;\\n");
+
+	// "use unix::poll;" — `::` is at columns 8-9.
+	const params = `{"textDocument":{"uri":"file:///mb2.ha"},"position":{"line":0,"character":8}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 501.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 501.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	// Header should be `module unix`, NOT `module unix::poll`.
+	assert(strings::contains(value, "module unix\n"));
+	assert(!strings::contains(value, "module unix::poll"));
+};
+
+@test fn hover_on_second_segment_resolves_full_path() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// `use unix::poll;` — hovering on `poll` should resolve to
+	// `unix::poll`, not just `unix`.
+	nav_open(&s, "file:///mb4.ha",
+		"use unix::poll;\\nfn f() void = void;\\n");
+
+	// "use unix::poll;" — `poll` starts at column 10.
+	const params = `{"textDocument":{"uri":"file:///mb4.ha"},"position":{"line":0,"character":11}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 503.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 503.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "module unix::poll"));
+};
+
+@test fn hover_on_qualifier_in_code_shows_module_readme() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// In `bufio::newscanner(...)`, hovering on `bufio` should show the
+	// bufio README, not fall through to a (missing) decl lookup.
+	nav_open(&s, "file:///mb3.ha",
+		"use bufio;\\nfn f() void = { bufio::newscanner(0); };\\n");
+
+	// Position on the second `bufio` (in the body, line 1).
+	// Source: "fn f() void = { bufio::newscanner(0); };"
+	//                          ^ char ~16
+	const params = `{"textDocument":{"uri":"file:///mb3.ha"},"position":{"line":1,"character":18}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 502.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 502.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "module bufio"));
+	assert(strings::contains(value, "buffered I/O"));
+};
+
 // --- fixture helpers ---
 
 fn nav_write(path: str, text: str) (bool | fs::error) = {

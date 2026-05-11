@@ -451,41 +451,12 @@ export fn handle_document_link_resolve(s: *server, r: lsp::request) void = {
 type ast_ident_strs = []str;
 
 fn resolve_module_target(s: *server, ident: []str) (str | void) = {
-	// Build a colon-separated HAREPATH: workspace folder paths followed
-	// by the system stdlib + third-party dirs.
-	let parts: []str = [];
-	let owned_parts: []str = []; // parts allocated by us, freed at end
-	defer {
-		free(parts);
-		for (let i = 0z; i < len(owned_parts); i += 1) {
-			free(owned_parts[i]);
-		};
-		free(owned_parts);
+	const (dir, sset) = match (find_module(s, ident)) {
+	case let pair: (str, module::srcset) => yield pair;
+	case void => return void;
 	};
-	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
-		const path = lsp::uri_decode_path(s.workspace_folders[i].uri);
-		append(owned_parts, path)!;
-		append(parts, path)!;
-	};
-	append(parts, "/usr/local/src/hare/stdlib")!;
-	append(parts, "/usr/local/src/hare/third-party")!;
-	const harepath = strings::join(":", parts...)!;
-	defer free(harepath);
-
-	// Build the cache directory in our repo's .tmp/ rather than ~/.cache.
-	const ctx = module::context {
-		harepath = harepath,
-		harecache = "",
-		tags = [],
-	};
-
-	const result = match (module::find(&ctx, ident: ast::ident)) {
-	case let pair: (str, module::srcset) =>
-		yield pair;
-	case module::error =>
-		return void;
-	};
-	const (dir, sset) = result;
+	// `dir` is borrowed from a static buffer in module::find; do NOT
+	// free it. The srcset IS owned and must be cleaned up.
 	let owned_set = sset;
 	defer module::finish_srcset(&owned_set);
 	if (len(sset.ha) == 0) return void;
@@ -505,6 +476,42 @@ fn resolve_module_target(s: *server, ident: []str) (str | void) = {
 	};
 	defer free(full);
 	return strings::concat("file://", full)!;
+};
+
+// Resolves a module ident to its on-disk directory using the workspace
+// folders + stdlib + third-party as HAREPATH. Returns the directory path
+// (BORROWED — do not free; backed by a static buffer inside module::find
+// that is overwritten on the next call) and the module's srcset (OWNED —
+// caller must call module::finish_srcset). On miss, returns void.
+export fn find_module(s: *server, ident: []str) ((str, module::srcset) | void) = {
+	let parts: []str = [];
+	let owned_parts: []str = [];
+	defer {
+		free(parts);
+		for (let i = 0z; i < len(owned_parts); i += 1) {
+			free(owned_parts[i]);
+		};
+		free(owned_parts);
+	};
+	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
+		const path = lsp::uri_decode_path(s.workspace_folders[i].uri);
+		append(owned_parts, path)!;
+		append(parts, path)!;
+	};
+	append(parts, "/usr/local/src/hare/stdlib")!;
+	append(parts, "/usr/local/src/hare/third-party")!;
+	const harepath = strings::join(":", parts...)!;
+	defer free(harepath);
+
+	const ctx = module::context {
+		harepath = harepath,
+		harecache = "",
+		tags = [],
+	};
+	match (module::find(&ctx, ident: ast::ident)) {
+	case let pair: (str, module::srcset) => return pair;
+	case module::error => return void;
+	};
 };
 
 

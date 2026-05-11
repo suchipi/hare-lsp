@@ -41,6 +41,19 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		});
 
 	const data = analysis::bytes(&doc.buf);
+
+	// Module-name hover: a `use foo::bar;` statement, a `::`
+	// separator, or a code-position qualifier like `bufio` in
+	// `bufio::newscanner`. If the cursor lands on a resolvable module
+	// path, render its README and return.
+	match (try_module_hover(s, doc, data, off)) {
+	case let md: str =>
+		defer free(md);
+		send_module_hover_response(s, doc, data, off, r.id, md);
+		return;
+	case void => void;
+	};
+
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) => yield r;
 	case void =>
@@ -94,7 +107,7 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	defer free(sig);
 	defer free(docs);
 
-	const md = build_hover_markdown(sig, docs);
+	const md = build_hover_markdown(s, doc, sig, docs);
 	defer free(md);
 
 	let result = json::newobject();
@@ -118,6 +131,49 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	json::put(&result, "range", range)!;
 
 	send_with_finish(s, r.id, result: json::value);
+};
+
+// Sends a hover response whose contents is `md` and whose range is the
+// best textual range we can compute around `off`. We don't have the
+// module-path span pre-computed, so widen to the surrounding `ident::ident`
+// run; if that fails, fall back to the single ident at `off`.
+fn send_module_hover_response(s: *server, doc: *document, data: []u8,
+		off: size, id: lsp::id, md: str) void = {
+	const enc = position_encoding(s);
+	let start_off = off;
+	let end_off = off;
+	match (path_run_at(data, off)) {
+	case let r: (size, size) =>
+		start_off = r.0;
+		end_off = r.1;
+	case void =>
+		match (analysis::ident_at(data, off)) {
+		case let r: (size, size) =>
+			start_off = r.0;
+			end_off = r.1;
+		case void => void;
+		};
+	};
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index,
+		enc, start_off);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index,
+		enc, end_off);
+	let result = json::newobject();
+	let contents = json::newobject();
+	json::set(&contents, "kind", "markdown": json::value)!;
+	json::set(&contents, "value", md: json::value)!;
+	json::put(&result, "contents", contents)!;
+	let range = json::newobject();
+	let s_obj = json::newobject();
+	json::put(&s_obj, "line", start_pos.line: f64)!;
+	json::put(&s_obj, "character", start_pos.character: f64)!;
+	let e_obj = json::newobject();
+	json::put(&e_obj, "line", end_pos.line: f64)!;
+	json::put(&e_obj, "character", end_pos.character: f64)!;
+	json::put(&range, "start", s_obj)!;
+	json::put(&range, "end", e_obj)!;
+	json::put(&result, "range", range)!;
+	send_with_finish(s, id, result: json::value);
 };
 
 // Handles textDocument/definition (and declaration; same per-file behavior
@@ -394,8 +450,10 @@ fn render_decl_signature(d: *ast::decl) str = {
 	case let f: ast::decl_func =>
 		// Re-emit through unparse::decl with the body stripped. The
 		// upstream renderer skips the `= body` block when f.body is
-		// null.
+		// null. Clear docs so the comment isn't baked into the code
+		// fence — build_hover_markdown appends it as prose below.
 		let copy = *d;
+		copy.docs = "";
 		copy.decl = ast::decl_func {
 			symbol = f.symbol,
 			ident = f.ident,
@@ -409,6 +467,7 @@ fn render_decl_signature(d: *ast::decl) str = {
 		};
 	case let g: ast::decl_global =>
 		let copy = *d;
+		copy.docs = "";
 		copy.decl = ast::decl_global {
 			is_const = g.is_const,
 			is_threadlocal = g.is_threadlocal,
@@ -424,7 +483,9 @@ fn render_decl_signature(d: *ast::decl) str = {
 	case =>
 		// Type alias / assert — keep as-is. For a type alias, the
 		// RHS *is* the type definition, so we want to show it.
-		match (unparse::decl(&buf, &unparse::syn_nowrap, d)) {
+		let copy = *d;
+		copy.docs = "";
+		match (unparse::decl(&buf, &unparse::syn_nowrap, &copy)) {
 		case size => void;
 		case => return strings::dup("<unparse error>")!;
 		};
@@ -432,17 +493,47 @@ fn render_decl_signature(d: *ast::decl) str = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
-fn build_hover_markdown(sig: str, docs: str) str = {
+fn build_hover_markdown(s: *server, doc: *document, sig: str, docs: str) str = {
+	const cleaned = clean_doc_comment(docs);
+	defer free(cleaned);
+	return build_hover_markdown_raw(s, doc, sig, cleaned);
+};
+
+// Same as build_hover_markdown but assumes `body` is already clean
+// markdown (no doc-comment leading-space stripping). Used for README
+// hovers where the source is raw markdown.
+export fn build_hover_markdown_raw(s: *server, doc: *document,
+		sig: str, body: str) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
 	memio::concat(&buf, "```hare\n")!;
 	memio::concat(&buf, sig)!;
 	memio::concat(&buf, "\n```")!;
-	if (len(docs) > 0) {
+	if (len(body) > 0) {
+		const linked = render_doc_refs(s, doc, body);
+		defer free(linked);
 		memio::concat(&buf, "\n\n")!;
-		memio::concat(&buf, docs)!;
+		memio::concat(&buf, linked)!;
 	};
 	return strings::dup(memio::string(&buf)!)!;
+};
+
+// Normalises a Hare doc-comment string for markdown display. Each line
+// produced by hare::lex::comment is the source line minus the leading `//`,
+// so it typically begins with one space (e.g. ` One diagnostic.\n`). We
+// strip that single leading space per line and trim trailing whitespace so
+// the markdown body reads as plain prose. Caller frees.
+fn clean_doc_comment(docs: str) str = {
+	if (len(docs) == 0) return strings::dup("")!;
+	const trimmed = strings::trimsuffix(docs, "\n");
+	const lines = strings::split(trimmed, "\n")!;
+	defer free(lines);
+	let cleaned: []str = [];
+	defer free(cleaned);
+	for (let i = 0z; i < len(lines); i += 1) {
+		append(cleaned, strings::trimprefix(lines[i], " "))!;
+	};
+	return strings::join("\n", cleaned...)!;
 };
 
 fn parse_text_document_position(p: (json::value | void)) ((str, lsp::position) | void) = {
@@ -908,8 +999,115 @@ fn infer_type_from_init(srv: *server, doc: *document,
 		return infer_unwrapped_init(srv, doc, p: *ast::expr);
 	case let p: ast::error_assert_expr =>
 		return infer_unwrapped_init(srv, doc, p: *ast::expr);
+	case let m: ast::match_expr =>
+		return infer_match_expr_type(srv, doc, &m);
 	case => return void;
 	};
+};
+
+// Best-effort type for a match expression: the union of each case's
+// contributed value type, deduplicated. Cases whose body always diverges
+// (return / abort) contribute nothing. Returns void if no case yields a
+// usable type, in which case the caller falls back to echoing the source.
+fn infer_match_expr_type(srv: *server, doc: *document,
+		m: *ast::match_expr) (str | void) = {
+	let parts: []str = [];
+	defer free_str_slice_nav(parts);
+	for (let i = 0z; i < len(m.cases); i += 1) {
+		const mc = &m.cases[i];
+		match (infer_case_value_type(srv, doc, mc)) {
+		case let t: str =>
+			if (!contains_str(parts, t)) {
+				append(parts, t)!;
+			} else {
+				free(t);
+			};
+		case void => void;
+		};
+	};
+	if (len(parts) == 0) return void;
+	if (len(parts) == 1) return strings::dup(parts[0])!;
+	const joined = strings::join(" | ", parts...)!;
+	defer free(joined);
+	return strings::concat("(", joined, ")")!;
+};
+
+// Returns the value type a single match case contributes back to the
+// surrounding match expression, or void if the case always diverges
+// (e.g. `return foo;`). Caller frees.
+fn infer_case_value_type(srv: *server, doc: *document,
+		mc: *ast::match_case) (str | void) = {
+	if (len(mc.exprs) == 0) return void;
+	// Walk the body. An explicit `yield` short-circuits the case's
+	// contribution. A `return` (anywhere we can see it at the top
+	// level) means this path diverges. Otherwise the implicit-yield
+	// rule applies: the type of the last expression.
+	for (let i = 0z; i < len(mc.exprs); i += 1) {
+		const e = mc.exprs[i];
+		match (e.expr) {
+		case ast::return_expr =>
+			return void;
+		case let y: ast::yield_expr =>
+			return type_of_yield_value(srv, doc, mc, y);
+		case => void;
+		};
+	};
+	return type_of_case_value_expr(srv, doc, mc, mc.exprs[len(mc.exprs) - 1]);
+};
+
+// Type of a `yield <value>`'s value, or void for bare `yield` (which
+// contributes void in Hare's type rules).
+fn type_of_yield_value(srv: *server, doc: *document,
+		mc: *ast::match_case, y: ast::yield_expr) (str | void) = {
+	const v = match (y.value) {
+	case let v: *ast::expr => yield v;
+	case null => return strings::dup("void")!;
+	};
+	return type_of_case_value_expr(srv, doc, mc, v);
+};
+
+// Best-effort type for an expression that flows out of a match case body.
+// Recognises references to the case's own binding (`yield i` where the
+// case is `case let i: T`) and otherwise reuses infer_type_from_init for
+// literals / calls / casts.
+fn type_of_case_value_expr(srv: *server, doc: *document,
+		mc: *ast::match_case, e: *ast::expr) (str | void) = {
+	match (e.expr) {
+	case let a: ast::access_expr =>
+		match (a) {
+		case let id: ast::access_identifier =>
+			if (len(id) == 1 && len(mc.name) > 0
+					&& id[0] == mc.name) {
+				return render_case_binding_type(mc);
+			};
+		case => void;
+		};
+	case => void;
+	};
+	return infer_type_from_init(srv, doc, e);
+};
+
+// Renders the case's binding type (`case let i: T` -> "T"). For a default
+// case or a case without an explicit type, returns void.
+fn render_case_binding_type(mc: *ast::match_case) (str | void) = {
+	const t = match (mc._type) {
+	case let t: *ast::_type => yield t;
+	case null => return void;
+	};
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
+	case size => void;
+	case => return void;
+	};
+	return strings::dup(memio::string(&buf)!)!;
+};
+
+fn contains_str(haystack: []str, needle: str) bool = {
+	for (let i = 0z; i < len(haystack); i += 1) {
+		if (haystack[i] == needle) return true;
+	};
+	return false;
 };
 
 // Infers the type of an init expression after stripping any error-flagged
@@ -934,7 +1132,19 @@ fn infer_unwrapped_init(srv: *server, doc: *document,
 fn type_label_for_literal(l: ast::literal_expr) (str | void) = {
 	match (l) {
 	case let p: ast::plain_literal =>
-		return strings::dup(unparse::builtin_type(p.storage))!;
+		// unparse::builtin_type aborts on the untyped const storages
+		// (ICONST, FCONST, RCONST). They have no lexical name; show
+		// the closest concrete type so hover stays useful.
+		switch (p.storage) {
+		case ast::builtin_type::ICONST =>
+			return strings::dup("int")!;
+		case ast::builtin_type::FCONST =>
+			return strings::dup("f64")!;
+		case ast::builtin_type::RCONST =>
+			return strings::dup("rune")!;
+		case =>
+			return strings::dup(unparse::builtin_type(p.storage))!;
+		};
 	case ast::array_literal =>
 		return strings::dup("[_]_")!;
 	case ast::struct_literal =>
