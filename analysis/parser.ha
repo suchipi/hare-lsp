@@ -81,12 +81,10 @@ export fn parse_recover(text: []u8, path: str) parse_result = {
 	// Phase 2: decls in a loop.
 	for (true) {
 		// EOF check, plus a pre-flight that the next token is plausibly
-		// the start of a declaration. Hare's stdlib parse::want has a
-		// bug where, on a non-matching token with multiple alternatives,
-		// it constructs an error message via mkloc twice and then
-		// double-unlexes — aborting the program. By gating on
-		// is_decl_boundary here we keep parse::decl off the buggy path
-		// for clearly-malformed input.
+		// the start of a declaration. Gating on is_decl_boundary lets
+		// us surface an "expected declaration" diagnostic at the bad
+		// token's location instead of whatever deeper error parse::decl
+		// would surface from inside the attrs loop or want chain.
 		const tok = match (parse::peek(&lexer)) {
 		case let t: lex::token =>
 			yield t;

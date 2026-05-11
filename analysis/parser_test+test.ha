@@ -80,6 +80,25 @@ export fn ok() void = void;
 	assert(r.completely_failed);
 };
 
+// Regression for the stdlib `parse::want` double-unlex abort. Inputs like
+// `export <name>` (where the attrs loop falls through and want is then
+// called with multiple alternatives — CONST/LET/DEF/TYPE/FN — none of
+// which match a NAME) used to crash the process via the stdlib assertion
+// "attempted to unlex more than one token". With our vendored hare::parse
+// overlay, want recovers cleanly and parse_recover reports an error.
+@test fn want_with_alternatives_doesnt_abort() void = {
+	const inputs = [
+		"export bar;",
+		"@test bar;",
+		"export @test bar;",
+	];
+	for (let i = 0z; i < len(inputs); i += 1) {
+		let r = parse_recover(strings::toutf8(inputs[i]), "test.ha");
+		defer finish_parse_result(&r);
+		assert(len(r.errors) >= 1);
+	};
+};
+
 @test fn many_decls_with_one_error_in_middle() void = {
 	const src = `export fn a() void = void;
 export fn b() void = void;

@@ -27,7 +27,7 @@ check-deps:
 		exit 1; \
 	fi
 
-hare-lsp: $(shell find cmd lsp server analysis -name '*.ha' 2>/dev/null)
+hare-lsp: $(shell find cmd lsp server analysis hare -name '*.ha' 2>/dev/null)
 	mkdir -p .cache
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) build $(HAREFLAGS) -o hare-lsp ./cmd/hare-lsp
 
