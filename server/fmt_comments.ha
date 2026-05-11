@@ -126,3 +126,86 @@ export fn has_in_range(c: *comment_cursor, low: size, high: size) bool = {
 	};
 	return false;
 };
+
+// A sorted list of byte offsets, each pointing one byte AFTER a `\n`
+// that begins a blank-line gap in the source. A "blank line" here
+// means at least one `\n\n` sequence outside string / rune / raw-
+// string / line-comment content. Used by builders to preserve user-
+// authored blank lines between items.
+export type blank_lines = []size;
+
+// Scans `data` and returns the offsets of every blank-line separator.
+// Specifically: for each maximal run of `\n` characters whose count is
+// >= 2 (and which lies outside a literal), the offset of the SECOND
+// `\n` in the run is recorded. `blank_between(prev_end, next_start)`
+// returns true iff at least one such offset falls in
+// `(prev_end, next_start)`. Caller frees with `free()`.
+export fn collect_blank_lines(data: []u8) blank_lines = {
+	let out: []size = [];
+	let i = 0z;
+	for (i < len(data); i += 1) {
+		const b = data[i];
+		switch (b) {
+		case '"': u8 =>
+			i += 1;
+			for (i < len(data) && data[i] != '"': u8; i += 1) {
+				if (data[i] == '\\': u8 && i + 1 < len(data)) {
+					i += 1;
+				};
+			};
+		case '\'': u8 =>
+			i += 1;
+			for (i < len(data) && data[i] != '\'': u8; i += 1) {
+				if (data[i] == '\\': u8 && i + 1 < len(data)) {
+					i += 1;
+				};
+			};
+		case '`': u8 =>
+			i += 1;
+			for (i < len(data) && data[i] != '`': u8; i += 1) void;
+		case '/': u8 =>
+			if (i + 1 < len(data) && data[i + 1] == '/': u8) {
+				// Skip rest of line; the `\n` itself stays
+				// because we want to detect a following blank.
+				let end = i + 2;
+				for (end < len(data) && data[end] != '\n': u8;
+						end += 1) void;
+				i = end - 1;
+			};
+		case '\n': u8 =>
+			// Count consecutive newlines starting here.
+			let j = i + 1;
+			let count = 1z;
+			for (j < len(data) && data[j] == '\n': u8; j += 1) {
+				count += 1;
+			};
+			if (count >= 2) {
+				// Record the offset just AFTER the second \n.
+				append(out, i + 2)!;
+			};
+			// Advance past the run minus one (loop's i += 1
+			// will land us at the first byte after the run).
+			i = j - 1;
+		case => void;
+		};
+	};
+	return out;
+};
+
+// Returns true iff at least one blank-line offset from `bl` lies in
+// the open interval (prev_end, next_start). Linear scan; the input is
+// sorted so a binary search would be a future micro-optimization.
+export fn blank_between(
+	bl: blank_lines,
+	prev_end: size,
+	next_start: size,
+) bool = {
+	if (next_start <= prev_end) return false;
+	for (let i = 0z; i < len(bl); i += 1) {
+		const off = bl[i];
+		if (off <= prev_end) continue;
+		if (off >= next_start) return false;
+		return true;
+	};
+	return false;
+};

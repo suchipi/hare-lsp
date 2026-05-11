@@ -50,8 +50,14 @@ export type doc_concat = struct { items: []doc };
 // after a comment must move to the next line).
 export type doc_comment = struct { text: str };
 
+// Renders to "" in flat mode, `text` in broken mode. Used for the
+// trailing-comma-when-wrapped pattern in arg / field / member lists.
+// Has flat width 0 (it disappears in flat mode), so it doesn't
+// contribute to fit decisions.
+export type doc_if_broken = struct { text: str };
+
 export type doc = (doc_text | doc_line | doc_hardline | doc_group |
-	doc_nest | doc_concat | doc_comment);
+	doc_nest | doc_concat | doc_comment | doc_if_broken);
 
 // Constructors. Each dup's any input strings so the caller doesn't
 // have to worry about ownership.
@@ -72,6 +78,8 @@ export fn nest(delta: i32, inner: doc) doc = doc_nest {
 export fn concat(items: []doc) doc = doc_concat { items = items };
 
 export fn comment(text: str) doc = doc_comment { text = strings::dup(text)! };
+
+export fn if_broken(s: str) doc = doc_if_broken { text = strings::dup(s)! };
 
 // Frees all memory owned by `d` (recursively).
 export fn doc_finish(d: *doc) void = {
@@ -96,6 +104,8 @@ export fn doc_finish(d: *doc) void = {
 		free(c.items);
 	case let cm: doc_comment =>
 		free(cm.text);
+	case let ib: doc_if_broken =>
+		free(ib.text);
 	};
 };
 
@@ -110,6 +120,7 @@ fn fits_flat(d: *doc) bool = {
 	case doc_line => return true;
 	case doc_hardline => return false;
 	case doc_comment => return false;
+	case doc_if_broken => return true;
 	case let g: doc_group =>
 		for (let i = 0z; i < len(g.items); i += 1) {
 			if (!fits_flat(&g.items[i])) return false;
@@ -140,6 +151,8 @@ fn flat_width(d: *doc) size = {
 		return WIDTH_INFINITY;
 	case doc_comment =>
 		return WIDTH_INFINITY;
+	case doc_if_broken =>
+		return 0z;
 	case let g: doc_group =>
 		return sum_flat_width(g.items);
 	case let n: doc_nest =>
@@ -173,16 +186,23 @@ export fn pretty(
 ) (size | io::error) = {
 	let cur_col = 0z;
 	let written = 0z;
-	render(out, d, render_mode::BROKEN, max_col, indent, &cur_col, &written)?;
+	render(out, d, render_mode::BROKEN, max_col, indent, 0z,
+		&cur_col, &written)?;
 	return written;
 };
 
+// `tail_width` is the flat-width of everything that will be rendered
+// after `d` and BEFORE the next break in flat mode. Used by
+// `doc_group` so its fit decision accounts for trailing text — e.g.
+// a group `(args)` followed by `?.0)` knows to break when `(args)`
+// fits but `(args)?.0)` doesn't.
 fn render(
 	out: io::handle,
 	d: *doc,
 	mode: render_mode,
 	max_col: size,
 	indent: i32,
+	tail_width: size,
 	cur_col: *size,
 	written: *size,
 ) (void | io::error) = {
@@ -199,32 +219,121 @@ fn render(
 	case doc_hardline =>
 		emit_break(out, indent, cur_col, written)?;
 	case let g: doc_group =>
-		// Decide flat-or-broken based on remaining columns.
+		// Decide flat-or-broken based on remaining columns,
+		// counting both the group's own flat width AND the
+		// `tail_width` of text that will follow on the same line
+		// in flat mode.
 		const remaining = if (*cur_col >= max_col) 0z
 			else max_col - *cur_col;
 		const w = sum_flat_width(g.items);
-		const child_mode = if (w <= remaining && fits_all(g.items))
+		const total = if (w == WIDTH_INFINITY) WIDTH_INFINITY
+			else if (tail_width == WIDTH_INFINITY) WIDTH_INFINITY
+			else if (w > WIDTH_INFINITY - tail_width) WIDTH_INFINITY
+			else w + tail_width;
+		const child_mode = if (total <= remaining && fits_all(g.items))
 			render_mode::FLAT
 		else
 			render_mode::BROKEN;
-		for (let i = 0z; i < len(g.items); i += 1) {
-			render(out, &g.items[i], child_mode, max_col, indent,
-				cur_col, written)?;
-		};
+		render_items(out, g.items, child_mode, max_col, indent,
+			tail_width, cur_col, written)?;
 	case let n: doc_nest =>
 		render(out, n.inner, mode, max_col, indent + n.delta,
-			cur_col, written)?;
+			tail_width, cur_col, written)?;
 	case let c: doc_concat =>
-		for (let i = 0z; i < len(c.items); i += 1) {
-			render(out, &c.items[i], mode, max_col, indent,
-				cur_col, written)?;
-		};
+		render_items(out, c.items, mode, max_col, indent,
+			tail_width, cur_col, written)?;
 	case let cm: doc_comment =>
-		// Comments always start with "// " and end at a hard break.
-		emit_str(out, "// ", cur_col, written)?;
+		// `cm.text` is the raw text after `//` from the source and
+		// includes any leading whitespace the user wrote (typically
+		// one space). Emit `//` with no extra space so we don't
+		// double up.
+		emit_str(out, "//", cur_col, written)?;
 		emit_str(out, cm.text, cur_col, written)?;
 		emit_break(out, indent, cur_col, written)?;
+	case let ib: doc_if_broken =>
+		switch (mode) {
+		case render_mode::FLAT => void;
+		case render_mode::BROKEN =>
+			emit_str(out, ib.text, cur_col, written)?;
+		};
 	};
+};
+
+// Renders a sequence of doc items, threading the right `tail_width`
+// for each one — namely, the flat-width of the items that come AFTER
+// it in the sequence, up to the first hardline / comment / softline
+// (which would break the line anyway).
+fn render_items(
+	out: io::handle,
+	items: []doc,
+	mode: render_mode,
+	max_col: size,
+	indent: i32,
+	outer_tail: size,
+	cur_col: *size,
+	written: *size,
+) (void | io::error) = {
+	for (let i = 0z; i < len(items); i += 1) {
+		const my_tail = tail_after(items, i + 1, mode, outer_tail);
+		render(out, &items[i], mode, max_col, indent, my_tail,
+			cur_col, written)?;
+	};
+};
+
+// Computes the flat-width of items[from..] up to the first item that
+// always breaks the line (hardline, comment, or — when mode is
+// BROKEN — a softline). If we can render past every item without
+// hitting such a break, `outer_tail` is added on as the tail beyond
+// this sequence.
+fn tail_after(
+	items: []doc,
+	from: size,
+	mode: render_mode,
+	outer_tail: size,
+) size = {
+	let total = 0z;
+	for (let i = from; i < len(items); i += 1) {
+		match (items[i]) {
+		case let t: doc_text =>
+			total += len(t.content);
+		case let l: doc_line =>
+			switch (mode) {
+			case render_mode::FLAT =>
+				total += len(l.flat);
+			case render_mode::BROKEN =>
+				return total;
+			};
+		case doc_hardline =>
+			return total;
+		case doc_comment =>
+			return total;
+		case doc_if_broken =>
+			switch (mode) {
+			case render_mode::FLAT => void;
+			case render_mode::BROKEN =>
+				// In broken mode an if_broken's text is
+				// always on a previous line by the time
+				// we'd be checking tail_width — but for
+				// safety, count it.
+				void;
+			};
+		case let g: doc_group =>
+			const w = sum_flat_width(g.items);
+			if (w == WIDTH_INFINITY) return WIDTH_INFINITY;
+			total += w;
+		case let n: doc_nest =>
+			const w = flat_width(n.inner);
+			if (w == WIDTH_INFINITY) return WIDTH_INFINITY;
+			total += w;
+		case let c: doc_concat =>
+			const w = sum_flat_width(c.items);
+			if (w == WIDTH_INFINITY) return WIDTH_INFINITY;
+			total += w;
+		};
+	};
+	if (outer_tail == WIDTH_INFINITY) return WIDTH_INFINITY;
+	if (total > WIDTH_INFINITY - outer_tail) return WIDTH_INFINITY;
+	return total + outer_tail;
 };
 
 fn fits_all(items: []doc) bool = {

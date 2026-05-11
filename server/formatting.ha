@@ -47,8 +47,10 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	// Build the doc tree from the AST + comment cursor.
 	const cs = collect_comments(data);
 	defer finish_comments(cs);
+	const bl = collect_blank_lines(data);
+	defer free(bl);
 	let cursor = comment_cursor { comments = cs, pos = 0 };
-	let d = build_subunit_doc(&pr.subunit, &cursor, len(data));
+	let d = build_subunit_doc(&pr.subunit, &cursor, bl, data);
 	defer doc_finish(&d);
 
 	let buf = memio::dynamic();
@@ -169,13 +171,15 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	const decl_range_end = pr.subunit.decls[last_idx: size].loc.end.off: size;
 	const cs = collect_comments(data);
 	defer finish_comments(cs);
+	const bl = collect_blank_lines(data);
+	defer free(bl);
 	let cursor = comment_cursor { comments = cs, pos = 0 };
 	// Skip past any comments before the first selected decl — those
 	// don't belong in the range edit.
 	const _ = pop_before(&cursor, decl_range_start);
 
 	let d = build_decls_range_doc(&pr.subunit, first_idx: size,
-		last_idx: size, &cursor);
+		last_idx: size, &cursor, bl, data);
 	defer doc_finish(&d);
 
 	let buf = memio::dynamic();

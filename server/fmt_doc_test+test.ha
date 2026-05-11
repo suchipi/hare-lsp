@@ -64,15 +64,18 @@ use strings;
 };
 
 @test fn fmt_doc_comment_forces_break_and_renders() void = {
+	// Caller passes the verbatim post-`//` text, including any
+	// leading space they want — `pretty` emits `//` followed by
+	// the text without inserting its own space, so the output
+	// preserves the source's exact comment spacing.
 	let items: []doc = alloc([], 3)!;
 	append(items, text("before"))!;
-	append(items, comment("hi"))!;
+	append(items, comment(" hi"))!;
 	append(items, text("after"))!;
 	let d = concat(items);
 	defer doc_finish(&d);
 	const out = pretty_str(&d, 80, 0)!;
 	defer free(out);
-	// comment_doc emits "// " + text + newline-break-to-indent
 	assert(strings::contains(out, "// hi"));
 	assert(strings::contains(out, "before"));
 	assert(strings::contains(out, "after"));
@@ -90,6 +93,33 @@ use strings;
 	const out = pretty_str(&d, 80, 0)!;
 	defer free(out);
 	assert(out == "a\nb");
+};
+
+@test fn fmt_doc_if_broken_disappears_in_flat_renders_in_broken() void = {
+	// In flat mode, if_broken(",") emits nothing.
+	let flat_items: []doc = alloc([], 4)!;
+	append(flat_items, text("("))!;
+	append(flat_items, text("x"))!;
+	append(flat_items, if_broken(","))!;
+	append(flat_items, text(")"))!;
+	let flat_d = group(flat_items);
+	defer doc_finish(&flat_d);
+	const flat_out = pretty_str(&flat_d, 80, 0)!;
+	defer free(flat_out);
+	assert(flat_out == "(x)");
+
+	// In broken mode (forced via hardline), if_broken(",") emits ",".
+	let br_items: []doc = alloc([], 5)!;
+	append(br_items, text("("))!;
+	append(br_items, hardline())!;
+	append(br_items, text("x"))!;
+	append(br_items, if_broken(","))!;
+	append(br_items, text(")"))!;
+	let br_d = group(br_items);
+	defer doc_finish(&br_d);
+	const br_out = pretty_str(&br_d, 80, 0)!;
+	defer free(br_out);
+	assert(br_out == "(\nx,)");
 };
 
 @test fn fmt_doc_softline_flat_in_flat_mode() void = {

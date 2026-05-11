@@ -49,6 +49,49 @@ use strings;
 	assert(cs[2].line == 3);
 };
 
+@test fn fmt_blank_lines_detects_single_blank() void = {
+	const src = strings::toutf8("a;\n\nb;\n");
+	const bl = collect_blank_lines(src);
+	defer free(bl);
+	assert(len(bl) == 1);
+	// "a;\n" ends at offset 3; the second \n is at offset 3, so the
+	// recorded offset is 4 (one past the second \n).
+	// "a" "; " "\n" "\n" "b" -> offsets 0,1,2,3,4
+	assert(bl[0] == 4);
+};
+
+@test fn fmt_blank_lines_collapses_multiple_blanks() void = {
+	const src = strings::toutf8("a;\n\n\n\nb;\n");
+	const bl = collect_blank_lines(src);
+	defer free(bl);
+	// Four \n in a row → still only one blank-line marker.
+	assert(len(bl) == 1);
+};
+
+@test fn fmt_blank_lines_ignores_blanks_inside_raw_string() void = {
+	const src = strings::toutf8("let s = `\n\nstuff`; let t = 1;\n");
+	const bl = collect_blank_lines(src);
+	defer free(bl);
+	assert(len(bl) == 0);
+};
+
+@test fn fmt_blank_between_open_interval() void = {
+	const src = strings::toutf8("a;\n\nb;\n");
+	const bl = collect_blank_lines(src);
+	defer free(bl);
+	// Between byte 1 (the ;) and byte 5 (the b after blanks).
+	assert(blank_between(bl, 1, 5));
+	// Same range but next_start before the blank marker should be false.
+	assert(!blank_between(bl, 1, 3));
+};
+
+@test fn fmt_blank_between_no_source_blank_returns_false() void = {
+	const src = strings::toutf8("a;\nb;\n");
+	const bl = collect_blank_lines(src);
+	defer free(bl);
+	assert(!blank_between(bl, 0, 4));
+};
+
 @test fn fmt_comments_pop_before_advances_cursor() void = {
 	const src = strings::toutf8("// a\n// b\nfn f() = 0;\n");
 	let cs = collect_comments(src);
