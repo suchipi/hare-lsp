@@ -20,8 +20,8 @@ A Language Server Protocol implementation for the [Hare programming language](ht
 - Hare v0.26.0 on `$PATH` (override with the `hare.path` setting).
 - [hare-json](https://git.sr.ht/~sircmpwn/hare-json) installed at `/usr/local/src/hare/third-party/encoding/json/`. Install with:
   ```sh
-  git clone https://git.sr.ht/~sircmpwn/hare-json /tmp/hare-json
-  sudo make -C /tmp/hare-json install
+  d=$(mktemp -d) && git clone https://git.sr.ht/~sircmpwn/hare-json "$d/hare-json"
+  sudo make -C "$d/hare-json" install
   ```
 
 ### Build
