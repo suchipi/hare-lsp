@@ -31,6 +31,10 @@ export type workspace_entry = struct {
 	// Doc comment, if any.
 	docs: str,
 	exported: bool,
+	// The module this entry lives in, derived from the basename of
+	// the file's containing directory. For /repo/foo/bar.ha this is
+	// "foo". Matches the Hare convention that directory == module name.
+	module: str,
 };
 
 // The workspace index.
@@ -54,6 +58,7 @@ export fn finish_workspace_index(idx: *workspace_index) void = {
 		free(idx.entries[i].short_name);
 		free(idx.entries[i].full_name);
 		free(idx.entries[i].docs);
+		free(idx.entries[i].module);
 	};
 	free(idx.entries);
 	for (let i = 0z; i < len(idx.indexed_files); i += 1) {
@@ -73,6 +78,7 @@ export fn drop_file(idx: *workspace_index, path_str: str) void = {
 			free(idx.entries[i].short_name);
 			free(idx.entries[i].full_name);
 			free(idx.entries[i].docs);
+			free(idx.entries[i].module);
 			delete(idx.entries[i]);
 		} else {
 			i += 1;
@@ -96,6 +102,7 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 	defer finish_index(&fi);
 
 	const uri = strings::concat("file://", file_path)!;
+	const module = module_from_path(file_path);
 	for (let i = 0z; i < len(fi.symbols); i += 1) {
 		const sym = &fi.symbols[i];
 		append(idx.entries, workspace_entry {
@@ -108,10 +115,29 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 			end_off = sym.span.end.off: u32,
 			docs = strings::dup(sym.docs)!,
 			exported = sym.exported,
+			module = strings::dup(module)!,
 		})!;
 	};
 	free(uri);
+	free(module);
 	append(idx.indexed_files, strings::dup(file_path)!)!;
+};
+
+// Returns the module-name basename of the directory containing the given
+// file. For "/repo/foo/bar.ha" returns "foo". For a file in the workspace
+// root (no parent directory in the path) returns "".
+fn module_from_path(file_path: str) str = {
+	const last_slash = match (strings::rindex(file_path, '/')) {
+	case let i: size => yield i;
+	case void => return strings::dup("")!;
+	};
+	if (last_slash == 0) return strings::dup("")!;
+	const dir = strings::sub(file_path, 0, last_slash);
+	const prev = match (strings::rindex(dir, '/')) {
+	case let i: size => yield i + 1;
+	case void => yield 0z;
+	};
+	return strings::dup(strings::sub(dir, prev, strings::end))!;
 };
 
 // Recursively walks `root` looking for *.ha files; calls index_file on each.
@@ -190,6 +216,43 @@ export fn find_first_by_short_name(idx: *workspace_index, name: str) (*workspace
 	for (let i = 0z; i < len(idx.entries); i += 1) {
 		if (idx.entries[i].short_name == name) {
 			return &idx.entries[i];
+		};
+	};
+	return void;
+};
+
+// Returns the first entry matching (module, short_name). Used for
+// qualified references like `mod::name`.
+export fn find_in_module(idx: *workspace_index, module: str, name: str) (*workspace_entry | void) = {
+	for (let i = 0z; i < len(idx.entries); i += 1) {
+		const e = &idx.entries[i];
+		if (e.short_name == name && e.module == module) {
+			return e;
+		};
+	};
+	return void;
+};
+
+// Returns the first entry matching short_name whose `module` is one of
+// the given imported module names. Used for unqualified references in a
+// file whose `use` list narrows the candidate set.
+//
+// `imported_modules` is a slice of module short names (e.g. ["io",
+// "strings"]). If empty, this function returns void — callers fall back
+// to [[find_first_by_short_name]] only as a last resort.
+export fn find_in_imports(
+	idx: *workspace_index,
+	imported_modules: []str,
+	name: str,
+) (*workspace_entry | void) = {
+	if (len(imported_modules) == 0) return void;
+	for (let i = 0z; i < len(idx.entries); i += 1) {
+		const e = &idx.entries[i];
+		if (e.short_name != name) continue;
+		for (let j = 0z; j < len(imported_modules); j += 1) {
+			if (e.module == imported_modules[j]) {
+				return e;
+			};
 		};
 	};
 	return void;

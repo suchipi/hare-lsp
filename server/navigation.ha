@@ -59,19 +59,23 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	let sig: str = "";
 	let docs: str = "";
 	let found_local = false;
-	match (analysis::find_by_short_name(&cache.idx, ident_str)) {
-	case let p: *analysis::symbol =>
-		match (find_decl_by_name(&cache.pr.subunit, ident_str)) {
-		case let i: size =>
-			sig = render_decl_signature(&cache.pr.subunit.decls[i]);
-			docs = strings::dup(p.docs)!;
-			found_local = true;
+	const qualifier_peek = qualifier_prefix_at(data, ident_range.0);
+	defer free(qualifier_peek);
+	if (len(qualifier_peek) == 0) {
+		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
+		case let p: *analysis::symbol =>
+			match (find_decl_by_name(&cache.pr.subunit, ident_str)) {
+			case let i: size =>
+				sig = render_decl_signature(&cache.pr.subunit.decls[i]);
+				docs = strings::dup(p.docs)!;
+				found_local = true;
+			case void => void;
+			};
 		case void => void;
 		};
-	case void => void;
 	};
 	if (!found_local) {
-		match (workspace_hover(s, ident_str)) {
+		match (workspace_hover(s, doc, data, ident_range.0, ident_str)) {
 		case let r: (str, str) =>
 			sig = r.0;
 			docs = r.1;
@@ -154,18 +158,22 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	};
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
 	const cache = parse_of(doc);
-	match (analysis::find_by_short_name(&cache.idx, ident_str)) {
-	case let p: *analysis::symbol =>
-		if (p.kind != analysis::symbol_kind::TYPE) {
-			send_null(s, r.id);
+	const qualifier_peek = qualifier_prefix_at(data, ident_range.0);
+	defer free(qualifier_peek);
+	if (len(qualifier_peek) == 0) {
+		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
+		case let p: *analysis::symbol =>
+			if (p.kind != analysis::symbol_kind::TYPE) {
+				send_null(s, r.id);
+				return;
+			};
+			send_location(s, r.id, uri, p.span, doc);
 			return;
+		case void => void;
 		};
-		send_location(s, r.id, uri, p.span, doc);
-		return;
-	case void => void;
 	};
-	// Workspace fallback: find a TYPE entry with this short name.
-	match (analysis::find_first_by_short_name(&s.workspace_index, ident_str)) {
+	// Module-aware workspace fallback (TYPE only).
+	match (workspace_lookup_aware(s, doc, data, ident_range.0, ident_str)) {
 	case let e: *analysis::workspace_entry =>
 		if (e.kind != analysis::symbol_kind::TYPE) {
 			send_null(s, r.id);
@@ -203,14 +211,21 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 	};
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
 	const cache = parse_of(doc);
-	match (analysis::find_by_short_name(&cache.idx, ident_str)) {
-	case let p: *analysis::symbol =>
-		send_location(s, r.id, uri, p.span, doc);
-		return;
-	case void => void;
+	// Bare local lookups only apply if the reference is not qualified —
+	// if the user wrote `mod::name`, the local file's index never has
+	// `name` (it would be in `mod`).
+	const qualifier_peek = qualifier_prefix_at(data, ident_range.0);
+	defer free(qualifier_peek);
+	if (len(qualifier_peek) == 0) {
+		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
+		case let p: *analysis::symbol =>
+			send_location(s, r.id, uri, p.span, doc);
+			return;
+		case void => void;
+		};
 	};
-	// Workspace fallback.
-	match (analysis::find_first_by_short_name(&s.workspace_index, ident_str)) {
+	// Module-aware workspace fallback.
+	match (workspace_lookup_aware(s, doc, data, ident_range.0, ident_str)) {
 	case let e: *analysis::workspace_entry =>
 		send_location_for_entry(s, r.id, e);
 	case void =>
@@ -257,12 +272,13 @@ fn send_location_for_entry(s: *server, id: lsp::id, e: *analysis::workspace_entr
 	};
 };
 
-// Looks for ident_str in the workspace index; if found, re-parses the
-// owning file, locates the matching decl, and returns (sig, docs) — both
-// freshly allocated. Returns void if no workspace entry matches or the
-// file can't be read.
-fn workspace_hover(s: *server, ident_str: str) ((str, str) | void) = {
-	const entry = match (analysis::find_first_by_short_name(&s.workspace_index, ident_str)) {
+// Looks for ident_str in the workspace index using module-aware
+// disambiguation. If found, re-parses the owning file, locates the
+// matching decl, and returns (sig, docs) — both freshly allocated.
+// Returns void if no workspace entry matches or the file can't be read.
+fn workspace_hover(s: *server, doc: *document, data: []u8,
+		ident_start: size, ident_str: str) ((str, str) | void) = {
+	const entry = match (workspace_lookup_aware(s, doc, data, ident_start, ident_str)) {
 	case let e: *analysis::workspace_entry => yield e;
 	case void => return void;
 	};
@@ -404,6 +420,85 @@ fn parse_text_document_position(p: (json::value | void)) ((str, lsp::position) |
 	case => return void;
 	};
 	return (uri, pos);
+};
+
+// Looks at the bytes immediately before the ident at off and returns the
+// qualifier prefix (everything before "::") as a freshly-allocated string,
+// or "" if the ident is bare.
+fn qualifier_prefix_at(data: []u8, ident_start: size) str = {
+	// We're looking for "...::ident" — the "::" must be directly before
+	// ident_start (no whitespace between qualifier and "::").
+	if (ident_start < 2) return strings::dup("")!;
+	if (data[ident_start - 1] != ':': u8 || data[ident_start - 2] != ':': u8) {
+		return strings::dup("")!;
+	};
+	// Walk back over the qualifier ident bytes.
+	let q_end = ident_start - 2;
+	let q_start = q_end;
+	for (q_start > 0; q_start -= 1) {
+		const b = data[q_start - 1];
+		if (!is_ident_byte_nav(b)) break;
+	};
+	if (q_start == q_end) return strings::dup("")!;
+	return strings::dup(strings::fromutf8(data[q_start..q_end])!)!;
+};
+
+fn is_ident_byte_nav(b: u8) bool = {
+	if (b >= 'a': u8 && b <= 'z': u8) return true;
+	if (b >= 'A': u8 && b <= 'Z': u8) return true;
+	if (b >= '0': u8 && b <= '9': u8) return true;
+	return b == '_': u8;
+};
+
+// Collects the short-name modules imported in the file's `use` block. For
+// `use io;` adds "io"; for `use foo::bar;` adds "bar" (the last segment).
+// Caller frees the slice and each string.
+fn collect_imported_module_names(su: *ast::subunit) []str = {
+	let out: []str = [];
+	for (let i = 0z; i < len(su.imports); i += 1) {
+		const id = su.imports[i].ident;
+		if (len(id) == 0) continue;
+		append(out, strings::dup(id[len(id) - 1])!)!;
+	};
+	return out;
+};
+
+fn free_str_slice_nav(s: []str) void = {
+	for (let i = 0z; i < len(s); i += 1) {
+		free(s[i]);
+	};
+	free(s);
+};
+
+// Module-aware workspace lookup. Tries in priority order:
+//   1. Qualifier present  -> find_in_module(qualifier, name)
+//   2. find_in_imports(file's imports, name)
+//   3. find_first_by_short_name (last-resort fallback)
+fn workspace_lookup_aware(
+	s: *server, doc: *document, data: []u8,
+	ident_start: size, ident_str: str,
+) (*analysis::workspace_entry | void) = {
+	const qualifier = qualifier_prefix_at(data, ident_start);
+	defer free(qualifier);
+	if (len(qualifier) > 0) {
+		match (analysis::find_in_module(&s.workspace_index, qualifier, ident_str)) {
+		case let e: *analysis::workspace_entry => return e;
+		case void => void;
+		};
+		// Qualifier was given but no match — don't silently fall back
+		// to a different module, that's a real miss.
+		return void;
+	};
+	// Bare name: rank by the open file's imports.
+	const cache = parse_of(doc);
+	const imports = collect_imported_module_names(&cache.pr.subunit);
+	defer free_str_slice_nav(imports);
+	match (analysis::find_in_imports(&s.workspace_index, imports, ident_str)) {
+	case let e: *analysis::workspace_entry => return e;
+	case void => void;
+	};
+	// Last-resort: any match in the workspace.
+	return analysis::find_first_by_short_name(&s.workspace_index, ident_str);
 };
 
 fn send_null(s: *server, id: lsp::id) void = {

@@ -279,6 +279,101 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(value, "answer"));
 };
 
+@test fn definition_disambiguates_by_imported_module() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// Two modules both declare `init`. We want imports of mod_a to win.
+	const path_a = ".tmp/lspmoda/init.ha";
+	const path_b = ".tmp/lspmodb/init.ha";
+	const text = "export fn init() void = void;\n";
+	nav_write_dir(".tmp/lspmoda");
+	nav_write_dir(".tmp/lspmodb");
+	let _ = match (nav_write(path_a, text)) {
+	case bool => yield true;
+	case => abort("cannot write");
+	};
+	let _ = match (nav_write(path_b, text)) {
+	case bool => yield true;
+	case => abort("cannot write");
+	};
+	defer nav_rm(path_a);
+	defer nav_rm(path_b);
+	analysis::index_file(&s.workspace_index, path_a, strings::toutf8(text));
+	analysis::index_file(&s.workspace_index, path_b, strings::toutf8(text));
+
+	// caller.ha imports lspmoda only.
+	nav_open(&s, "file:///caller.ha",
+		"use lspmoda;\\n\\nfn caller() void = init();\\n");
+
+	// Position on `init` in caller.ha.
+	const params = `{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":2,"character":21}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 450.0,
+		method = strings::dup("textDocument/definition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_definition(&s, r);
+
+	const v = skip_to_response(out, 450.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const uri = *(json::get(&result, "uri") as *json::value) as str;
+	// Should resolve to mod-a, not mod-b.
+	assert(strings::contains(uri, "lspmoda"));
+	assert(!strings::contains(uri, "lspmodb"));
+};
+
+@test fn definition_resolves_qualified_reference() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const path_a = ".tmp/lspmodc/init.ha";
+	const path_b = ".tmp/lspmodd/init.ha";
+	const text = "export fn init() void = void;\n";
+	nav_write_dir(".tmp/lspmodc");
+	nav_write_dir(".tmp/lspmodd");
+	let _ = match (nav_write(path_a, text)) {
+	case bool => yield true;
+	case => abort("cannot write");
+	};
+	let _ = match (nav_write(path_b, text)) {
+	case bool => yield true;
+	case => abort("cannot write");
+	};
+	defer nav_rm(path_a);
+	defer nav_rm(path_b);
+	analysis::index_file(&s.workspace_index, path_a, strings::toutf8(text));
+	analysis::index_file(&s.workspace_index, path_b, strings::toutf8(text));
+
+	// caller writes `lspmodd::init()` — a qualified reference.
+	// Despite lspmodc also having `init`, the qualifier must win.
+	nav_open(&s, "file:///caller2.ha",
+		"fn caller() void = lspmodd::init();\\n");
+
+	// Position on `init` in caller2.ha — right after `::`.
+	// "fn caller() void = lspmodd::init();" — `init` is cols 28-31.
+	const params = `{"textDocument":{"uri":"file:///caller2.ha"},"position":{"line":0,"character":30}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 451.0,
+		method = strings::dup("textDocument/definition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_definition(&s, r);
+
+	const v = skip_to_response(out, 451.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const uri = *(json::get(&result, "uri") as *json::value) as str;
+	assert(strings::contains(uri, "lspmodd"));
+};
+
 // --- fixture helpers ---
 
 fn nav_write(path: str, text: str) (bool | fs::error) = {
@@ -286,6 +381,12 @@ fn nav_write(path: str, text: str) (bool | fs::error) = {
 	defer io::close(f)!;
 	io::writeall(f, strings::toutf8(text))!;
 	return true;
+};
+
+fn nav_write_dir(path: str) void = {
+	match (os::mkdir(path, 0o755)) {
+	case => void;
+	};
 };
 
 fn nav_rm(path: str) void = {
