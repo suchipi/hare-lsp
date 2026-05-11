@@ -17,6 +17,52 @@ export fn answer() int = 42;
 export fn ask() int = answer();
 `;
 
+// Hover on a stdlib-qualified call (`bufio::newscanner`). The server lazily
+// indexes the imported module from $HAREPATH / default install paths.
+@test fn e2e_hover_on_stdlib_qualified_call() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `use bufio;
+export fn main() void = {
+	let _ = bufio::newscanner;
+};
+`;
+	const did_open = build_did_open("file:///stdlib_hover.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `newscanner` in `bufio::newscanner`. Line 2, char 17.
+	const hover_req = `{"jsonrpc":"2.0","id":400,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///stdlib_hover.ha"},"position":{"line":2,"character":17}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 400.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value => yield *p;
+	case void =>
+		fmt::fatalf("e2e: stdlib hover missing result: {}", text);
+	};
+	const result_obj = match (result) {
+	case let o: json::object => yield o;
+	case =>
+		fmt::fatalf("e2e: stdlib hover returned null — bufio::newscanner unresolved. body={}",
+			text);
+	};
+	const contents = (*(json::get(&result_obj, "contents") as *json::value)) as json::object;
+	const md = (*(json::get(&contents, "value") as *json::value)) as str;
+	assert(strings::contains(md, "newscanner"),
+		"hover should mention the identifier");
+};
+
 // Hover on a local `let` binding inside a function body. Before this was
 // supported, the handler only looked at top-level decls and returned null.
 @test fn e2e_hover_on_local_let_binding() void = {

@@ -87,6 +87,14 @@ export type server = struct {
 	// Workspace-wide symbol index.
 	workspace_index: analysis::workspace_index,
 
+	// Symbol index for Hare's stdlib and third-party modules, populated
+	// lazily on first reference. Lookups consult this after
+	// `workspace_index` so user code can shadow stdlib symbols if needed.
+	stdlib_index: analysis::workspace_index,
+	// Module identifiers (joined with "::") that have already been
+	// scanned into stdlib_index, so we don't re-index on every hover.
+	indexed_stdlib_modules: []str,
+
 	// LRU cache of disk-file parses, used by cross-file features
 	// (workspace_hover, type-hierarchy subtypes, references workspace
 	// scan, rename workspace scan) so a cursor that triggers repeated
@@ -135,6 +143,8 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	negotiated_encoding = analysis::encoding::UTF16,
 	documents = [],
 	workspace_index = analysis::new_workspace_index(),
+	stdlib_index = analysis::new_workspace_index(),
+	indexed_stdlib_modules = [],
 	file_parse_cache = new_file_parse_cache(),
 };
 
@@ -179,6 +189,11 @@ export fn finish(s: *server) void = {
 	};
 	free(s.documents);
 	analysis::finish_workspace_index(&s.workspace_index);
+	analysis::finish_workspace_index(&s.stdlib_index);
+	for (let i = 0z; i < len(s.indexed_stdlib_modules); i += 1) {
+		free(s.indexed_stdlib_modules[i]);
+	};
+	free(s.indexed_stdlib_modules);
 	finish_file_parse_cache(&s.file_parse_cache);
 };
 

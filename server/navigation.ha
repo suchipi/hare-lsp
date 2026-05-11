@@ -450,6 +450,48 @@ fn collect_imported_module_names(su: *ast::subunit) []str = {
 	return out;
 };
 
+// Like `collect_imported_module_names` but returns the full module identifier
+// ("unix::poll") rather than just the last segment. Used to drive stdlib
+// directory lookups, which need the full subpath.
+fn collect_imported_module_paths(su: *ast::subunit) []str = {
+	let out: []str = [];
+	for (let i = 0z; i < len(su.imports); i += 1) {
+		const id = su.imports[i].ident;
+		if (len(id) == 0) continue;
+		append(out, join_module_ident(id))!;
+	};
+	return out;
+};
+
+// Finds the full module identifier for an import whose last segment matches
+// `qualifier` ("poll" -> "unix::poll" if such an import exists). Returns
+// the empty string when nothing matches; caller frees in that case too
+// since the result is always allocated.
+fn full_module_for_qualifier(su: *ast::subunit, qualifier: str) str = {
+	for (let i = 0z; i < len(su.imports); i += 1) {
+		const id = su.imports[i].ident;
+		if (len(id) == 0) continue;
+		if (id[len(id) - 1] != qualifier) continue;
+		return join_module_ident(id);
+	};
+	return strings::dup("")!;
+};
+
+fn join_module_ident(id: ast::ident) str = {
+	let out: []u8 = [];
+	for (let i = 0z; i < len(id); i += 1) {
+		if (i > 0) {
+			append(out, ':': u8)!;
+			append(out, ':': u8)!;
+		};
+		const seg = strings::toutf8(id[i]);
+		for (let j = 0z; j < len(seg); j += 1) {
+			append(out, seg[j])!;
+		};
+	};
+	return strings::fromutf8(out)!;
+};
+
 fn free_str_slice_nav(s: []str) void = {
 	for (let i = 0z; i < len(s); i += 1) {
 		free(s[i]);
@@ -472,8 +514,22 @@ fn workspace_lookup_aware(
 		case let e: *analysis::workspace_entry => return e;
 		case void => void;
 		};
-		// Qualifier was given but no match — don't silently fall back
-		// to a different module, that's a real miss.
+		// Workspace miss — try resolving against stdlib/third-party,
+		// lazily indexing the named module the first time we see it.
+		// The qualifier we see is the last segment of the use path
+		// (e.g. "poll" for `use unix::poll;`), so we also try the
+		// fully-qualified module identifier when the open file's
+		// imports point to a multi-segment path ending in `qualifier`.
+		const cache = parse_of(doc);
+		const full = full_module_for_qualifier(&cache.pr.subunit, qualifier);
+		defer free(full);
+		const lookup_module = if (len(full) > 0) full else qualifier;
+		if (ensure_stdlib_module_indexed(s, lookup_module)) {
+			match (analysis::find_in_module(&s.stdlib_index, qualifier, ident_str)) {
+			case let e: *analysis::workspace_entry => return e;
+			case void => void;
+			};
+		};
 		return void;
 	};
 	// Bare name: rank by the open file's imports.
@@ -484,8 +540,22 @@ fn workspace_lookup_aware(
 	case let e: *analysis::workspace_entry => return e;
 	case void => void;
 	};
-	// Last-resort: any match in the workspace.
-	return analysis::find_first_by_short_name(&s.workspace_index, ident_str);
+	// Ensure each import is indexed in stdlib, then try matching.
+	const full_imports = collect_imported_module_paths(&cache.pr.subunit);
+	defer free_str_slice_nav(full_imports);
+	for (let i = 0z; i < len(full_imports); i += 1) {
+		const _ = ensure_stdlib_module_indexed(s, full_imports[i]);
+	};
+	match (analysis::find_in_imports(&s.stdlib_index, imports, ident_str)) {
+	case let e: *analysis::workspace_entry => return e;
+	case void => void;
+	};
+	// Last-resort: any match in the workspace, then stdlib.
+	match (analysis::find_first_by_short_name(&s.workspace_index, ident_str)) {
+	case let e: *analysis::workspace_entry => return e;
+	case void => void;
+	};
+	return analysis::find_first_by_short_name(&s.stdlib_index, ident_str);
 };
 
 fn send_null(s: *server, id: lsp::id) void = {
