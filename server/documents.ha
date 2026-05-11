@@ -298,10 +298,9 @@ fn apply_content_change(s: *server, doc: *document, change: json::value) void = 
 	invalidate_parse_cache(doc);
 };
 
-// Returns the negotiated position encoding (currently always UTF16; updated
-// once initialize negotiation lands).
+// Returns the position encoding negotiated at initialize.
 export fn position_encoding(s: *server) analysis::encoding = {
-	return analysis::encoding::UTF16;
+	return s.negotiated_encoding;
 };
 
 // Handles textDocument/didClose.

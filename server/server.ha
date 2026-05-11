@@ -76,6 +76,11 @@ export type server = struct {
 	// User-configured server settings.
 	config: config,
 
+	// Position encoding negotiated at initialize. LSP defaults to
+	// UTF-16; we'll pick UTF-8 if the client supports it (better for
+	// non-ASCII files) or fall back to UTF-16 otherwise.
+	negotiated_encoding: analysis::encoding,
+
 	// Open documents, keyed by URI.
 	documents: []document,
 
@@ -120,6 +125,7 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	next_registration_seq = 0,
 	client_capabilities = void,
 	config = default_config(),
+	negotiated_encoding = analysis::encoding::UTF16,
 	documents = [],
 	workspace_index = analysis::new_workspace_index(),
 };
@@ -504,9 +510,10 @@ fn handle_initialize(s: *server, r: lsp::request) void = {
 		extract_init_param_trace(s, &o);
 		extract_init_param_capabilities(s, &o);
 		extract_init_param_workspace_folders(s, &o);
+		extract_init_param_position_encodings(s, &o);
 	};
 
-	const result = match (build_initialize_result()) {
+	const result = match (build_initialize_result(s)) {
 	case let v: json::value => yield v;
 	case nomem =>
 		send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
@@ -522,7 +529,7 @@ fn handle_initialize(s: *server, r: lsp::request) void = {
 	s.state = server_state::INITIALIZING;
 };
 
-fn build_initialize_result() (json::value | nomem) = {
+fn build_initialize_result(s: *server) (json::value | nomem) = {
 	let r = json::newobject();
 	let ok = false;
 	defer if (!ok) json::finish(r);
@@ -530,6 +537,14 @@ fn build_initialize_result() (json::value | nomem) = {
 	let caps = json::newobject();
 	let caps_ok = false;
 	defer if (!caps_ok) json::finish(caps);
+
+	// Echo the negotiated position encoding back to the client.
+	const enc_str = switch (s.negotiated_encoding) {
+	case analysis::encoding::UTF8 => yield "utf-8";
+	case analysis::encoding::UTF16 => yield "utf-16";
+	case analysis::encoding::UTF32 => yield "utf-32";
+	};
+	json::set(&caps, "positionEncoding", enc_str: json::value)?;
 
 	// Text document sync: incremental, with willSave/willSaveWaitUntil/save.
 	let tds = json::newobject();
@@ -742,6 +757,53 @@ fn extract_init_param_workspace_folders(s: *server, o: *json::object) void = {
 		name = strings::dup("")!,
 	})!;
 	set_workspace_folders(s, folders);
+};
+
+// Reads params.capabilities.general.positionEncodings (an array of
+// strings like ["utf-16", "utf-8"]) and picks the preferred encoding.
+// UTF-8 wins when both are offered (better for non-ASCII performance);
+// otherwise we keep the default UTF-16.
+fn extract_init_param_position_encodings(s: *server, o: *json::object) void = {
+	const caps = match (json::get(o, "capabilities")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case => return;
+		};
+	case => return;
+	};
+	const general = match (json::get(&caps, "general")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case => return;
+		};
+	case => return;
+	};
+	const arr = match (json::get(&general, "positionEncodings")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let a: []json::value => yield a;
+		case => return;
+		};
+	case => return;
+	};
+	let saw_utf8 = false;
+	let saw_utf16 = false;
+	for (let i = 0z; i < len(arr); i += 1) {
+		match (arr[i]) {
+		case let v: str =>
+			if (v == "utf-8") saw_utf8 = true;
+			if (v == "utf-16") saw_utf16 = true;
+		case => void;
+		};
+	};
+	if (saw_utf8) {
+		s.negotiated_encoding = analysis::encoding::UTF8;
+	} else if (saw_utf16) {
+		s.negotiated_encoding = analysis::encoding::UTF16;
+	};
+	// Neither offered? Stick with the LSP default (UTF-16).
 };
 
 fn handle_shutdown(s: *server, r: lsp::request) void = {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 
+use analysis;
 use bufio;
 use encoding::json;
 use io;
@@ -189,4 +190,56 @@ use strings;
 
 	assert(len(s.workspace_folders) == 1);
 	assert(s.workspace_folders[0].uri == "file:///legacy");
+};
+
+@test fn initialize_picks_utf8_when_offered() void = {
+	let out = memio::dynamic();
+	defer io::close(&out)!;
+	let in_buf = alloc(memio::fixed([]))!;
+	defer free(in_buf);
+	let scan = alloc(bufio::newscanner(in_buf))!;
+	defer { bufio::finish(scan); free(scan); };
+	let s = new(scan, &out);
+	defer finish(&s);
+
+	const params = `{"capabilities":{"general":{"positionEncodings":["utf-16","utf-8"]}}}`;
+	let pv = json::loadstr(params)!;
+	const r = lsp::request {
+		id = 1.0,
+		method = strings::dup("initialize")!,
+		params = pv,
+	};
+	defer { free(r.method); json::finish(pv); };
+	handle_initialize(&s, r);
+
+	assert(s.negotiated_encoding == analysis::encoding::UTF8);
+
+	// Inspect the wire response — capabilities.positionEncoding should
+	// echo "utf-8".
+	const data = memio::buffer(&out);
+	const text = strings::fromutf8(data)!;
+	assert(strings::contains(text, `"positionEncoding":"utf-8"`));
+};
+
+@test fn initialize_defaults_to_utf16_when_no_general_caps() void = {
+	let out = memio::dynamic();
+	defer io::close(&out)!;
+	let in_buf = alloc(memio::fixed([]))!;
+	defer free(in_buf);
+	let scan = alloc(bufio::newscanner(in_buf))!;
+	defer { bufio::finish(scan); free(scan); };
+	let s = new(scan, &out);
+	defer finish(&s);
+
+	const params = `{"capabilities":{}}`;
+	let pv = json::loadstr(params)!;
+	const r = lsp::request {
+		id = 1.0,
+		method = strings::dup("initialize")!,
+		params = pv,
+	};
+	defer { free(r.method); json::finish(pv); };
+	handle_initialize(&s, r);
+
+	assert(s.negotiated_encoding == analysis::encoding::UTF16);
 };
