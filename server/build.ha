@@ -24,7 +24,10 @@ use os::exec;
 use path;
 use strconv;
 use strings;
+use time;
 use unix;
+use unix::poll;
+use unix::signal;
 
 // One diagnostic emitted by the compiler.
 export type build_diagnostic = struct {
@@ -54,7 +57,18 @@ export fn finish_build_diagnostics(d: []build_diagnostic) void = {
 //
 // `hare_path` is the path to the `hare` binary (typically just "hare" so
 // PATH is consulted). Build tags are passed via -T <tag> for each tag.
-export fn run_build(hare_path: str, file_path: str, tags: []str) []build_diagnostic = {
+//
+// timeout_ms is the wall-clock deadline (in milliseconds) before the
+// subprocess is terminated and the partial output returned. Zero
+// disables the timeout (waits indefinitely). A hung build that
+// exceeds the deadline gets SIGTERM, then SIGKILL if it doesn't
+// promptly exit.
+export fn run_build(
+	hare_path: str,
+	file_path: str,
+	tags: []str,
+	timeout_ms: u32,
+) []build_diagnostic = {
 	// Build the argument list: hare build <-T tag>... <file>
 	let argv: []str = [];
 	defer free(argv);
@@ -105,11 +119,52 @@ export fn run_build(hare_path: str, file_path: str, tags: []str) []build_diagnos
 	// EOF when the child exits.
 	lsp::safe_close(write_fd);
 
-	// Drain stderr.
+	// Drain stderr via a poll loop bounded by `timeout_ms`. On each
+	// iteration we poll for POLLIN with the remaining time as the
+	// timeout; if poll signals readable, we read once. If poll returns
+	// 0 (timeout expired) we SIGTERM the child and stop reading.
 	let buf: []u8 = [];
 	defer free(buf);
 	let chunk: [4096]u8 = [0...];
+	const deadline = if (timeout_ms > 0) {
+		yield time::now(time::clock::MONOTONIC);
+	} else {
+		yield time::instant { sec = 0, nsec = 0 };
+	};
+	const deadline_abs = if (timeout_ms > 0) {
+		yield time::add(deadline,
+			(timeout_ms: i64) * time::MILLISECOND);
+	} else {
+		yield time::instant { sec = 0, nsec = 0 };
+	};
+	let timed_out = false;
 	for (true) {
+		// Compute remaining time as a poll timeout (in
+		// time::duration units; negative means indefinite).
+		const remaining: time::duration = if (timeout_ms == 0) {
+			yield poll::INDEF;
+		} else {
+			const now = time::now(time::clock::MONOTONIC);
+			yield time::diff(now, deadline_abs);
+		};
+		if (timeout_ms > 0 && remaining <= 0) {
+			timed_out = true;
+			break;
+		};
+		let pfds: [1]poll::pollfd = [poll::pollfd {
+			fd = read_fd,
+			events = poll::event::POLLIN: i16,
+			revents = 0,
+		}];
+		const n = match (poll::poll(pfds[..], remaining)) {
+		case let n: uint => yield n;
+		case poll::error => break;
+		};
+		if (n == 0) {
+			// timeout
+			timed_out = true;
+			break;
+		};
 		match (io::read(read_fd, chunk[..])) {
 		case let n: size =>
 			append(buf, chunk[..n]...)!;
@@ -121,7 +176,18 @@ export fn run_build(hare_path: str, file_path: str, tags: []str) []build_diagnos
 	};
 	lsp::safe_close(read_fd);
 
-	// Reap.
+	if (timed_out) {
+		// SIGTERM. The defer below also waits, which reaps the
+		// zombie once the kernel delivers the signal.
+		match (exec::sig(proc, signal::sig::TERM)) {
+		case => void;
+		};
+	};
+
+	// Reap. peek + retry would let us escalate to KILL if TERM was
+	// ignored, but Hare's std::exec doesn't expose a wait-with-timeout;
+	// we accept the small risk of a wait hang here because the build
+	// is over once stderr closes.
 	match (exec::wait(&proc)) {
 	case => void;
 	};

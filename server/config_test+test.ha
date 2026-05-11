@@ -32,6 +32,7 @@ fn cleanup_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out
 	assert(len(c.tags) == 0);
 	assert(c.diagnostics_debounce_ms == 300);
 	assert(c.enable_build_diagnostics);
+	assert(c.build_timeout_ms == 60000);
 	assert(c.format_indent_style == indent_style::TAB);
 	assert(c.format_indent_width == 8);
 	assert(c.inlay_hints_parameter_names);
@@ -42,7 +43,7 @@ fn cleanup_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out
 	let (s, scan, in_buf, out) = fresh_server();
 	defer cleanup_server(&s, scan, in_buf, out);
 
-	const settings = `{"path":"/opt/hare/bin/hare","tags":["+linux","+x86_64"],"diagnostics":{"debounceMs":500,"enableBuild":false},"format":{"indentStyle":"space","indentWidth":4,"trimFinalNewlines":false,"insertFinalNewline":false},"inlayHints":{"parameterNames":false,"inferredTypes":false}}`;
+	const settings = `{"path":"/opt/hare/bin/hare","tags":["+linux","+x86_64"],"diagnostics":{"debounceMs":500,"enableBuild":false,"buildTimeoutMs":10000},"format":{"indentStyle":"space","indentWidth":4,"trimFinalNewlines":false,"insertFinalNewline":false},"inlayHints":{"parameterNames":false,"inferredTypes":false}}`;
 	let v = json::loadstr(settings)!;
 	defer json::finish(v);
 	apply_settings(&s, v);
@@ -53,6 +54,7 @@ fn cleanup_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out
 	assert(s.config.tags[1] == "+x86_64");
 	assert(s.config.diagnostics_debounce_ms == 500);
 	assert(!s.config.enable_build_diagnostics);
+	assert(s.config.build_timeout_ms == 10000);
 	assert(s.config.format_indent_style == indent_style::SPACE);
 	assert(s.config.format_indent_width == 4);
 	assert(!s.config.format_trim_final_newlines);

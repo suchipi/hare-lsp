@@ -31,6 +31,13 @@ export type config = struct {
 	// to in-process parse diagnostics. Defaults to true.
 	enable_build_diagnostics: bool,
 
+	// Maximum wall-clock milliseconds to wait for a `hare build`
+	// subprocess to finish before SIGTERM'ing it. A hung build (deep
+	// macro recursion, deadlocked test, etc.) would otherwise block
+	// the entire LSP main loop indefinitely. Defaults to 60000 (60s);
+	// set to 0 to disable the timeout.
+	build_timeout_ms: u32,
+
 	// Format options.
 	format_indent_style: indent_style,
 	format_indent_width: u32,
@@ -54,6 +61,7 @@ export fn default_config() config = config {
 	tags = [],
 	diagnostics_debounce_ms = 300,
 	enable_build_diagnostics = true,
+	build_timeout_ms = 60000,
 	format_indent_style = indent_style::TAB,
 	format_indent_width = 8,
 	format_trim_final_newlines = true,
@@ -264,6 +272,17 @@ export fn apply_settings(s: *server, v: json::value) void = {
 				match (*dp) {
 				case let b: bool =>
 					s.config.enable_build_diagnostics = b;
+				case => void;
+				};
+			case => void;
+			};
+			match (json::get(&dobj, "buildTimeoutMs")) {
+			case let dp: *json::value =>
+				match (*dp) {
+				case let f: f64 =>
+					if (f >= 0.0) {
+						s.config.build_timeout_ms = f: u32;
+					};
 				case => void;
 				};
 			case => void;

@@ -110,6 +110,7 @@ Settings are read from the `hare` namespace. Defaults are in parentheses.
 | `tags` | string[] | `[]` | Build tags (`-T <tag>`). |
 | `diagnostics.debounceMs` | number | `300` | Minimum ms between the last `didChange` and the next parse-diagnostics refresh. |
 | `diagnostics.enableBuild` | boolean | `true` | Whether to run `hare build` on save. |
+| `diagnostics.buildTimeoutMs` | number | `60000` | Max wall-clock ms to wait for `hare build` (or `hare test` / `hare run`) before SIGTERM. `0` disables the timeout. |
 | `format.indentStyle` | `"tab"`/`"space"` | `"tab"` | Tab vs space indent in formatting output. |
 | `format.indentWidth` | number | `8` | Number of spaces per indent level when `indentStyle = space`. |
 | `format.trimFinalNewlines` | boolean | `true` | Trim trailing whitespace at file end. |

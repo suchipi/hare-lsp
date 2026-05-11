@@ -11,7 +11,10 @@ use lsp;
 use os;
 use os::exec;
 use strings;
+use time;
 use unix;
+use unix::poll;
+use unix::signal;
 
 export fn handle_execute_command(s: *server, r: lsp::request) void = {
 	const obj = match (params_obj_xc(r.params)) {
@@ -127,11 +130,44 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	};
 	lsp::safe_close(write_fd);
 
-	// Stream output.
+	// Stream output via a deadline-bounded poll loop. Same shape as
+	// run_build's drain in build.ha — see there for rationale. A hung
+	// `hare test` won't freeze the LSP main loop.
 	let buf: []u8 = [];
 	defer free(buf);
 	let chunk: [4096]u8 = [0...];
+	const timeout_ms = s.config.build_timeout_ms;
+	const deadline_abs = if (timeout_ms > 0) {
+		yield time::add(time::now(time::clock::MONOTONIC),
+			(timeout_ms: i64) * time::MILLISECOND);
+	} else {
+		yield time::instant { sec = 0, nsec = 0 };
+	};
+	let timed_out = false;
 	for (true) {
+		const remaining: time::duration = if (timeout_ms == 0) {
+			yield poll::INDEF;
+		} else {
+			const now = time::now(time::clock::MONOTONIC);
+			yield time::diff(now, deadline_abs);
+		};
+		if (timeout_ms > 0 && remaining <= 0) {
+			timed_out = true;
+			break;
+		};
+		let pfds: [1]poll::pollfd = [poll::pollfd {
+			fd = read_fd,
+			events = poll::event::POLLIN: i16,
+			revents = 0,
+		}];
+		const n = match (poll::poll(pfds[..], remaining)) {
+		case let n: uint => yield n;
+		case poll::error => break;
+		};
+		if (n == 0) {
+			timed_out = true;
+			break;
+		};
 		match (io::read(read_fd, chunk[..])) {
 		case let n: size =>
 			append(buf, chunk[..n]...)!;
@@ -142,14 +178,23 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 		};
 	};
 	lsp::safe_close(read_fd);
+	if (timed_out) {
+		match (exec::sig(proc, signal::sig::TERM)) {
+		case => void;
+		};
+		log_warning(s, "hare command timed out and was terminated");
+	};
 	match (exec::wait(&proc)) {
 	case => void;
 	};
 
-	// Send the output to the client.
+	// Send the output to the client. Tag-prefixed so users searching
+	// their "Output" panel can tell what produced the lines.
 	const output = strings::fromutf8(buf)!;
 	if (len(output) > 0) {
-		log_info(s, output);
+		const tagged = strings::concat("[hare ", subcmd, "] ", output)!;
+		defer free(tagged);
+		log_info(s, tagged);
 	};
 };
 
