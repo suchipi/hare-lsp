@@ -21,8 +21,13 @@
     "languages": [
       {
         "id": "hare",
-        "aliases": ["Hare", "hare"],
-        "extensions": [".ha"],
+        "aliases": [
+          "Hare",
+          "hare"
+        ],
+        "extensions": [
+          ".ha"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -43,7 +48,9 @@
         },
         "hare.tags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Build tags passed to `hare build` (e.g. [\"+linux\", \"+x86_64\"])."
         },
@@ -60,7 +67,10 @@
         },
         "hare.format.indentStyle": {
           "type": "string",
-          "enum": ["tab", "space"],
+          "enum": [
+            "tab",
+            "space"
+          ],
           "default": "tab",
           "description": "Tab vs space indent in formatting output."
         },
@@ -92,7 +102,11 @@
         },
         "hare.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Trace LSP traffic to the output channel."
         }
@@ -102,7 +116,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package --no-dependencies"
+    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

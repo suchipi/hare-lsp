@@ -1,6 +1,6 @@
 # Hare LSP — VSCode extension
 
-Adds Hare language support to VSCode by wrapping the [hare-lsp](../../) language server.
+Adds Hare language support to VSCode by wrapping the `hare-lsp` language server.
 
 ## Install (from source)
 
@@ -24,7 +24,7 @@ The extension expects `hare-lsp` on `$PATH`. Override with the
 
 ## Settings
 
-All `hare.*` settings declared in [package.json](./package.json) are
+All `hare.*` settings declared in `package.json` are
 forwarded to the server via the standard `workspace/configuration`
 flow. See the project README for what each one does.
 
@@ -39,7 +39,7 @@ Open this folder in VSCode and press F5 to launch a development host.
 
 ## Publishing
 
-The `publisher` field in [package.json](./package.json) is set to
+The `publisher` field in `package.json` is set to
 `"local"`, which is fine for `code --install-extension` from a local
 `.vsix` but blocks publication to the VS Code Marketplace. Before
 publishing, register a publisher with `vsce create-publisher <name>`
