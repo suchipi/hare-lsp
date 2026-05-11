@@ -76,7 +76,9 @@
       "Read(//usr/local/src/hare/stdlib/hare/**)",
       "WebFetch(domain:git.sr.ht)",
       "WebFetch(domain:sr.ht)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(make hare-lsp *)",
+      "Bash(HAREPATH=\"/Users/suchipi/Code/hare-lsp:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" HARECACHE=\"/Users/suchipi/Code/hare-lsp/.cache\" hare test ./e2e)"
     ]
   }
 }
