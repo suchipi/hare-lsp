@@ -70,6 +70,7 @@
       "Bash(wc:*)",
       "Bash(which:*)",
       "Bash(xxd:*)",
+      "Bash(diff:*)",
       "Read(//usr/local/bin/**)",
       "Read(//usr/local/src/hare/**)",
       "Read(//usr/local/src/hare/stdlib/hare/**)",
