@@ -65,46 +65,46 @@ fn add_organize_imports_action(
 
 	if (len(pr.subunit.imports) == 0) return;
 
-	// Build sorted list of joined idents for the new block.
-	let names: []str = [];
+	// Render each import to its `use ...;` source form, preserving the
+	// bindings variant (alias / member list / wildcard). Then sort by
+	// the rendered text and dedupe equal lines. Sorting by text gives
+	// a stable ordering that still respects Hare conventions:
+	//   use bar = foo;
+	//   use foo;
+	//   use foo::*;
+	//   use foo::{a, b};
+	let lines: []str = [];
 	defer {
-		for (let i = 0z; i < len(names); i += 1) {
-			free(names[i]);
+		for (let i = 0z; i < len(lines); i += 1) {
+			free(lines[i]);
 		};
-		free(names);
+		free(lines);
 	};
 	for (let i = 0z; i < len(pr.subunit.imports); i += 1) {
-		const imp = pr.subunit.imports[i];
-		let parts: []str = [];
-		defer free(parts);
-		for (let j = 0z; j < len(imp.ident); j += 1) {
-			append(parts, imp.ident[j])!;
-		};
-		const joined = strings::join("::", parts...)!;
-		// Dedupe by skip-if-present.
+		const rendered = render_import(&pr.subunit.imports[i]);
 		let dup = false;
-		for (let j = 0z; j < len(names); j += 1) {
-			if (names[j] == joined) {
+		for (let j = 0z; j < len(lines); j += 1) {
+			if (lines[j] == rendered) {
 				dup = true;
 				break;
 			};
 		};
 		if (dup) {
-			free(joined);
+			free(rendered);
 		} else {
-			append(names, joined)!;
+			append(lines, rendered)!;
 		};
 	};
-	if (len(names) == 0) return;
-	sort::sort(names, size(str), &cmp::strs)!;
+	if (len(lines) == 0) return;
+	sort::sort(lines, size(str), &cmp::strs)!;
 
 	// Build the new import block text.
 	let new_text: str = strings::dup("")!;
 	defer free(new_text);
-	for (let i = 0z; i < len(names); i += 1) {
-		const line = strings::concat("use ", names[i], ";\n")!;
-		const next = strings::concat(new_text, line)!;
-		free(line);
+	for (let i = 0z; i < len(lines); i += 1) {
+		const with_nl = strings::concat(lines[i], "\n")!;
+		const next = strings::concat(new_text, with_nl)!;
+		free(with_nl);
 		free(new_text);
 		new_text = next;
 	};
@@ -151,6 +151,43 @@ fn add_organize_imports_action(
 	let cur = *arr;
 	append(cur, action: json::value)!;
 	*arr = cur;
+};
+
+// Renders a single import back to source form, preserving the bindings
+// variant. The returned string is freshly allocated; the caller frees it.
+//
+//   use foo;            (void bindings)
+//   use foo = bar::baz; (import_alias — Hare syntax puts the alias first)
+//   use foo::{a, b};    (import_members)
+//   use foo::*;         (import_wildcard)
+fn render_import(imp: *ast::import) str = {
+	let parts: []str = [];
+	defer free(parts);
+	for (let i = 0z; i < len(imp.ident); i += 1) {
+		append(parts, imp.ident[i])!;
+	};
+	const joined = strings::join("::", parts...)!;
+	defer free(joined);
+
+	match (imp.bindings) {
+	case void =>
+		return strings::concat("use ", joined, ";")!;
+	case let alias: ast::import_alias =>
+		return strings::concat("use ", alias, " = ", joined, ";")!;
+	case let members: ast::import_members =>
+		// Sort member list deterministically for organize-imports.
+		let members_copy: []str = [];
+		defer free(members_copy);
+		for (let i = 0z; i < len(members); i += 1) {
+			append(members_copy, members[i])!;
+		};
+		sort::sort(members_copy, size(str), &cmp::strs)!;
+		const inner = strings::join(", ", members_copy...)!;
+		defer free(inner);
+		return strings::concat("use ", joined, "::{", inner, "};")!;
+	case ast::import_wildcard =>
+		return strings::concat("use ", joined, "::*;")!;
+	};
 };
 
 fn params_obj_ca(p: (json::value | void)) (json::object | void) =
