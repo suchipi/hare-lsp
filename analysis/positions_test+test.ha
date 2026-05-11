@@ -116,3 +116,31 @@ use strings;
 	assert(p.line == 0);
 	assert(p.character == 2);
 };
+
+@test fn crlf_byte_to_position_does_not_count_carriage_return() void = {
+	// "ab\r\ncd\r\nef" — three lines separated by CRLF. The '\r' must
+	// not be counted as a column character on its own line.
+	const text = strings::toutf8("ab\r\ncd\r\nef");
+	const idx = build_line_index(text);
+	defer free(idx);
+	// Offset of 'c' (start of line 1).
+	const off_c = strings::index("ab\r\ncd\r\nef", 'c') as size;
+	const pc = byte_to_position(text, idx, encoding::UTF8, off_c);
+	assert(pc.line == 1);
+	assert(pc.character == 0);
+	// Position right after "cd" — should be character 2, not 3 (the
+	// broken implementation included the \r in the column count).
+	const pe = byte_to_position(text, idx, encoding::UTF8, off_c + 2);
+	assert(pe.line == 1);
+	assert(pe.character == 2);
+};
+
+@test fn crlf_position_to_byte_lands_correctly() void = {
+	const text = strings::toutf8("ab\r\ncd\r\nef");
+	const idx = build_line_index(text);
+	defer free(idx);
+	// Line 1 starts at offset 4. character 2 → offset 6 (the '\r').
+	const off = position_to_byte(text, idx, encoding::UTF8,
+		position { line = 1, character = 2 });
+	assert(off == 6);
+};

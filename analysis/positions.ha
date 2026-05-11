@@ -40,7 +40,9 @@ export fn build_line_index(text: []u8) []size = {
 // Converts a byte offset into an LSP Position using the given encoding.
 //
 // The line index must be sorted ascending and start with 0. text must be the
-// same buffer the line_index was computed against.
+// same buffer the line_index was computed against. CRLF line endings are
+// handled: the `\r` immediately preceding a `\n` is excluded from the
+// column count so positions on CRLF files match positions on LF files.
 export fn byte_to_position(
 	text: []u8,
 	line_index: []size,
@@ -49,11 +51,7 @@ export fn byte_to_position(
 ) position = {
 	const line = line_for_offset(line_index, off);
 	const line_start = line_index[line];
-	const line_end = if (line + 1 < len(line_index)) {
-		yield line_index[line + 1] - 1; // exclude the '\n'
-	} else {
-		yield len(text);
-	};
+	const line_end = line_content_end(text, line_index, line);
 	const clamped = if (off > line_end) line_end else off;
 	const char = column_units(text[line_start..clamped], enc);
 	return position {
@@ -73,13 +71,25 @@ export fn position_to_byte(
 	const line = pos.line: size;
 	if (line >= len(line_index)) return len(text);
 	const line_start = line_index[line];
-	const line_end = if (line + 1 < len(line_index)) {
-		yield line_index[line + 1] - 1;
+	const line_end = line_content_end(text, line_index, line);
+	return units_to_byte(text[line_start..line_end], enc, pos.character: size)
+		+ line_start;
+};
+
+// Returns the byte offset where the content of `line` ends, excluding
+// any trailing `\r` and `\n`. For the final line in a CRLF buffer that
+// doesn't end with a newline, returns len(text).
+fn line_content_end(text: []u8, line_index: []size, line: size) size = {
+	let end = if (line + 1 < len(line_index)) {
+		yield line_index[line + 1] - 1; // exclude the '\n'
 	} else {
 		yield len(text);
 	};
-	return units_to_byte(text[line_start..line_end], enc, pos.character: size)
-		+ line_start;
+	if (end > 0 && end <= len(text) && end - 1 < len(text) &&
+		text[end - 1] == '\r': u8) {
+		end -= 1;
+	};
+	return end;
 };
 
 // Returns the line containing the given byte offset (0-based). Uses binary
