@@ -40,16 +40,31 @@ export fn imports(lexer: *lex::lexer) ([]ast::import | error) = {
 		import.loc.start = mkloc(lexer);
 		let (name, trailing) = ident_trailing(lexer)?;
 		import.ident = name;
-		switch (want(lexer, ltok::SEMICOLON, ltok::LBRACE,
-			ltok::EQUAL, ltok::TIMES)?.0) {
+		// Track the location of the closing `;` so loc.end can be
+		// set to it. Stdlib uses `mkloc(lexer)` after the parse
+		// finishes, but mkloc returns the position of the
+		// lexer's NEXT token — for hare-lsp the document is
+		// parsed in non-COMMENTS mode, so the next token is
+		// whatever real code comes after the `use`, possibly
+		// several lines later. That makes `loc.end` extend
+		// across blank lines and intervening comments, which in
+		// turn makes textDocument/documentLink emit a link
+		// covering the next comment, underlining it as
+		// cmd+clickable in VS Code. Capture the closing `;`
+		// token's own location instead.
+		let semi_loc: lex::location = lex::location { ... };
+		const next_tok = want(lexer, ltok::SEMICOLON, ltok::LBRACE,
+			ltok::EQUAL, ltok::TIMES)?;
+		switch (next_tok.0) {
 		case ltok::SEMICOLON =>
 			synassert(mkloc(lexer), !trailing,
 				"Unexpected trailing :: in ident")?;
+			semi_loc = next_tok.2;
 		case ltok::LBRACE =>
 			synassert(mkloc(lexer), trailing,
 				"Expected trailing :: in ident")?;
 			import.bindings = name_list(lexer)?;
-			want(lexer, ltok::SEMICOLON)?;
+			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
 		case ltok::EQUAL =>
 			synassert(mkloc(lexer),
 				len(name) == 1 && !trailing,
@@ -57,15 +72,15 @@ export fn imports(lexer: *lex::lexer) ([]ast::import | error) = {
 			import.bindings = name[0];
 			free(name);
 			import.ident = ident(lexer)?;
-			want(lexer, ltok::SEMICOLON)?;
+			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
 		case ltok::TIMES =>
 			synassert(mkloc(lexer), trailing,
 				"Expected trailing :: in ident")?;
 			import.bindings = ast::import_wildcard;
-			want(lexer, ltok::SEMICOLON)?;
+			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
 		case => abort(); // Unreachable
 		};
-		import.loc.end = mkloc(lexer);
+		import.loc.end = semi_loc;
 	};
 	return imports;
 };
