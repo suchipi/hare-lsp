@@ -18,6 +18,13 @@
     "onLanguage:hare"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "hare-lsp.restart",
+        "title": "Restart Hare LSP",
+        "category": "Hare"
+      }
+    ],
     "languages": [
       {
         "id": "hare",
@@ -38,80 +45,92 @@
         "path": "./syntaxes/hare.tmLanguage.json"
       }
     ],
-    "configuration": {
-      "title": "Hare",
-      "properties": {
-        "hare.path": {
-          "type": "string",
-          "default": "hare",
-          "description": "Path to the `hare` binary used by the language server."
-        },
-        "hare.tags": {
-          "type": "array",
-          "items": {
-            "type": "string"
+    "configuration": [
+      {
+        "title": "Hare LSP",
+        "properties": {
+          "hare-lsp.path": {
+            "type": "string",
+            "default": "hare-lsp",
+            "description": "Path to the `hare-lsp` language server binary launched by the extension."
+          }
+        }
+      },
+      {
+        "title": "Hare",
+        "properties": {
+          "hare.path": {
+            "type": "string",
+            "default": "hare",
+            "description": "Path to the `hare` binary used by the language server."
           },
-          "default": [],
-          "description": "Build tags passed to `hare build` (e.g. [\"+linux\", \"+x86_64\"])."
-        },
-        "hare.diagnostics.debounceMs": {
-          "type": "number",
-          "default": 300,
-          "minimum": 0,
-          "description": "Minimum ms between the last didChange and the next parse-diagnostics refresh."
-        },
-        "hare.diagnostics.enableBuild": {
-          "type": "boolean",
-          "default": true,
-          "description": "Run `hare build` on save to surface type-check diagnostics."
-        },
-        "hare.format.indentStyle": {
-          "type": "string",
-          "enum": [
-            "tab",
-            "space"
-          ],
-          "default": "tab",
-          "description": "Tab vs space indent in formatting output."
-        },
-        "hare.format.indentWidth": {
-          "type": "number",
-          "default": 8,
-          "minimum": 1,
-          "description": "Number of spaces per indent level when indentStyle is `space`."
-        },
-        "hare.format.trimFinalNewlines": {
-          "type": "boolean",
-          "default": true,
-          "description": "Trim trailing whitespace at end of file on save."
-        },
-        "hare.format.insertFinalNewline": {
-          "type": "boolean",
-          "default": true,
-          "description": "Ensure the file ends with a single newline on save."
-        },
-        "hare.inlayHints.parameterNames": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show parameter-name hints at call sites."
-        },
-        "hare.inlayHints.inferredTypes": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show inferred-type hints on let / const bindings."
-        },
-        "hare.trace.server": {
-          "type": "string",
-          "enum": [
-            "off",
-            "messages",
-            "verbose"
-          ],
-          "default": "off",
-          "description": "Trace LSP traffic to the output channel."
+          "hare.tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Build tags passed to `hare build` (e.g. [\"+linux\", \"+x86_64\"])."
+          },
+          "hare.diagnostics.debounceMs": {
+            "type": "number",
+            "default": 300,
+            "minimum": 0,
+            "description": "Minimum ms between the last didChange and the next parse-diagnostics refresh."
+          },
+          "hare.diagnostics.enableBuild": {
+            "type": "boolean",
+            "default": true,
+            "description": "Run `hare build` on save to surface type-check diagnostics."
+          },
+          "hare.format.indentStyle": {
+            "type": "string",
+            "enum": [
+              "tab",
+              "space"
+            ],
+            "default": "tab",
+            "description": "Tab vs space indent in formatting output."
+          },
+          "hare.format.indentWidth": {
+            "type": "number",
+            "default": 8,
+            "minimum": 1,
+            "description": "Number of spaces per indent level when indentStyle is `space`."
+          },
+          "hare.format.trimFinalNewlines": {
+            "type": "boolean",
+            "default": true,
+            "description": "Trim trailing whitespace at end of file on save."
+          },
+          "hare.format.insertFinalNewline": {
+            "type": "boolean",
+            "default": true,
+            "description": "Ensure the file ends with a single newline on save."
+          },
+          "hare.inlayHints.parameterNames": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show parameter-name hints at call sites."
+          },
+          "hare.inlayHints.inferredTypes": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show inferred-type hints on let / const bindings."
+          },
+          "hare.trace.server": {
+            "type": "string",
+            "enum": [
+              "off",
+              "messages",
+              "verbose"
+            ],
+            "default": "off",
+            "description": "Trace LSP traffic to the output channel."
+          }
         }
       }
-    }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",
