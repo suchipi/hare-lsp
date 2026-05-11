@@ -74,6 +74,11 @@
             "default": "hare",
             "description": "Path to the `hare` binary used by the language server."
           },
+          "hare.harepath": {
+            "type": "string",
+            "default": "",
+            "description": "Colon-separated module search paths (overrides $HAREPATH for the language server). Useful when VSCode is launched without inheriting the user's shell environment. Empty falls back to $HAREPATH then /usr/local/src/hare/{stdlib,third-party}."
+          },
           "hare.tags": {
             "type": "array",
             "items": {

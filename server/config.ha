@@ -18,6 +18,11 @@ export type config = struct {
 	// Path to the `hare` binary. Defaults to the value found in PATH.
 	hare_path: str,
 
+	// Colon-separated list of directories searched for Hare modules
+	// (mirrors the $HAREPATH env var). Empty string means "use $HAREPATH
+	// from the environment, falling back to the platform default".
+	harepath: str,
+
 	// Build tags passed to `hare build` and module resolution. e.g.
 	// ["+linux", "+x86_64"].
 	tags: []str,
@@ -58,6 +63,7 @@ export type indent_style = enum {
 // Returns the default configuration (used until the client provides values).
 export fn default_config() config = config {
 	hare_path = strings::dup("hare")!,
+	harepath = strings::dup("")!,
 	tags = [],
 	diagnostics_debounce_ms = 300,
 	enable_build_diagnostics = true,
@@ -73,6 +79,7 @@ export fn default_config() config = config {
 // Releases memory owned by the config.
 export fn finish_config(c: *config) void = {
 	free(c.hare_path);
+	free(c.harepath);
 	for (let i = 0z; i < len(c.tags); i += 1) {
 		free(c.tags[i]);
 	};
@@ -225,6 +232,17 @@ export fn apply_settings(s: *server, v: json::value) void = {
 		case let str_val: str =>
 			free(s.config.hare_path);
 			s.config.hare_path = strings::dup(str_val)!;
+		case => void;
+		};
+	case => void;
+	};
+
+	match (json::get(&o, "harepath")) {
+	case let p: *json::value =>
+		match (*p) {
+		case let str_val: str =>
+			free(s.config.harepath);
+			s.config.harepath = strings::dup(str_val)!;
 		case => void;
 		};
 	case => void;

@@ -23,19 +23,31 @@ const STDLIB_DEFAULTS: [_]str = [
 	"/usr/local/src/hare/third-party",
 ];
 
-// Returns the list of stdlib search roots. Honours $HAREPATH (colon
-// separated) when set; otherwise falls back to the well-known install
-// locations on Unix-like systems.
-fn stdlib_search_paths() []str = {
+// Returns the list of stdlib search roots in priority order:
+//   1. `hare.harepath` setting when non-empty (gives editor users
+//      explicit control even when their shell-set $HAREPATH isn't
+//      inherited).
+//   2. $HAREPATH env var
+//   3. Built-in defaults for /usr/local/src/hare.
+fn stdlib_search_paths(s: *server) []str = {
 	let out: []str = [];
-	match (os::getenv("HAREPATH")) {
-	case let raw: str =>
-		const tok = strings::tokenize(raw, ":");
+	if (len(s.config.harepath) > 0) {
+		const tok = strings::tokenize(s.config.harepath, ":");
 		for (let item => strings::next_token(&tok)) {
 			if (len(item) == 0) continue;
 			append(out, strings::dup(item)!)!;
 		};
-	case void => void;
+	};
+	if (len(out) == 0) {
+		match (os::getenv("HAREPATH")) {
+		case let raw: str =>
+			const tok = strings::tokenize(raw, ":");
+			for (let item => strings::next_token(&tok)) {
+				if (len(item) == 0) continue;
+				append(out, strings::dup(item)!)!;
+			};
+		case void => void;
+		};
 	};
 	if (len(out) == 0) {
 		for (let i = 0z; i < len(STDLIB_DEFAULTS); i += 1) {
@@ -59,7 +71,7 @@ export fn ensure_stdlib_module_indexed(s: *server, module: str) bool = {
 	const subpath = module_subpath(module);
 	defer free(subpath);
 
-	const paths = stdlib_search_paths();
+	const paths = stdlib_search_paths(s);
 	defer {
 		for (let i = 0z; i < len(paths); i += 1) free(paths[i]);
 		free(paths);
