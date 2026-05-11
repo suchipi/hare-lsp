@@ -350,12 +350,84 @@ fn decl_ident(d: *ast::decl) ast::ident = {
 	};
 };
 
+// Renders the declaration's signature without its body (for fn) or
+// initializer (for global / def). For type aliases we keep the RHS
+// because that *is* the type. The intent is that hover shows just what
+// the symbol is, not its full definition — e.g.
+//   `export fn main() void`   (not `... = { let scan = ...; ... }`)
+//   `let stdout_file: io::file`  (not `... = rt::STDOUT_FILENO`)
 fn render_decl_signature(d: *ast::decl) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
-	match (unparse::decl(&buf, &unparse::syn_nowrap, d)) {
-	case size => void;
-	case => return strings::dup("<unparse error>")!;
+
+	match (d.decl) {
+	case let c: ast::decl_const =>
+		// decl_const.init is non-nullable, so we can't strip it by
+		// re-pointing a field. Render manually.
+		if (d.exported) {
+			match (memio::concat(&buf, "export ")) {
+			case size => void;
+			case => return strings::dup("<unparse error>")!;
+			};
+		};
+		match (memio::concat(&buf, "def ")) {
+		case size => void;
+		case => return strings::dup("<unparse error>")!;
+		};
+		match (unparse::ident(&buf, c.ident)) {
+		case size => void;
+		case => return strings::dup("<unparse error>")!;
+		};
+		match (c._type) {
+		case let t: *ast::_type =>
+			match (memio::concat(&buf, ": ")) {
+			case size => void;
+			case => void;
+			};
+			match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
+			case size => void;
+			case => void;
+			};
+		case null => void;
+		};
+		return strings::dup(memio::string(&buf)!)!;
+	case let f: ast::decl_func =>
+		// Re-emit through unparse::decl with the body stripped. The
+		// upstream renderer skips the `= body` block when f.body is
+		// null.
+		let copy = *d;
+		copy.decl = ast::decl_func {
+			symbol = f.symbol,
+			ident = f.ident,
+			prototype = f.prototype,
+			body = null,
+			attrs = f.attrs,
+		};
+		match (unparse::decl(&buf, &unparse::syn_nowrap, &copy)) {
+		case size => void;
+		case => return strings::dup("<unparse error>")!;
+		};
+	case let g: ast::decl_global =>
+		let copy = *d;
+		copy.decl = ast::decl_global {
+			is_const = g.is_const,
+			is_threadlocal = g.is_threadlocal,
+			symbol = g.symbol,
+			ident = g.ident,
+			_type = g._type,
+			init = null,
+		};
+		match (unparse::decl(&buf, &unparse::syn_nowrap, &copy)) {
+		case size => void;
+		case => return strings::dup("<unparse error>")!;
+		};
+	case =>
+		// Type alias / assert — keep as-is. For a type alias, the
+		// RHS *is* the type definition, so we want to show it.
+		match (unparse::decl(&buf, &unparse::syn_nowrap, d)) {
+		case size => void;
+		case => return strings::dup("<unparse error>")!;
+		};
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };

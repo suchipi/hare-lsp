@@ -73,6 +73,84 @@ export fn main() void = {
 		"inferred type should replace the init-source fallback");
 };
 
+// Top-level hover should render the signature only — no `= body`. The
+// previous behavior dumped the full unparsed decl including the function
+// body, which was useless noise for anything bigger than a one-liner.
+@test fn e2e_hover_top_level_strips_body() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `export fn add(a: int, b: int) int = {
+	let result = a + b;
+	return result;
+};
+`;
+	const did_open = build_did_open("file:///strip_body.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `add` in the function declaration. Line 0, char 10.
+	const hover_req = `{"jsonrpc":"2.0","id":800,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///strip_body.ha"},"position":{"line":0,"character":10}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 800.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = (*(json::get(&obj, "result") as *json::value)) as json::object;
+	const contents = (*(json::get(&result_obj, "contents") as *json::value)) as json::object;
+	const md = (*(json::get(&contents, "value") as *json::value)) as str;
+
+	assert(strings::contains(md, "fn add(a: int, b: int) int"),
+		"hover must include the function signature");
+	assert(!strings::contains(md, "return result"),
+		"hover must not include the function body");
+	assert(!strings::contains(md, "let result"),
+		"hover must not include the function body");
+};
+
+// Same idea for global decls: `let foo: T = init` should hover as `let foo: T`.
+@test fn e2e_hover_global_strips_init() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `export let buffer_size: size = 12345;
+`;
+	const did_open = build_did_open("file:///strip_init.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `buffer_size`. Line 0, char 14.
+	const hover_req = `{"jsonrpc":"2.0","id":810,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///strip_init.ha"},"position":{"line":0,"character":14}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 810.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = (*(json::get(&obj, "result") as *json::value)) as json::object;
+	const contents = (*(json::get(&result_obj, "contents") as *json::value)) as json::object;
+	const md = (*(json::get(&contents, "value") as *json::value)) as str;
+
+	assert(strings::contains(md, "buffer_size") &&
+			strings::contains(md, "size"),
+		"hover must include the global's name and type");
+	assert(!strings::contains(md, "12345"),
+		"hover must not include the initializer value");
+};
+
 // Hover on a stdlib symbol that lives under a `+platform` tag directory
 // (`os::stdout_file` is in os/+darwin/stdfd.ha on Darwin). The module
 // indexer must fold the tag dir into the parent module, otherwise the
