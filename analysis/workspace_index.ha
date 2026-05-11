@@ -136,20 +136,31 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 };
 
 // Returns the module-name basename of the directory containing the given
-// file. For "/repo/foo/bar.ha" returns "foo". For a file in the workspace
-// root (no parent directory in the path) returns "".
+// file. For "/repo/foo/bar.ha" returns "foo". For "/repo/os/+darwin/x.ha"
+// returns "os" — Hare's `+tag` / `-tag` directories belong to their
+// parent module, not to a separate module named after the tag.
 fn module_from_path(file_path: str) str = {
 	const last_slash = match (strings::rindex(file_path, '/')) {
 	case let i: size => yield i;
 	case void => return strings::dup("")!;
 	};
 	if (last_slash == 0) return strings::dup("")!;
-	const dir = strings::sub(file_path, 0, last_slash);
-	const prev = match (strings::rindex(dir, '/')) {
-	case let i: size => yield i + 1;
-	case void => yield 0z;
+	let dir = strings::sub(file_path, 0, last_slash);
+	for (true) {
+		const prev = match (strings::rindex(dir, '/')) {
+		case let i: size => yield i + 1;
+		case void => yield 0z;
+		};
+		const seg = strings::sub(dir, prev, strings::end);
+		if (len(seg) == 0) return strings::dup("")!;
+		const bytes = strings::toutf8(seg);
+		if (bytes[0] != '+': u8 && bytes[0] != '-': u8) {
+			return strings::dup(seg)!;
+		};
+		// Tag directory — peel it off and look at the parent.
+		if (prev == 0) return strings::dup("")!;
+		dir = strings::sub(dir, 0, prev - 1);
 	};
-	return strings::dup(strings::sub(dir, prev, strings::end))!;
 };
 
 // Recursively walks `root` looking for *.ha files; calls index_file on each.

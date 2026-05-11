@@ -73,6 +73,98 @@ export fn main() void = {
 		"inferred type should replace the init-source fallback");
 };
 
+// Hover on a stdlib symbol that lives under a `+platform` tag directory
+// (`os::stdout_file` is in os/+darwin/stdfd.ha on Darwin). The module
+// indexer must fold the tag dir into the parent module, otherwise the
+// lookup would search under module "+darwin" and miss.
+@test fn e2e_hover_on_stdlib_tag_dir_symbol() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `use os;
+export fn main() void = {
+	let _ = os::stdout_file;
+};
+`;
+	const did_open = build_did_open("file:///tag_hover.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `stdout_file` in `os::stdout_file`. Line 2, char 13.
+	const hover_req = `{"jsonrpc":"2.0","id":600,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///tag_hover.ha"},"position":{"line":2,"character":13}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 600.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case =>
+			fmt::fatalf("e2e: os::stdout_file hover returned null. body={}",
+				text);
+		};
+	case void =>
+		fmt::fatalf("e2e: response missing result: {}", text);
+	};
+	const contents = (*(json::get(&result_obj, "contents") as *json::value)) as json::object;
+	const md = (*(json::get(&contents, "value") as *json::value)) as str;
+	assert(strings::contains(md, "stdout_file"),
+		"hover should mention stdout_file");
+};
+
+// Goto-definition on the same symbol — exercises the same module lookup
+// path via handle_definition, so a fix to module_from_path benefits both.
+@test fn e2e_definition_on_stdlib_tag_dir_symbol() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `use os;
+export fn main() void = {
+	let _ = os::stdout_file;
+};
+`;
+	const did_open = build_did_open("file:///tag_def.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	const def_req = `{"jsonrpc":"2.0","id":700,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///tag_def.ha"},"position":{"line":2,"character":13}}}`;
+	send(&s, strings::toutf8(def_req));
+
+	const body = wait_for_response(&s, 700.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value => yield *p;
+	case void =>
+		fmt::fatalf("e2e: definition response missing result: {}", text);
+	};
+	match (result) {
+	case json::object => void;
+	case let arr: []json::value =>
+		assert(len(arr) > 0,
+			"definition should return at least one location");
+	case =>
+		fmt::fatalf("e2e: definition returned null for os::stdout_file. body={}",
+			text);
+	};
+};
+
 // Hover on a stdlib-qualified call (`bufio::newscanner`). The server lazily
 // indexes the imported module from $HAREPATH / default install paths.
 @test fn e2e_hover_on_stdlib_qualified_call() void = {
