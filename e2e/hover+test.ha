@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: MPL-2.0
+// (c) hare-lsp authors
+//
+// e2e check: open a small Hare document and ask for hover on an
+// identifier in it. The unit tests cover `handle_hover` directly with a
+// synthetic document; this exercises the full sync path (didOpen →
+// hover) the way VSCode does, so we catch issues that only manifest
+// when the document is sent over the wire.
+
+use encoding::json;
+use fmt;
+use strings;
+
+def HOVER_DOC: str = `// SPDX-License-Identifier: MPL-2.0
+export fn answer() int = 42;
+
+export fn ask() int = answer();
+`;
+
+// Reproduces the call-site hover scenario the user reported: hovering on a
+// qualified workspace identifier (e.g. `server::new`). The `server` module is
+// in this workspace, so the server should resolve it via the workspace
+// index. The unit tests only cover unqualified top-level decls in the
+// current file, so this fills a gap.
+@test fn e2e_hover_on_qualified_workspace_call() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	// rootUri matters: workspace indexing scans this folder so qualified
+	// lookups resolve.
+	const init_msg = strings::concat(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
+		os_repo_root(),
+		`","workspaceFolders":[{"uri":"file://`,
+		os_repo_root(),
+		`","name":"hare-lsp"}],"capabilities":{}}}`)!;
+	defer free(init_msg);
+	send(&s, strings::toutf8(init_msg));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	// Open a small file that mirrors the user's actual main.ha shape.
+	const sample = `use server;
+export fn main() void = {
+	let _ = server::run;
+};
+`;
+	const did_open = build_did_open("file:///probe_main.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Wait for indexing to settle — `initialized` triggers a workspace
+	// scan and the server emits a log notification when done. We pull
+	// a few messages so the index is populated before we ask for hover.
+	drain_until_indexed(&s);
+
+	// Hover on `run` in `server::run`. Line 2 (0-indexed), `server::run`
+	// starts at column 9 ("let _ = "), so `run` starts at column 17.
+	const hover_req = `{"jsonrpc":"2.0","id":100,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///probe_main.ha"},"position":{"line":2,"character":17}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 100.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value => yield *p;
+	case void =>
+		fmt::fatalf("e2e: hover response has no result: {}", text);
+	};
+	match (result) {
+	case json::object => void;
+	case =>
+		fmt::fatalf("e2e: hover on `server::run` returned null — workspace-qualified hover broken. body={}",
+			text);
+	};
+};
+
+// Best-effort: wait briefly for the "indexed N file(s)" log to arrive so the
+// workspace index is populated. Times out silently — the hover test below
+// will surface the real problem.
+fn drain_until_indexed(s: *session) void = {
+	for (let i = 0z; i < 20z; i += 1) {
+		const body = recv(s);
+		defer free(body);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, "indexed") &&
+				strings::contains(text, "file(s)")) return;
+	};
+};
+
+fn os_repo_root() str = {
+	// Tests run from the repo root; we hardcode it for the URI.
+	return "/Users/suchipi/Code/hare-lsp";
+};
+
+@test fn e2e_hover_on_identifier() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	// Initialize. We need to be ready before opening docs.
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	// didOpen.
+	const did_open = build_did_open("file:///hover_test.ha", HOVER_DOC);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `answer` in the call `answer()` on line 3 (0-indexed),
+	// which is `export fn ask() int = answer();`. The call's `answer`
+	// starts at column 23.
+	const hover_req = `{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///hover_test.ha"},"position":{"line":3,"character":24}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 2.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value => yield *p;
+	case void =>
+		fmt::fatalf("e2e: hover response has no result field: {}", text);
+	};
+	// LSP allows null when nothing matches. Surface that as a clear
+	// failure so the developer can compare against what VSCode receives.
+	const result_obj = match (result) {
+	case let o: json::object => yield o;
+	case =>
+		fmt::fatalf("e2e: hover returned null/non-object — server didn't recognize the identifier. Body: {}",
+			text);
+	};
+	const contents = match (json::get(&result_obj, "contents")) {
+	case let p: *json::value => yield *p;
+	case void =>
+		fmt::fatalf("e2e: hover result missing contents: {}", text);
+	};
+	const c_obj = contents as json::object;
+	match (json::get(&c_obj, "value")) {
+	case let p: *json::value =>
+		const md = *p as str;
+		assert(strings::contains(md, "answer"),
+			"hover markdown should mention the identifier name");
+	case void =>
+		fmt::fatalf("e2e: hover contents missing value: {}", text);
+	};
+};
+
+fn build_did_open(uri: str, body: str) str = {
+	// JSON-encode the body. We do it the long way rather than json::dumpstr
+	// to keep this test light — the body has no embedded quotes or
+	// backslashes.
+	let result = strings::concat(
+		`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"`,
+		uri,
+		`","languageId":"hare","version":1,"text":`,
+		json_string_quote(body),
+		`}}}`)!;
+	return result;
+};
+
+fn json_string_quote(s: str) str = {
+	// Minimal JSON string encoder for ASCII printable + common whitespace.
+	const bytes = strings::toutf8(s);
+	let out: []u8 = [];
+	append(out, '"': u8)!;
+	for (let i = 0z; i < len(bytes); i += 1) {
+		const b = bytes[i];
+		switch (b) {
+		case '"': u8 =>
+			append(out, '\\': u8)!;
+			append(out, '"': u8)!;
+		case '\\': u8 =>
+			append(out, '\\': u8)!;
+			append(out, '\\': u8)!;
+		case '\n': u8 =>
+			append(out, '\\': u8)!;
+			append(out, 'n': u8)!;
+		case '\r': u8 =>
+			append(out, '\\': u8)!;
+			append(out, 'r': u8)!;
+		case '\t': u8 =>
+			append(out, '\\': u8)!;
+			append(out, 't': u8)!;
+		case =>
+			append(out, b)!;
+		};
+	};
+	append(out, '"': u8)!;
+	return strings::fromutf8(out)!;
+};

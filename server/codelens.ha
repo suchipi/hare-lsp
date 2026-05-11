@@ -151,6 +151,18 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 		echo_back(s, r);
 		return;
 	};
+	const lens_uri = match (json::get(&data_field, "uri")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let s: str => yield s;
+		case =>
+			echo_back(s, r);
+			return;
+		};
+	case =>
+		echo_back(s, r);
+		return;
+	};
 
 	// Count references across the workspace.
 	let count = 0z;
@@ -158,7 +170,9 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 		count += count_token_occurrences(analysis::bytes(&s.documents[i].buf), name);
 	};
 
-	// Build the command "N references".
+	// Build the command "N references". The client needs uri + position
+	// so it can invoke editor.action.showReferences; we pass the lens's
+	// own range start.
 	let cmd = json::newobject();
 	const title = strings::concat(fmt_size_cl(count), " references")!;
 	defer free(title);
@@ -172,6 +186,40 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 		send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
 		return;
 	};
+
+	// Pull range.start from the echoed lens so the client can target the
+	// references search at the identifier's position. If the lens lacks a
+	// range (shouldn't happen) we still emit the command without args —
+	// the client falls back to a no-op.
+	match (json::get(&result_obj, "range")) {
+	case let rp: *json::value =>
+		match (*rp) {
+		case let r_obj: json::object =>
+			match (json::get(&r_obj, "start")) {
+			case let sp: *json::value =>
+				let args: []json::value = [];
+				match (json::dup(lens_uri: json::value)) {
+				case let v: json::value =>
+					append(args, v)!;
+				case nomem =>
+					send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+					return;
+				};
+				match (json::dup(*sp)) {
+				case let v: json::value =>
+					append(args, v)!;
+				case nomem =>
+					send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+					return;
+				};
+				json::put(&cmd, "arguments", args: json::value)!;
+			case => void;
+			};
+		case => void;
+		};
+	case => void;
+	};
+
 	// Replace any existing command and add the new one.
 	json::put(&result_obj, "command", cmd)!;
 	const v: json::value = result_obj;

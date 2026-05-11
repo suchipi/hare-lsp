@@ -127,6 +127,13 @@ fn emit_param_hints(
 			i = j - 1;
 			continue;
 		};
+		// Skip function declarations themselves — the `fn name(` form
+		// is not a call site. Without this we'd render parameter hints
+		// on top of the parameter declarations.
+		if (preceded_by_fn(data, i)) {
+			i = j - 1;
+			continue;
+		};
 		const name = strings::fromutf8(data[i..j])!;
 		// Resolve.
 		const sym = match (analysis::find_by_short_name(idx, name)) {
@@ -185,6 +192,21 @@ fn is_word_byte_ih(b: u8) bool = {
 	if (b >= 'A': u8 && b <= 'Z': u8) return true;
 	if (b >= '0': u8 && b <= '9': u8) return true;
 	return b == '_': u8;
+};
+
+// True when the identifier starting at `i` is preceded (after skipping
+// whitespace) by the keyword `fn` standing on its own. Used to skip
+// function declaration names so we don't render parameter hints on the
+// parameter list of the declaration itself.
+fn preceded_by_fn(data: []u8, i: size) bool = {
+	if (i < 3) return false; // need at least "fn " before
+	let k = i;
+	for (k > 0 && is_ws(data[k - 1]); k -= 1) void;
+	if (k < 2) return false;
+	if (data[k - 1] != 'n': u8 || data[k - 2] != 'f': u8) return false;
+	// The `fn` must itself be a standalone word.
+	if (k == 2) return true;
+	return !is_word_byte_ih(data[k - 3]);
 };
 
 fn find_decl_idx(su: *ast::subunit, name: str) (size | void) = {

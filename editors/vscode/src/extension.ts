@@ -114,6 +114,45 @@ export function activate(context: vscode.ExtensionContext): void {
       void client.setTrace(Trace.fromString(getTraceServer()));
       void refreshStatus();
     }),
+    // Invoked by the "N references" CodeLens emitted by codelens.ha. The
+    // server passes (uri, position) as arguments; we fetch references
+    // via the LSP and hand them to VSCode's built-in references peek.
+    vscode.commands.registerCommand(
+      "hare-lsp.showReferences",
+      async (uri: string, position: { line: number; character: number }) => {
+        if (!client) return;
+        const locations = (await client.sendRequest(
+          "textDocument/references",
+          {
+            textDocument: { uri },
+            position,
+            context: { includeDeclaration: false },
+          },
+        )) as Array<{
+          uri: string;
+          range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+          };
+        }> | null;
+        const vsLocations = (locations ?? []).map(
+          (loc) =>
+            new vscode.Location(
+              vscode.Uri.parse(loc.uri),
+              new vscode.Range(
+                new vscode.Position(loc.range.start.line, loc.range.start.character),
+                new vscode.Position(loc.range.end.line, loc.range.end.character),
+              ),
+            ),
+        );
+        await vscode.commands.executeCommand(
+          "editor.action.showReferences",
+          vscode.Uri.parse(uri),
+          new vscode.Position(position.line, position.character),
+          vsLocations,
+        );
+      },
+    ),
   );
 
   const statusItem = vscode.window.createStatusBarItem(
