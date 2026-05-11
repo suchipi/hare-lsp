@@ -76,6 +76,42 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	abort("response not found");
 };
 
+// Round-trips a file with leading and inline comments through
+// handle_formatting; the resulting newText must contain every comment
+// from the input. Regression for the data-loss bug where
+// `unparse::subunit` silently dropped non-doc comments.
+@test fn formatting_preserves_inline_comments() void = {
+	let (s, scan, in_buf, out) = fmt_test_server();
+	defer fmt_test_cleanup(&s, scan, in_buf, out);
+	// fmt_open splices `src` into a JSON string literal; newlines and
+	// tabs must be JSON-escaped (\\n / \\t) so the JSON parser decodes
+	// them, not raw characters which would terminate the literal.
+	const src = "// SPDX-License-Identifier: MPL-2.0\\n// (c) test authors\\n\\nuse io;\\n\\nexport fn main() void = {\\n\\t// note one\\n\\tlet x = 1;\\n\\tlet y = 2;\\n\\t// note two\\n\\tlet z = x + y;\\n};\\n";
+	fmt_open(&s, "file:///cmt.ha", src);
+
+	const params = `{"textDocument":{"uri":"file:///cmt.ha"},"options":{"tabSize":8,"insertSpaces":false}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 2.0,
+		method = strings::dup("textDocument/formatting")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_formatting(&s, r);
+	const v = fmt_skip_to_response(out, 2.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	assert(len(result) == 1, "expected one edit covering the whole document");
+	const edit = result[0] as json::object;
+	const new_text = *(json::get(&edit, "newText") as *json::value) as str;
+
+	assert(strings::contains(new_text, "SPDX-License-Identifier"));
+	assert(strings::contains(new_text, "(c) test authors"));
+	assert(strings::contains(new_text, "note one"));
+	assert(strings::contains(new_text, "note two"));
+};
+
 @test fn range_formatting_edits_only_selected_decl() void = {
 	let (s, scan, in_buf, out) = fmt_test_server();
 	defer fmt_test_cleanup(&s, scan, in_buf, out);

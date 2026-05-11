@@ -44,9 +44,16 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 
+	// Build the doc tree from the AST + comment cursor.
+	const cs = collect_comments(data);
+	defer finish_comments(cs);
+	let cursor = comment_cursor { comments = cs, pos = 0 };
+	let d = build_subunit_doc(&pr.subunit, &cursor, len(data));
+	defer doc_finish(&d);
+
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
-	match (unparse::subunit(&buf, &unparse::syn_wrap, pr.subunit)) {
+	match (pretty(&buf, &d, 80, 0)) {
 	case size => void;
 	case =>
 		send_array_fmt(s, r.id, []);
@@ -157,26 +164,32 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 
-	// Unparse the run of selected decls.
+	// Format the run of selected decls with comment interleaving.
+	const decl_range_start = pr.subunit.decls[first_idx: size].loc.start.off: size;
+	const decl_range_end = pr.subunit.decls[last_idx: size].loc.end.off: size;
+	const cs = collect_comments(data);
+	defer finish_comments(cs);
+	let cursor = comment_cursor { comments = cs, pos = 0 };
+	// Skip past any comments before the first selected decl — those
+	// don't belong in the range edit.
+	const _ = pop_before(&cursor, decl_range_start);
+
+	let d = build_decls_range_doc(&pr.subunit, first_idx: size,
+		last_idx: size, &cursor);
+	defer doc_finish(&d);
+
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
-	for (let i = first_idx: size; i <= last_idx: size; i += 1) {
-		match (unparse::decl(&buf, &unparse::syn_wrap, &pr.subunit.decls[i])) {
-		case size => void;
-		case =>
-			send_array_fmt(s, r.id, []);
-			return;
-		};
-		fmt::fprint(&buf, ";")!;
-		if (i < last_idx: size) {
-			fmt::fprint(&buf, "\n\n")!;
-		} else {
-			fmt::fprint(&buf, "\n")!;
-		};
+	match (pretty(&buf, &d, 80, 0)) {
+	case size => void;
+	case =>
+		send_array_fmt(s, r.id, []);
+		return;
 	};
 	const formatted_str = memio::string(&buf)!;
 	const formatted_str_with_indent = apply_indent_style(s, formatted_str);
 	defer if (formatted_str_with_indent != formatted_str) free(formatted_str_with_indent);
+	_ = decl_range_end; // silence unused warning if any
 
 	const replace_start = pr.subunit.decls[first_idx: size].loc.start.off: size;
 	const replace_end = pr.subunit.decls[last_idx: size].loc.end.off: size;
