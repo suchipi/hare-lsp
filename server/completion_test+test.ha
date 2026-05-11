@@ -175,3 +175,74 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	};
 	assert(found_helper);
 };
+
+@test fn completion_function_has_snippet_and_sortText() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	comp_open(&s, "file:///snip.ha",
+		"fn greet(name: str, age: int) void = void;\\nfn main() void = g\\n");
+
+	const params = `{"textDocument":{"uri":"file:///snip.ha"},"position":{"line":1,"character":18}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 4.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 4.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "greet") continue;
+		found = true;
+		// Snippet insertText and Snippet format.
+		const insert_text = *(json::get(&item, "insertText") as *json::value) as str;
+		assert(insert_text == "greet(${1:name}, ${2:age})$0");
+		const fmt_val = *(json::get(&item, "insertTextFormat") as *json::value) as f64;
+		assert(fmt_val == 2.0);
+		// File-local sortText prefix.
+		const sort = *(json::get(&item, "sortText") as *json::value) as str;
+		assert(strings::hasprefix(sort, "1-"));
+	};
+	assert(found);
+};
+
+@test fn completion_keyword_has_keyword_sortText() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	comp_open(&s, "file:///k.ha", "fn main() void = l\\n");
+
+	const params = `{"textDocument":{"uri":"file:///k.ha"},"position":{"line":0,"character":18}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 5.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 5.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let saw_let = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "let") continue;
+		saw_let = true;
+		const sort = *(json::get(&item, "sortText") as *json::value) as str;
+		assert(strings::hasprefix(sort, "3-"));
+	};
+	assert(saw_let);
+};

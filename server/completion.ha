@@ -132,6 +132,15 @@ fn is_word_byte_comp(b: u8) bool = {
 	return b == '_': u8;
 };
 
+// sortText prefixes: clients rank lexicographically. We bias toward
+// what the user typed in this file first, then workspace symbols,
+// then keywords. The labels following these prefixes are the
+// completion text, so identical sources sort alphabetically within
+// their priority band.
+def SORT_LOCAL: str = "1-";
+def SORT_WORKSPACE: str = "2-";
+def SORT_KEYWORD: str = "3-";
+
 fn add_keywords(arr: *[]json::value, partial: str) void = {
 	let a = *arr;
 	for (let i = 0z; i < len(KEYWORDS); i += 1) {
@@ -140,6 +149,9 @@ fn add_keywords(arr: *[]json::value, partial: str) void = {
 		json::set(&item, "label", KEYWORDS[i]: json::value)!;
 		json::put(&item, "kind", CIK_KEYWORD)!;
 		json::set(&item, "detail", "keyword": json::value)!;
+		const sort = strings::concat(SORT_KEYWORD, KEYWORDS[i])!;
+		defer free(sort);
+		json::set(&item, "sortText", sort: json::value)!;
 		append(a, item: json::value)!;
 	};
 	*arr = a;
@@ -157,6 +169,12 @@ fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 		json::set(&item, "detail", sym.name: json::value)!;
 		if (len(sym.docs) > 0) {
 			json::set(&item, "documentation", sym.docs: json::value)!;
+		};
+		const sort = strings::concat(SORT_LOCAL, sym.short_name)!;
+		defer free(sort);
+		json::set(&item, "sortText", sort: json::value)!;
+		if (sym.kind == analysis::symbol_kind::FUNCTION) {
+			attach_function_snippet(&item, sym.short_name, sym.param_names);
 		};
 		append(a, item: json::value)!;
 	};
@@ -180,6 +198,12 @@ fn add_workspace_symbols(s: *server, arr: *[]json::value, partial: str) void = {
 		json::set(&item, "detail", e.full_name: json::value)!;
 		if (len(e.docs) > 0) {
 			json::set(&item, "documentation", e.docs: json::value)!;
+		};
+		const sort = strings::concat(SORT_WORKSPACE, e.short_name)!;
+		defer free(sort);
+		json::set(&item, "sortText", sort: json::value)!;
+		if (e.kind == analysis::symbol_kind::FUNCTION) {
+			attach_function_snippet(&item, e.short_name, e.param_names);
 		};
 		append(a, item: json::value)!;
 		added += 1;
@@ -207,9 +231,73 @@ fn add_module_members(s: *server, arr: *[]json::value, module: str, partial: str
 		if (len(e.docs) > 0) {
 			json::set(&item, "documentation", e.docs: json::value)!;
 		};
+		const sort = strings::concat(SORT_WORKSPACE, e.short_name)!;
+		defer free(sort);
+		json::set(&item, "sortText", sort: json::value)!;
+		if (e.kind == analysis::symbol_kind::FUNCTION) {
+			attach_function_snippet(&item, e.short_name, e.param_names);
+		};
 		append(a, item: json::value)!;
 	};
 	*arr = a;
+};
+
+// Attaches an insertText snippet of the form
+//   name(${1:p1}, ${2:p2})$0
+// plus insertTextFormat: 2 (Snippet). For zero-arg functions emits
+// "name()$0". param_names may contain empty strings for unnamed params,
+// in which case we substitute `p<N>`.
+fn attach_function_snippet(
+	item: *json::object,
+	name: str,
+	param_names: []str,
+) void = {
+	let buf: []u8 = [];
+	defer free(buf);
+	append(buf, strings::toutf8(name)...)!;
+	append(buf, '(': u8)!;
+	for (let i = 0z; i < len(param_names); i += 1) {
+		if (i > 0) {
+			append(buf, ',': u8)!;
+			append(buf, ' ': u8)!;
+		};
+		append(buf, '$': u8)!;
+		append(buf, '{': u8)!;
+		const idx_str = fmt_size_local_comp(i + 1);
+		defer free(idx_str);
+		append(buf, strings::toutf8(idx_str)...)!;
+		append(buf, ':': u8)!;
+		if (len(param_names[i]) > 0) {
+			append(buf, strings::toutf8(param_names[i])...)!;
+		} else {
+			append(buf, 'p': u8)!;
+			append(buf, strings::toutf8(idx_str)...)!;
+		};
+		append(buf, '}': u8)!;
+	};
+	append(buf, ')': u8)!;
+	append(buf, '$': u8)!;
+	append(buf, '0': u8)!;
+	// json::set duplicates the string, so we can pass the borrowed view.
+	const view = strings::fromutf8(buf)!;
+	json::set(item, "insertText", view: json::value)!;
+	json::put(item, "insertTextFormat", 2: f64)!;
+};
+
+fn fmt_size_local_comp(n: size) str = {
+	// Caller copies the returned bytes immediately (into a json string
+	// via toutf8/fromutf8), so a local stack buffer would be unsafe —
+	// it would go out of scope before the copy. Allocate a fresh string
+	// each time. Caller does not free; the result is small and short-lived.
+	if (n == 0) return strings::dup("0")!;
+	let buf: [21]u8 = [0...];
+	let i = len(buf);
+	let v = n;
+	for (v > 0; v /= 10) {
+		i -= 1;
+		buf[i] = ('0': u8) + (v % 10): u8;
+	};
+	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
 fn symbol_kind_to_completion(k: analysis::symbol_kind) f64 = {

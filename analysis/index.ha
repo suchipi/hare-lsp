@@ -39,6 +39,10 @@ export type symbol = struct {
 	docs: str,
 	// Whether the decl was declared `export`.
 	exported: bool,
+	// For FUNCTION-kind symbols: parameter names from the prototype, in
+	// order. Empty for unnamed parameters and for non-function symbols.
+	// Used by completion to render snippet placeholders like ${1:path}.
+	param_names: []str,
 };
 
 // A per-file symbol index.
@@ -61,6 +65,10 @@ export fn finish_index(idx: *file_index) void = {
 		free(idx.symbols[i].name);
 		free(idx.symbols[i].short_name);
 		free(idx.symbols[i].docs);
+		for (let j = 0z; j < len(idx.symbols[i].param_names); j += 1) {
+			free(idx.symbols[i].param_names[j]);
+		};
+		free(idx.symbols[i].param_names);
 	};
 	free(idx.symbols);
 };
@@ -69,21 +77,34 @@ fn index_decl(idx: *file_index, d: *ast::decl) void = {
 	const docs = if (len(d.docs) > 0) strings::dup(d.docs)! else strings::dup("")!;
 	match (d.decl) {
 	case let f: ast::decl_func =>
+		const params = extract_param_names(f);
 		add_symbol(idx, f.ident, symbol_kind::FUNCTION, d.loc, docs,
-			d.exported);
+			d.exported, params);
 	case let t: ast::decl_type =>
 		add_symbol(idx, t.ident, symbol_kind::TYPE, d.loc, docs,
-			d.exported);
+			d.exported, []);
 	case let g: ast::decl_global =>
 		const k = if (g.is_const) symbol_kind::CONST else symbol_kind::GLOBAL;
-		add_symbol(idx, g.ident, k, d.loc, docs, d.exported);
+		add_symbol(idx, g.ident, k, d.loc, docs, d.exported, []);
 	case let c: ast::decl_const =>
 		add_symbol(idx, c.ident, symbol_kind::DEF, d.loc, docs,
-			d.exported);
+			d.exported, []);
 	case ast::assert_expr =>
 		// `static assert(...)` — no symbol introduced.
 		free(docs);
 	};
+};
+
+fn extract_param_names(f: ast::decl_func) []str = {
+	let out: []str = [];
+	match (f.prototype.repr) {
+	case let proto: ast::func_type =>
+		for (let i = 0z; i < len(proto.params); i += 1) {
+			append(out, strings::dup(proto.params[i].name)!)!;
+		};
+	case => void;
+	};
+	return out;
 };
 
 fn add_symbol(
@@ -93,6 +114,7 @@ fn add_symbol(
 	loc: ast::location,
 	docs: str,
 	exported: bool,
+	param_names: []str,
 ) void = {
 	const joined = ident_join(id);
 	const short = if (len(id) > 0) strings::dup(id[len(id) - 1])! else strings::dup("")!;
@@ -109,6 +131,7 @@ fn add_symbol(
 		name_span = name_span,
 		docs = docs,
 		exported = exported,
+		param_names = param_names,
 	})!;
 };
 

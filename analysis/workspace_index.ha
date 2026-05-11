@@ -35,6 +35,10 @@ export type workspace_entry = struct {
 	// the file's containing directory. For /repo/foo/bar.ha this is
 	// "foo". Matches the Hare convention that directory == module name.
 	module: str,
+	// For FUNCTION-kind entries: parameter names from the prototype.
+	// Empty for non-functions and for prototypes with no named params.
+	// Used to build snippet placeholders in completion.
+	param_names: []str,
 };
 
 // The workspace index.
@@ -53,12 +57,7 @@ export fn new_workspace_index() workspace_index = workspace_index {
 // Releases owned memory.
 export fn finish_workspace_index(idx: *workspace_index) void = {
 	for (let i = 0z; i < len(idx.entries); i += 1) {
-		free(idx.entries[i].uri);
-		free(idx.entries[i].path);
-		free(idx.entries[i].short_name);
-		free(idx.entries[i].full_name);
-		free(idx.entries[i].docs);
-		free(idx.entries[i].module);
+		free_workspace_entry(&idx.entries[i]);
 	};
 	free(idx.entries);
 	for (let i = 0z; i < len(idx.indexed_files); i += 1) {
@@ -67,18 +66,26 @@ export fn finish_workspace_index(idx: *workspace_index) void = {
 	free(idx.indexed_files);
 };
 
+fn free_workspace_entry(e: *workspace_entry) void = {
+	free(e.uri);
+	free(e.path);
+	free(e.short_name);
+	free(e.full_name);
+	free(e.docs);
+	free(e.module);
+	for (let j = 0z; j < len(e.param_names); j += 1) {
+		free(e.param_names[j]);
+	};
+	free(e.param_names);
+};
+
 // Drops all entries originating from `path`. Used when a file is renamed,
 // deleted, or modified before re-indexing.
 export fn drop_file(idx: *workspace_index, path_str: str) void = {
 	let i = 0z;
 	for (i < len(idx.entries)) {
 		if (idx.entries[i].path == path_str) {
-			free(idx.entries[i].uri);
-			free(idx.entries[i].path);
-			free(idx.entries[i].short_name);
-			free(idx.entries[i].full_name);
-			free(idx.entries[i].docs);
-			free(idx.entries[i].module);
+			free_workspace_entry(&idx.entries[i]);
 			delete(idx.entries[i]);
 		} else {
 			i += 1;
@@ -105,6 +112,10 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 	const module = module_from_path(file_path);
 	for (let i = 0z; i < len(fi.symbols); i += 1) {
 		const sym = &fi.symbols[i];
+		let pn: []str = [];
+		for (let j = 0z; j < len(sym.param_names); j += 1) {
+			append(pn, strings::dup(sym.param_names[j])!)!;
+		};
 		append(idx.entries, workspace_entry {
 			uri = strings::dup(uri)!,
 			path = strings::dup(file_path)!,
@@ -116,6 +127,7 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 			docs = strings::dup(sym.docs)!,
 			exported = sym.exported,
 			module = strings::dup(module)!,
+			param_names = pn,
 		})!;
 	};
 	free(uri);
