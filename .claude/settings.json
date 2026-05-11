@@ -30,7 +30,16 @@
       "Bash(hare build *)",
       "Bash(chmod +x .tmp/build-diag-test.sh)",
       "Bash(.tmp/build-diag-test.sh)",
-      "Bash(HAREPATH=\"$\\(cd ../.. && pwd\\):/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare run main.ha)"
+      "Bash(HAREPATH=\"$\\(cd ../.. && pwd\\):/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare run main.ha)",
+      "Bash(HAREPATH=\"/Users/suchipi/Code/hare-lsp:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare test -m server file_parse_cache_evicts_when_full)",
+      "Bash(HAREPATH=\"/Users/suchipi/Code/hare-lsp:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare test ./server)",
+      "Read(//Users/suchipi/.claude/plans/**)",
+      "Bash(HAREPATH=\"/Users/suchipi/Code/hare-lsp:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare build -v -o hare-lsp ./cmd/hare-lsp)",
+      "Bash(HAREPATH=\"/Users/suchipi/Code/hare-lsp:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" hare build ./cmd/hare-lsp)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(HAREPATH=\"/usr/local/src/hare/stdlib\" HARECACHE=/Users/suchipi/Code/hare-lsp/.cache hare run /Users/suchipi/Code/hare-lsp/.tmp/scan-debug/scan-debug.ha)",
+      "Bash(hare test *)",
+      "Bash(npx tsc *)"
     ]
   }
 }
