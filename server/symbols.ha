@@ -40,15 +40,12 @@ export fn handle_document_symbol(s: *server, r: lsp::request) void = {
 	};
 
 	const data = analysis::bytes(&doc.buf);
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
+	const cache = parse_of(doc);
 
 	const enc = position_encoding(s);
 	let arr: []json::value = [];
-	for (let i = 0z; i < len(idx.symbols); i += 1) {
-		const sym = &idx.symbols[i];
+	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
+		const sym = &cache.idx.symbols[i];
 		let item = json::newobject();
 		json::set(&item, "name", sym.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_lsp(sym.kind))!;
@@ -106,11 +103,8 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
-	const sym = match (analysis::find_by_short_name(&idx, ident_str)) {
+	const cache = parse_of(doc);
+	const sym = match (analysis::find_by_short_name(&cache.idx, ident_str)) {
 	case let p: *analysis::symbol => yield p;
 	case void =>
 		send_empty_array(s, r.id);
@@ -146,13 +140,10 @@ export fn handle_folding_range(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
+	const cache = parse_of(doc);
 	let arr: []json::value = [];
-	for (let i = 0z; i < len(idx.symbols); i += 1) {
-		const sym = &idx.symbols[i];
+	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
+		const sym = &cache.idx.symbols[i];
 		const start_line = sym.span.start.line: u32;
 		const end_line = sym.span.end.line: u32;
 		if (end_line <= start_line) continue;
@@ -163,9 +154,9 @@ export fn handle_folding_range(s: *server, r: lsp::request) void = {
 		append(arr, item: json::value)!;
 	};
 	// Also fold the import block as a region.
-	if (len(pr.subunit.imports) >= 2) {
-		const first = pr.subunit.imports[0];
-		const last = pr.subunit.imports[len(pr.subunit.imports) - 1];
+	if (len(cache.pr.subunit.imports) >= 2) {
+		const first = cache.pr.subunit.imports[0];
+		const last = cache.pr.subunit.imports[len(cache.pr.subunit.imports) - 1];
 		if (last.loc.end.line > first.loc.start.line) {
 			let item = json::newobject();
 			json::put(&item, "startLine", (first.loc.start.line - 1): f64)!;
@@ -219,10 +210,7 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
+	const cache = parse_of(doc);
 
 	let arr: []json::value = [];
 	for (let i = 0z; i < len(positions); i += 1) {
@@ -240,7 +228,7 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		// Innermost: the ident at the cursor (if any).
 		const ident_rng = analysis::ident_at(data, off);
 		// Outer: the containing decl span (if any).
-		const sym = analysis::symbol_at(&idx, off);
+		const sym = analysis::symbol_at(&cache.idx, off);
 
 		let outer_obj: (json::value | void) = void;
 		match (sym) {
@@ -303,12 +291,11 @@ export fn handle_document_link(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
+	const cache = parse_of(doc);
 	const enc = position_encoding(s);
 	let arr: []json::value = [];
-	for (let i = 0z; i < len(pr.subunit.imports); i += 1) {
-		const imp = pr.subunit.imports[i];
+	for (let i = 0z; i < len(cache.pr.subunit.imports); i += 1) {
+		const imp = cache.pr.subunit.imports[i];
 		const start_pos = analysis::byte_to_position(data, doc.buf.line_index,
 			enc, imp.loc.start.off: size);
 		const end_pos = analysis::byte_to_position(data, doc.buf.line_index,

@@ -32,17 +32,14 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
+	const cache = parse_of(doc);
 
 	let arr: []json::value = [];
 	const enc = position_encoding(s);
 
 	// Reference-count lens for each exported decl.
-	for (let i = 0z; i < len(idx.symbols); i += 1) {
-		const sym = &idx.symbols[i];
+	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
+		const sym = &cache.idx.symbols[i];
 		if (!sym.exported) continue;
 		let lens = json::newobject();
 		const sp = analysis::byte_to_position(data, doc.buf.line_index,

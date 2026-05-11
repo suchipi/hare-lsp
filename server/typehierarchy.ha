@@ -39,11 +39,8 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 	const off = analysis::position_to_byte(data, doc.buf.line_index,
 		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
-	const sym = match (analysis::symbol_at(&idx, off)) {
+	const cache = parse_of(doc);
+	const sym = match (analysis::symbol_at(&cache.idx, off)) {
 	case let p: *analysis::symbol => yield p;
 	case void =>
 		send_array_th(s, r.id, []);

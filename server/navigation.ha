@@ -53,22 +53,17 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
 
-	// Re-parse to get an AST (the document store doesn't keep one yet —
-	// it will once parse caching is added in a follow-up).
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
+	const cache = parse_of(doc);
 
 	// Try local file first; on miss, fall back to the workspace index.
 	let sig: str = "";
 	let docs: str = "";
 	let found_local = false;
-	match (analysis::find_by_short_name(&idx, ident_str)) {
+	match (analysis::find_by_short_name(&cache.idx, ident_str)) {
 	case let p: *analysis::symbol =>
-		match (find_decl_by_name(&pr.subunit, ident_str)) {
+		match (find_decl_by_name(&cache.pr.subunit, ident_str)) {
 		case let i: size =>
-			sig = render_decl_signature(&pr.subunit.decls[i]);
+			sig = render_decl_signature(&cache.pr.subunit.decls[i]);
 			docs = strings::dup(p.docs)!;
 			found_local = true;
 		case void => void;
@@ -158,11 +153,8 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
-	match (analysis::find_by_short_name(&idx, ident_str)) {
+	const cache = parse_of(doc);
+	match (analysis::find_by_short_name(&cache.idx, ident_str)) {
 	case let p: *analysis::symbol =>
 		if (p.kind != analysis::symbol_kind::TYPE) {
 			send_null(s, r.id);
@@ -210,11 +202,8 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
-	match (analysis::find_by_short_name(&idx, ident_str)) {
+	const cache = parse_of(doc);
+	match (analysis::find_by_short_name(&cache.idx, ident_str)) {
 	case let p: *analysis::symbol =>
 		send_location(s, r.id, uri, p.span, doc);
 		return;

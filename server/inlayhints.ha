@@ -35,17 +35,14 @@ export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
+	const cache = parse_of(doc);
 
 	let arr: []json::value = [];
 	if (s.config.inlay_hints_parameter_names) {
-		let idx = analysis::build_index(&pr.subunit);
-		defer analysis::finish_index(&idx);
-		emit_param_hints(s, doc, &pr.subunit, &idx, &arr);
+		emit_param_hints(s, doc, &cache.pr.subunit, &cache.idx, &arr);
 	};
 	if (s.config.inlay_hints_inferred_types) {
-		emit_inferred_type_hints(s, doc, &pr.subunit, &arr);
+		emit_inferred_type_hints(s, doc, &cache.pr.subunit, &arr);
 	};
 
 	send_array_ih(s, r.id, arr);

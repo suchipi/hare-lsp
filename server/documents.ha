@@ -40,6 +40,49 @@ export type document = struct {
 	// followed by a publishDiagnostics call (because the debounce
 	// suppressed it). Cleared whenever we actually publish.
 	diagnostics_pending: bool,
+	// Cached parse + index of the current buffer contents. Null when
+	// the buffer has been mutated since the last parse. Acquire via
+	// [[parse_of]] which lazy-fills on demand.
+	parse_cache: nullable *parse_cache_entry,
+};
+
+// Owns a parse_result and the matching file_index. Allocated together
+// so callers can borrow both without juggling lifetimes.
+export type parse_cache_entry = struct {
+	pr: analysis::parse_result,
+	idx: analysis::file_index,
+};
+
+fn finish_parse_cache(c: nullable *parse_cache_entry) void = {
+	match (c) {
+	case null => void;
+	case let p: *parse_cache_entry =>
+		analysis::finish_index(&p.idx);
+		analysis::finish_parse_result(&p.pr);
+		free(p);
+	};
+};
+
+// Returns a borrowed pointer to the document's cached parse + index,
+// building them on demand. The returned pointer is invalidated on the
+// next call to [[invalidate_parse_cache]] (any buffer mutation).
+export fn parse_of(doc: *document) *parse_cache_entry = {
+	match (doc.parse_cache) {
+	case let p: *parse_cache_entry => return p;
+	case null => void;
+	};
+	let entry = alloc(parse_cache_entry {
+		pr = analysis::parse_recover(analysis::bytes(&doc.buf), doc.uri),
+		idx = analysis::file_index { symbols = [] },
+	})!;
+	entry.idx = analysis::build_index(&entry.pr.subunit);
+	doc.parse_cache = entry;
+	return entry;
+};
+
+fn invalidate_parse_cache(doc: *document) void = {
+	finish_parse_cache(doc.parse_cache);
+	doc.parse_cache = null;
 };
 
 // Looks up a document by URI. Returns nullable so callers can check before
@@ -87,6 +130,7 @@ export fn finish_document(d: *document) void = {
 	analysis::finish(&d.buf);
 	free(d.prev_tokens);
 	free(d.prev_result_id);
+	finish_parse_cache(d.parse_cache);
 };
 
 // --- handlers --------------------------------------------------------
@@ -129,6 +173,7 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 		last_edit_at = now,
 		last_publish_at = time::INSTANT_ZERO,
 		diagnostics_pending = false,
+		parse_cache = null,
 	};
 	upsert_document(s, doc);
 	const stored = match (find_document(s, uri)) {
@@ -229,6 +274,7 @@ fn apply_content_change(s: *server, doc: *document, change: json::value) void = 
 	if (range_p is void) {
 		// Full document sync.
 		analysis::replace_all(&doc.buf, strings::toutf8(text));
+		invalidate_parse_cache(doc);
 		return;
 	};
 	const range = match (lsp::decode_range(*(range_p as *json::value))) {
@@ -249,6 +295,7 @@ fn apply_content_change(s: *server, doc: *document, change: json::value) void = 
 			character = range.end.character,
 		});
 	analysis::replace_range(&doc.buf, start_byte, end_byte, strings::toutf8(text));
+	invalidate_parse_cache(doc);
 };
 
 // Returns the negotiated position encoding (currently always UTF16; updated
@@ -298,6 +345,7 @@ export fn handle_did_save(s: *server, n: lsp::notification) void = {
 	match (object_string(&obj, "text")) {
 	case let txt: str =>
 		analysis::replace_all(&doc.buf, strings::toutf8(txt));
+		invalidate_parse_cache(doc);
 	case void => void;
 	};
 	// Save bypasses the debounce: we want fresh diagnostics now.

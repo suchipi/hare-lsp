@@ -60,8 +60,8 @@ fn add_organize_imports_action(
 	s: *server, doc: *document, uri: str, arr: *[]json::value,
 ) void = {
 	const data = analysis::bytes(&doc.buf);
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
+	const cache = parse_of(doc);
+	const pr = &cache.pr;
 
 	if (len(pr.subunit.imports) == 0) return;
 

@@ -66,7 +66,7 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 		add_module_members(s, &arr, prefix_info.module, prefix_info.partial);
 	case prefix_kind::PLAIN =>
 		add_keywords(&arr, prefix_info.partial);
-		add_file_locals(&arr, &doc.buf, uri, prefix_info.partial);
+		add_file_locals(&arr, doc, prefix_info.partial);
 		add_workspace_symbols(s, &arr, prefix_info.partial);
 	};
 	free(prefix_info.module);
@@ -145,14 +145,11 @@ fn add_keywords(arr: *[]json::value, partial: str) void = {
 	*arr = a;
 };
 
-fn add_file_locals(arr: *[]json::value, buf: *analysis::buffer, uri: str, partial: str) void = {
+fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 	let a = *arr;
-	let pr = analysis::parse_recover(analysis::bytes(buf), uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
-	for (let i = 0z; i < len(idx.symbols); i += 1) {
-		const sym = &idx.symbols[i];
+	const cache = parse_of(doc);
+	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
+		const sym = &cache.idx.symbols[i];
 		if (len(partial) > 0 && !strings::hasprefix(sym.short_name, partial)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", sym.short_name: json::value)!;

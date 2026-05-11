@@ -44,11 +44,8 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	defer free(ctx.callee_name);
 
 	// Resolve the callee in the file's index, then in the workspace index.
-	let pr = analysis::parse_recover(data, uri);
-	defer analysis::finish_parse_result(&pr);
-	let idx = analysis::build_index(&pr.subunit);
-	defer analysis::finish_index(&idx);
-	const decl_idx = match (find_decl_by_short_name(&pr.subunit, ctx.callee_name)) {
+	const cache = parse_of(doc);
+	const decl_idx = match (find_decl_by_short_name(&cache.pr.subunit, ctx.callee_name)) {
 	case let i: size => yield i;
 	case void =>
 		// Try workspace.
@@ -56,7 +53,7 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 		return;
 	};
 
-	const sig = render_decl_signature_local(&pr.subunit.decls[decl_idx]);
+	const sig = render_decl_signature_local(&cache.pr.subunit.decls[decl_idx]);
 	defer free(sig);
 
 	let signatures: []json::value = [];
@@ -65,7 +62,7 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 
 	// Build a parameters array by walking the decl's prototype.
 	let params_arr: []json::value = [];
-	const param_count = count_params(&pr.subunit.decls[decl_idx]);
+	const param_count = count_params(&cache.pr.subunit.decls[decl_idx]);
 	for (let i = 0z; i < param_count; i += 1) {
 		let p = json::newobject();
 		const lbl = strings::concat("param ", fmt_size_local(i))!;

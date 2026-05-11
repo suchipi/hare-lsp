@@ -112,8 +112,8 @@ fn find_or_create_uri_bucket(by_uri: *[](str, []json::value), uri: str) size = {
 // Computes parse-only diagnostics for a document and returns a slice of
 // json::value Diagnostic objects. Caller takes ownership.
 fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
-	let r = analysis::parse_recover(analysis::bytes(&doc.buf), doc.uri);
-	defer analysis::finish_parse_result(&r);
+	const cache = parse_of(doc);
+	const r = &cache.pr;
 
 	let arr: []json::value = [];
 	const enc = position_encoding(s);

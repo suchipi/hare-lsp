@@ -182,3 +182,40 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	assert(analysis::as_string(&doc.buf) == "second");
 	assert(len(s.documents) == 1);
 };
+
+@test fn parse_cache_reuses_until_buffer_mutates() void = {
+	let (s, scan, in_buf, out) = doc_test_server();
+	defer doc_test_cleanup(&s, scan, in_buf, out);
+
+	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"fn a() void = void;\n"}}`;
+	const (n, pv) = make_notification("textDocument/didOpen", open);
+	defer finish_notification(n, pv);
+	handle_did_open(&s, n);
+
+	const doc = find_document(&s, "file:///x.ha") as *document;
+	// After didOpen, parse_cache should already be populated (refresh
+	// diagnostics built it).
+	assert(doc.parse_cache is *parse_cache_entry);
+
+	// Multiple parse_of calls without mutation reuse the same entry —
+	// confirm by snapshotting the address and asserting it's unchanged.
+	const c1 = parse_of(doc);
+	const c1_addr = c1: uintptr;
+	const c2 = parse_of(doc);
+	assert(c2: uintptr == c1_addr);
+	const c3 = parse_of(doc);
+	assert(c3: uintptr == c1_addr);
+
+	// A buffer-replacing edit invalidates the cache.
+	const change = `{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"fn b() void = void;\n"}]}`;
+	const (cn, cpv) = make_notification("textDocument/didChange", change);
+	defer finish_notification(cn, cpv);
+	handle_did_change(&s, cn);
+
+	// After the edit, the cache should reflect the new buffer. The
+	// pointer address may or may not be reused by the allocator, but
+	// the indexed symbol name should now be "b", not "a".
+	const c4 = parse_of(doc);
+	assert(len(c4.idx.symbols) >= 1);
+	assert(c4.idx.symbols[0].short_name == "b");
+};
