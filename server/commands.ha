@@ -105,8 +105,8 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	let cmd = match (exec::cmd(s.config.hare_path, argv...)) {
 	case let c: exec::command => yield c;
 	case =>
-		io::close(read_fd)!;
-		io::close(write_fd)!;
+		lsp::safe_close(read_fd);
+		lsp::safe_close(write_fd);
 		log_error(s, "failed to spawn hare command");
 		return;
 	};
@@ -120,12 +120,12 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	const proc = match (exec::start(&cmd)) {
 	case let p: exec::process => yield p;
 	case =>
-		io::close(read_fd)!;
-		io::close(write_fd)!;
+		lsp::safe_close(read_fd);
+		lsp::safe_close(write_fd);
 		log_error(s, "failed to start hare command");
 		return;
 	};
-	io::close(write_fd)!;
+	lsp::safe_close(write_fd);
 
 	// Stream output.
 	let buf: []u8 = [];
@@ -141,7 +141,7 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 			break;
 		};
 	};
-	io::close(read_fd)!;
+	lsp::safe_close(read_fd);
 	match (exec::wait(&proc)) {
 	case => void;
 	};

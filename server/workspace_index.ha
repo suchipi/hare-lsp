@@ -213,7 +213,7 @@ fn os_open_helper(path_str: str) (io_file_helper | void) = {
 };
 
 fn io_close_helper(f: io_file_helper) void = {
-	io::close(f)!;
+	lsp::safe_close(f);
 };
 
 fn io_read_helper(f: io_file_helper, buf: []u8) (size | void) = {

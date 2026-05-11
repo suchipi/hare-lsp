@@ -69,8 +69,8 @@ export fn run_build(hare_path: str, file_path: str, tags: []str) []build_diagnos
 	let cmd = match (exec::cmd(hare_path, build_args("build", argv)...)) {
 	case let c: exec::command => yield c;
 	case =>
-		io::close(read_fd)!;
-		io::close(write_fd)!;
+		lsp::safe_close(read_fd);
+		lsp::safe_close(write_fd);
 		return [];
 	};
 
@@ -91,14 +91,14 @@ export fn run_build(hare_path: str, file_path: str, tags: []str) []build_diagnos
 	const proc = match (exec::start(&cmd)) {
 	case let p: exec::process => yield p;
 	case =>
-		io::close(read_fd)!;
-		io::close(write_fd)!;
+		lsp::safe_close(read_fd);
+		lsp::safe_close(write_fd);
 		return [];
 	};
 
 	// Close the write end in our process so reads from read_fd will hit
 	// EOF when the child exits.
-	io::close(write_fd)!;
+	lsp::safe_close(write_fd);
 
 	// Drain stderr.
 	let buf: []u8 = [];
@@ -114,7 +114,7 @@ export fn run_build(hare_path: str, file_path: str, tags: []str) []build_diagnos
 			break;
 		};
 	};
-	io::close(read_fd)!;
+	lsp::safe_close(read_fd);
 
 	// Reap.
 	match (exec::wait(&proc)) {
