@@ -123,6 +123,11 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 	let seen_paths: []str = [];
 	defer free(seen_paths);
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
+		if (i % 32 == 0 && check_cancel(s, r.id)) {
+			const v: json::value = arr;
+			json::finish(v);
+			return;
+		};
 		const e = &s.workspace_index.entries[i];
 		if (e.kind != analysis::symbol_kind::TYPE) continue;
 		if (str_in(seen_paths, e.path)) continue;

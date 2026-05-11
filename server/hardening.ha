@@ -62,3 +62,13 @@ export fn send_cancelled(s: *server, id: lsp::id) void = {
 	case => void;
 	};
 };
+
+// Polled by long-running handlers between work units. Returns true and
+// short-circuits the handler (response + cleanup) when the client has
+// cancelled the request; returns false otherwise.
+export fn check_cancel(s: *server, id: lsp::id) bool = {
+	if (!is_cancelled(s, id)) return false;
+	send_cancelled(s, id);
+	clear_cancellation(s, id);
+	return true;
+};

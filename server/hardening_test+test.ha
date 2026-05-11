@@ -51,3 +51,26 @@ fn hard_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, 
 	assert(is_cancelled(&s, "abc": lsp::id));
 	assert(!is_cancelled(&s, "xyz": lsp::id));
 };
+
+@test fn check_cancel_sends_response_and_clears() void = {
+	let (s, scan, in_buf, out) = hard_test_server();
+	defer hard_test_cleanup(&s, scan, in_buf, out);
+	const id: lsp::id = 99.0;
+	append(s.cancelled_ids, id)!;
+	assert(check_cancel(&s, id));
+	// After firing, the entry is gone.
+	assert(!is_cancelled(&s, id));
+	// And the wire shows a RequestCancelled error.
+	const data = memio::buffer(out);
+	const text = strings::fromutf8(data)!;
+	assert(strings::contains(text, "-32800"));
+	assert(strings::contains(text, "request cancelled"));
+};
+
+@test fn check_cancel_returns_false_when_not_cancelled() void = {
+	let (s, scan, in_buf, out) = hard_test_server();
+	defer hard_test_cleanup(&s, scan, in_buf, out);
+	assert(!check_cancel(&s, 1.0: lsp::id));
+	// Nothing was written.
+	assert(len(memio::buffer(out)) == 0);
+};

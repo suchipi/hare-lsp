@@ -46,19 +46,34 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 	const target = strings::fromutf8(data[ident_range.0..ident_range.1])!;
 
 	let arr: []json::value = [];
+	let cancelled = false;
 	for (let i = 0z; i < len(s.documents); i += 1) {
+		if (i % 32 == 0 && check_cancel(s, r.id)) {
+			cancelled = true;
+			break;
+		};
 		const more = find_references_in_doc(s, &s.documents[i], target);
 		append(arr, more...)!;
 		free(more);
 	};
 	const seen = collect_open_paths(s);
 	defer free(seen);
-	for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
+	if (!cancelled) for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
+		if (i % 32 == 0 && check_cancel(s, r.id)) {
+			cancelled = true;
+			break;
+		};
 		const path = s.workspace_index.indexed_files[i];
 		if (is_in_open_paths(seen, path)) continue;
 		const more = find_references_in_file_on_disk(path, target);
 		append(arr, more...)!;
 		free(more);
+	};
+
+	if (cancelled) {
+		const v: json::value = arr;
+		json::finish(v);
+		return;
 	};
 
 	const result_v: json::value = arr;
@@ -296,19 +311,34 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 		};
 		free(locs);
 	};
+	let cancelled = false;
 	for (let i = 0z; i < len(s.documents); i += 1) {
+		if (i % 32 == 0 && check_cancel(s, r.id)) {
+			cancelled = true;
+			break;
+		};
 		const more = find_references_in_doc(s, &s.documents[i], target);
 		append(locs, more...)!;
 		free(more);
 	};
 	const seen = collect_open_paths(s);
 	defer free(seen);
-	for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
+	if (!cancelled) for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
+		if (i % 32 == 0 && check_cancel(s, r.id)) {
+			cancelled = true;
+			break;
+		};
 		const path = s.workspace_index.indexed_files[i];
 		if (is_in_open_paths(seen, path)) continue;
 		const more = find_references_in_file_on_disk(path, target);
 		append(locs, more...)!;
 		free(more);
+	};
+
+	if (cancelled) {
+		// `changes` and `locs` are freed via the surrounding defer/finish.
+		json::finish(changes);
+		return;
 	};
 
 	// Group by uri.
