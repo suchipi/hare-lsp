@@ -221,9 +221,16 @@ fn extract_query(p: (json::value | void)) (str | void) = {
 
 // Refreshes the workspace index for files reported by
 // workspace/didChangeWatchedFiles. Called from the file watch handler.
+//
+// Only `.ha` files are indexed: the watcher's glob may include other
+// patterns (notably `*.s`, since assembly is part of a Hare module's
+// source set), but the parser would abort on non-Hare bytes. We also
+// ignore anything inside our own `.cache/` since the Hare compiler
+// drops `*.o.tmp.s` artifacts there.
 export fn workspace_handle_file_event(s: *server, uri: str, event_type: int) void = {
 	const path = uri_to_local_path(uri);
 	defer free(path);
+	if (!is_indexable_path(path)) return;
 	// Invalidate the on-disk parse cache for this path regardless of
 	// event type — any change makes the cached parse stale.
 	file_parse_cache_drop_path(&s.file_parse_cache, path);
@@ -241,6 +248,17 @@ export fn workspace_handle_file_event(s: *server, uri: str, event_type: int) voi
 		analysis::index_file(&s.workspace_index, path, f);
 	case => void;
 	};
+};
+
+// Whether a path on disk should be parsed as Hare and added to the
+// workspace index. Exported only for tests.
+export fn is_indexable_path(path_str: str) bool = {
+	if (!strings::hassuffix(path_str, ".ha")) return false;
+	// Reject anything inside a `.cache/` directory at any depth: the
+	// Hare compiler scratches build artifacts there (including
+	// `.ha`-suffixed intermediates in the future).
+	if (strings::contains(path_str, "/.cache/")) return false;
+	return true;
 };
 
 fn open_file_for_read(path_str: str) ([]u8 | void) = {

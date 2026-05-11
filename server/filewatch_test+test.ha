@@ -88,6 +88,27 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 	assert(!has_document(&s, "file:///gone.ha"));
 };
 
+// Regression: the file watcher's glob includes `**/*.s`, so the LSP
+// gets workspace/didChangeWatchedFiles events for the `.cache/*.o.tmp.s`
+// assembly intermediates the Hare compiler leaves behind. Feeding any
+// non-Hare bytes through the parser would crash the server (the bufio
+// scanner's unread assertion or a downstream malloc bug). The handler
+// must reject those URIs at the boundary.
+@test fn workspace_handle_file_event_skips_non_hare() void = {
+	// Cache scratch files: nope.
+	assert(!is_indexable_path("/repo/.cache/abc.o.tmp.s"));
+	assert(!is_indexable_path("/repo/.cache/abc.s"));
+	// `.s` anywhere: nope (Hare's source set includes assembly, but we
+	// don't index it).
+	assert(!is_indexable_path("/repo/foo/bar.s"));
+	// `.ha` files inside `.cache/` are also rejected: the compiler may
+	// stage intermediates there in future versions.
+	assert(!is_indexable_path("/repo/.cache/abc.ha"));
+	// Real Hare files: yes.
+	assert(is_indexable_path("/repo/foo.ha"));
+	assert(is_indexable_path("/repo/server/build.ha"));
+};
+
 @test fn did_change_watched_files_logs_when_trace_on() void = {
 	let (s, scan, in_buf, out) = fw_test_server();
 	defer fw_test_cleanup(&s, scan, in_buf, out);

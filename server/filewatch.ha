@@ -20,9 +20,12 @@ use strings;
 // Registers the file watcher with the client. Should be called after the
 // server has reached the READY state. Returns the registration request id,
 // or void on transport failure.
+//
+// We only watch `**/*.ha`. Hare also accepts `*.s` as part of a module's
+// source set, but the LSP doesn't parse assembly, and watching it picks
+// up build artifacts (e.g. qbe's `.cache/*.o.tmp.s`) that we'd then
+// dispatch as bogus index updates.
 export fn register_file_watchers(s: *server) (i64 | void) = {
-	// Build the watcher options:
-	//   { watchers: [ { globPattern: "**/*.ha" }, { globPattern: "**/*.s" } ] }
 	let opts = json::newobject();
 	let opts_owned = true;
 	defer if (opts_owned) json::finish(opts);
@@ -39,9 +42,6 @@ export fn register_file_watchers(s: *server) (i64 | void) = {
 	let w1 = json::newobject();
 	json::set(&w1, "globPattern", "**/*.ha": json::value)!;
 	append(watchers, w1: json::value)!;
-	let w2 = json::newobject();
-	json::set(&w2, "globPattern", "**/*.s": json::value)!;
-	append(watchers, w2: json::value)!;
 
 	json::put(&opts, "watchers", watchers: json::value)!;
 	watchers_owned = false;

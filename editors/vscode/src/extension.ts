@@ -80,7 +80,11 @@ export function activate(context: vscode.ExtensionContext): void {
     synchronize: {
       // Forward `hare.*` setting changes to the server.
       configurationSection: "hare",
-      fileEvents: vscode.workspace.createFileSystemWatcher("**/*.{ha,s}"),
+      // Only watch Hare source. Assembly (`*.s`) is part of a module's
+      // source set per Hare's rules but the LSP doesn't parse it; the
+      // qbe-output `.cache/*.o.tmp.s` artifacts also matched
+      // `**/*.{ha,s}` and crashed the server when fed to the parser.
+      fileEvents: vscode.workspace.createFileSystemWatcher("**/*.ha"),
     },
     initializationOptions: {
       // Some servers consult initializationOptions for one-time setup
