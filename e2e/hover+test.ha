@@ -17,6 +17,62 @@ export fn answer() int = 42;
 export fn ask() int = answer();
 `;
 
+// Hover on `let scan = bufio::newscanner(...)` — no explicit type annotation,
+// so the server should infer the type from the callee's return signature.
+// Catches the regression where the hover used to read just "let scan", which
+// is duplicate of what the user already typed.
+@test fn e2e_hover_local_let_infers_call_return_type() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(&s, 1.0));
+	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `use bufio;
+use os;
+export fn main() void = {
+	let scan = bufio::newscanner(os::stdin);
+	let _ = scan;
+};
+`;
+	const did_open = build_did_open("file:///infer_call.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `scan` in `let _ = scan`. Line 4, char 9.
+	const hover_req = `{"jsonrpc":"2.0","id":500,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///infer_call.ha"},"position":{"line":4,"character":9}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 500.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case =>
+			fmt::fatalf("e2e: hover returned null for inferred-type local. body={}",
+				text);
+		};
+	case void =>
+		fmt::fatalf("e2e: hover response missing result: {}", text);
+	};
+	const contents = (*(json::get(&result_obj, "contents") as *json::value)) as json::object;
+	const md = (*(json::get(&contents, "value") as *json::value)) as str;
+	// The server should report the inferred type rather than the bare
+	// `let scan` form. bufio::newscanner returns bufio::scanner.
+	assert(strings::contains(md, "scanner"),
+		"hover on a `let x = call()` local should infer the call's return type");
+	// And it should NOT render the source-text fallback when inference
+	// succeeded.
+	assert(!strings::contains(md, "= bufio::newscanner"),
+		"inferred type should replace the init-source fallback");
+};
+
 // Hover on a stdlib-qualified call (`bufio::newscanner`). The server lazily
 // indexes the imported module from $HAREPATH / default install paths.
 @test fn e2e_hover_on_stdlib_qualified_call() void = {

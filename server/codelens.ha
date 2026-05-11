@@ -48,10 +48,27 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 			enc, sym.span.end.off: size);
 		json::put(&lens, "range", encode_range_cl(sp, ep))!;
 		// Carry a `data` blob so resolve knows what to fill in.
+		// We also stash the identifier's own position so the resolve
+		// step can hand it to editor.action.showReferences — using the
+		// lens range start would land on the `export` keyword (or the
+		// type's `let`/`const`), making references match every keyword
+		// occurrence instead of the symbol. The analysis index's
+		// `name_span` is currently a stub (loc.start..loc.start), so we
+		// search the decl's source text for the identifier ourselves.
+		const ident_off = find_ident_within(data,
+			sym.span.start.off: size,
+			sym.span.end.off: size,
+			sym.short_name);
+		const name_pos = analysis::byte_to_position(data, doc.buf.line_index,
+			enc, ident_off);
 		let lens_data = json::newobject();
 		json::set(&lens_data, "kind", "references": json::value)!;
 		json::set(&lens_data, "uri", uri: json::value)!;
 		json::set(&lens_data, "name", sym.short_name: json::value)!;
+		let name_pos_obj = json::newobject();
+		json::put(&name_pos_obj, "line", name_pos.line: f64)!;
+		json::put(&name_pos_obj, "character", name_pos.character: f64)!;
+		json::put(&lens_data, "namePosition", name_pos_obj)!;
 		json::put(&lens, "data", lens_data)!;
 		append(arr, lens: json::value)!;
 	};
@@ -187,36 +204,28 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 		return;
 	};
 
-	// Pull range.start from the echoed lens so the client can target the
-	// references search at the identifier's position. If the lens lacks a
-	// range (shouldn't happen) we still emit the command without args —
-	// the client falls back to a no-op.
-	match (json::get(&result_obj, "range")) {
-	case let rp: *json::value =>
-		match (*rp) {
-		case let r_obj: json::object =>
-			match (json::get(&r_obj, "start")) {
-			case let sp: *json::value =>
-				let args: []json::value = [];
-				match (json::dup(lens_uri: json::value)) {
-				case let v: json::value =>
-					append(args, v)!;
-				case nomem =>
-					send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
-					return;
-				};
-				match (json::dup(*sp)) {
-				case let v: json::value =>
-					append(args, v)!;
-				case nomem =>
-					send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
-					return;
-				};
-				json::put(&cmd, "arguments", args: json::value)!;
-			case => void;
-			};
-		case => void;
+	// Use the identifier's own position (stashed by handle_code_lens)
+	// so showReferences searches for the symbol — not the leading
+	// `export` keyword or other tokens that share the decl's start
+	// offset.
+	match (json::get(&data_field, "namePosition")) {
+	case let pp: *json::value =>
+		let args: []json::value = [];
+		match (json::dup(lens_uri: json::value)) {
+		case let v: json::value =>
+			append(args, v)!;
+		case nomem =>
+			send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+			return;
 		};
+		match (json::dup(*pp)) {
+		case let v: json::value =>
+			append(args, v)!;
+		case nomem =>
+			send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+			return;
+		};
+		json::put(&cmd, "arguments", args: json::value)!;
 	case => void;
 	};
 
@@ -395,4 +404,30 @@ fn send_array_cl(s: *server, id: lsp::id, arr: []json::value) void = {
 	case size => void;
 	case => void;
 	};
+};
+
+// Returns the byte offset of `name` within data[span_start..span_end],
+// matched as a whole word. Falls back to `span_start` if not found (an
+// invariant violation that shouldn't happen for well-formed decls).
+fn find_ident_within(data: []u8, span_start: size, span_end: size,
+		name: str) size = {
+	const target = strings::toutf8(name);
+	if (len(target) == 0) return span_start;
+	const end = if (span_end > len(data)) len(data) else span_end;
+	if (span_start >= end) return span_start;
+	for (let i = span_start; i + len(target) <= end; i += 1) {
+		let ok = true;
+		for (let j = 0z; j < len(target); j += 1) {
+			if (data[i + j] != target[j]) {
+				ok = false;
+				break;
+			};
+		};
+		if (!ok) continue;
+		if (i > span_start && is_word_byte_cl(data[i - 1])) continue;
+		if (i + len(target) < end &&
+				is_word_byte_cl(data[i + len(target)])) continue;
+		return i;
+	};
+	return span_start;
 };

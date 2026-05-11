@@ -72,8 +72,8 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		};
 	};
 	if (!found_local && len(qualifier_peek) == 0) {
-		match (find_local_binding(&cache.pr.subunit, ident_str,
-				ident_range.0)) {
+		match (find_local_binding(s, doc, &cache.pr.subunit, data,
+				ident_str, ident_range.0)) {
 		case let rendered: str =>
 			sig = rendered;
 			docs = strings::dup("")!;
@@ -578,7 +578,8 @@ fn send_with_finish(s: *server, id: lsp::id, v: json::value) void = {
 // local `let` / `const` / function-parameter binding. Walks the body of the
 // containing function decl. Returns void if no matching binding is in
 // scope at `off`. Caller frees the result.
-fn find_local_binding(su: *ast::subunit, name: str, off: size) (str | void) = {
+fn find_local_binding(srv: *server, doc: *document, su: *ast::subunit,
+		data: []u8, name: str, off: size) (str | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
 		if (off < d.loc.start.off: size) continue;
@@ -602,8 +603,8 @@ fn find_local_binding(su: *ast::subunit, name: str, off: size) (str | void) = {
 		};
 		// Innermost wins: walk recursively, tracking the best (deepest
 		// containing) hit.
-		match (walk_for_local(body, name, off)) {
-		case let s: str => return s;
+		match (walk_for_local(srv, doc, data, body, name, off)) {
+		case let r: str => return r;
 		case void => return void;
 		};
 	};
@@ -613,7 +614,8 @@ fn find_local_binding(su: *ast::subunit, name: str, off: size) (str | void) = {
 // Recurses through the common expression forms looking for a `let`/`const`
 // binding of `name` whose textual range encloses `off`. Returns the
 // rendered signature or void.
-fn walk_for_local(e: *ast::expr, name: str, off: size) (str | void) = {
+fn walk_for_local(srv: *server, doc: *document, data: []u8,
+		e: *ast::expr, name: str, off: size) (str | void) = {
 	// We never early-return on range mismatch: for compound bodies,
 	// preceding sibling bindings are still in scope at `off`.
 	match (e.expr) {
@@ -625,54 +627,125 @@ fn walk_for_local(e: *ast::expr, name: str, off: size) (str | void) = {
 			const bd = &b.bindings[i];
 			for (let j = 0z; j < len(bd.names); j += 1) {
 				if (bd.names[j] != name) continue;
-				return render_local_binding(b.kind, bd);
+				return render_local_binding(srv, doc, data, b.kind, bd);
 			};
 		};
 		// Also walk into the init expression in case it contains
 		// nested bindings (rare but valid).
-		return walk_for_local(b.bindings[0].init, name, off);
+		return walk_for_local(srv, doc, data, b.bindings[0].init, name, off);
 	case let c: ast::compound_expr =>
 		// Visit in order so an inner shadowing binding wins.
 		let hit: (str | void) = void;
 		for (let i = 0z; i < len(c.exprs); i += 1) {
 			const child = c.exprs[i];
 			if (child.loc.start.off: size > off) break;
-			match (walk_for_local(child, name, off)) {
-			case let s: str =>
+			match (walk_for_local(srv, doc, data, child, name, off)) {
+			case let r: str =>
 				match (hit) {
 				case let prev: str => free(prev);
 				case void => void;
 				};
-				hit = s;
+				hit = r;
 			case void => void;
 			};
 		};
 		return hit;
 	case let i: ast::if_expr =>
-		match (walk_for_local(i.tbranch, name, off)) {
-		case let s: str => return s;
+		match (walk_for_local(srv, doc, data, i.tbranch, name, off)) {
+		case let r: str => return r;
 		case void => void;
 		};
 		match (i.fbranch) {
 		case let e2: *ast::expr =>
-			return walk_for_local(e2, name, off);
+			return walk_for_local(srv, doc, data, e2, name, off);
 		case null => return void;
 		};
 	case let fr: ast::for_expr =>
 		match (fr.bindings) {
 		case let b: *ast::expr =>
-			match (walk_for_local(b, name, off)) {
-			case let s: str => return s;
+			match (walk_for_local(srv, doc, data, b, name, off)) {
+			case let r: str => return r;
 			case void => void;
 			};
 		case null => void;
 		};
-		return walk_for_local(fr.body, name, off);
+		return walk_for_local(srv, doc, data, fr.body, name, off);
+	case let m: ast::match_expr =>
+		// Match-case bindings (`case let x: T => ...`) introduce a
+		// local for the duration of the case body. The case range is
+		// the span of its first expr through its last; we approximate
+		// "in scope" by checking whether off lies within any expr.
+		for (let i = 0z; i < len(m.cases); i += 1) {
+			const mc = &m.cases[i];
+			const in_case = case_contains(mc.exprs, off);
+			if (in_case && mc.name == name) {
+				return render_match_case_binding(mc);
+			};
+			if (!in_case) continue;
+			match (walk_case_exprs(srv, doc, data, mc.exprs, name, off)) {
+			case let r: str => return r;
+			case void => void;
+			};
+		};
+		return walk_for_local(srv, doc, data, m.value, name, off);
+	case let sw: ast::switch_expr =>
+		for (let i = 0z; i < len(sw.cases); i += 1) {
+			const sc = &sw.cases[i];
+			if (!case_contains(sc.exprs, off)) continue;
+			match (walk_case_exprs(srv, doc, data, sc.exprs, name, off)) {
+			case let r: str => return r;
+			case void => void;
+			};
+		};
+		return walk_for_local(srv, doc, data, sw.value, name, off);
+	case let d: ast::defer_expr =>
+		return walk_for_local(srv, doc, data, d: *ast::expr, name, off);
+	case let r: ast::return_expr =>
+		match (r) {
+		case let inner: *ast::expr =>
+			return walk_for_local(srv, doc, data, inner, name, off);
+		case null => return void;
+		};
+	case let y: ast::yield_expr =>
+		match (y.value) {
+		case let inner: *ast::expr =>
+			return walk_for_local(srv, doc, data, inner, name, off);
+		case null => return void;
+		};
+	case let p: ast::propagate_expr =>
+		return walk_for_local(srv, doc, data, p: *ast::expr, name, off);
+	case let p: ast::error_assert_expr =>
+		return walk_for_local(srv, doc, data, p: *ast::expr, name, off);
+	case let c: ast::call_expr =>
+		// Walks the callee and arguments. Rarely useful for bindings
+		// but covers nested expression bodies.
+		match (walk_for_local(srv, doc, data, c.lvalue, name, off)) {
+		case let r: str => return r;
+		case void => void;
+		};
+		for (let i = 0z; i < len(c.args); i += 1) {
+			match (walk_for_local(srv, doc, data, c.args[i], name, off)) {
+			case let r: str => return r;
+			case void => void;
+			};
+		};
+		return void;
+	case let a: ast::assign_expr =>
+		match (a.object) {
+		case let lhs: *ast::expr =>
+			match (walk_for_local(srv, doc, data, lhs, name, off)) {
+			case let r: str => return r;
+			case void => void;
+			};
+		case null => void;
+		};
+		return walk_for_local(srv, doc, data, a.value, name, off);
 	case => return void;
 	};
 };
 
-fn render_local_binding(kind: ast::binding_kind, b: *ast::binding) str = {
+fn render_local_binding(srv: *server, doc: *document, data: []u8,
+		kind: ast::binding_kind, b: *ast::binding) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
 	const kw = switch (kind) {
@@ -706,7 +779,206 @@ fn render_local_binding(kind: ast::binding_kind, b: *ast::binding) str = {
 		case size => void;
 		case => void;
 		};
-	case null => void;
+	case null =>
+		// No explicit type — try to infer one from the init.
+		match (infer_type_from_init(srv, doc, b.init)) {
+		case let inferred: str =>
+			defer free(inferred);
+			match (memio::concat(&buf, ": ", inferred)) {
+			case size => void;
+			case => void;
+			};
+		case void =>
+			// Last resort: echo the init source so the user at
+			// least sees what they wrote, instead of a bare
+			// `let scan` with no information.
+			const init_off_start = b.init.loc.start.off: size;
+			const init_off_end = b.init.loc.end.off: size;
+			if (init_off_end <= len(data) &&
+					init_off_start <= init_off_end) {
+				const init_src = strings::fromutf8(
+					data[init_off_start..init_off_end])!;
+				match (memio::concat(&buf, " = ", init_src)) {
+				case size => void;
+				case => void;
+				};
+			};
+		};
+	};
+	return strings::dup(memio::string(&buf)!)!;
+};
+
+// Best-effort inference of the type of `init`. Handles:
+//   - plain literals (int, str, etc.)
+//   - direct call expressions (workspace + stdlib callee return type)
+//   - cast expressions
+//   - struct/array/tuple literals (renders the literal type only)
+// Other forms return void; the caller falls back to echoing the source.
+fn infer_type_from_init(srv: *server, doc: *document,
+		init: *ast::expr) (str | void) = {
+	match (init.expr) {
+	case let l: ast::literal_expr =>
+		return type_label_for_literal(l);
+	case let c: ast::call_expr =>
+		return infer_call_return_type(srv, doc, &c);
+	case let c: ast::cast_expr =>
+		let buf = memio::dynamic();
+		defer lsp::safe_close(&buf);
+		match (unparse::_type(&buf, &unparse::syn_nowrap, c._type)) {
+		case size => void;
+		case => return void;
+		};
+		return strings::dup(memio::string(&buf)!)!;
+	case => return void;
+	};
+};
+
+fn type_label_for_literal(l: ast::literal_expr) (str | void) = {
+	match (l) {
+	case let p: ast::plain_literal =>
+		return strings::dup(unparse::builtin_type(p.storage))!;
+	case ast::array_literal =>
+		return strings::dup("[_]_")!;
+	case ast::struct_literal =>
+		return strings::dup("struct { ... }")!;
+	case ast::tuple_literal =>
+		return strings::dup("(...)")!;
+	};
+};
+
+// Resolves the callee of a direct call expression and renders its return
+// type, e.g. `bufio::newscanner(...)` -> `bufio::scanner`. Returns void if
+// the callee isn't a direct access_identifier or can't be resolved.
+fn infer_call_return_type(srv: *server, doc: *document,
+		c: *ast::call_expr) (str | void) = {
+	const callee_ident = match (c.lvalue.expr) {
+	case let a: ast::access_expr =>
+		yield match (a) {
+		case let id: ast::access_identifier => yield id;
+		case => return void;
+		};
+	case => return void;
+	};
+	if (len(callee_ident) == 0) return void;
+	const callee_name = callee_ident[len(callee_ident) - 1];
+
+	const entry = match (lookup_callee(srv, doc, callee_ident)) {
+	case let e: *analysis::workspace_entry => yield e;
+	case void => return void;
+	};
+	const fpe = match (cached_parse_or_drop_stale(srv, entry.path)) {
+	case let p: *file_parse_entry => yield p;
+	case null => return void;
+	};
+	const idx = match (find_decl_by_name(&fpe.pr.subunit, callee_name)) {
+	case let i: size => yield i;
+	case void => return void;
+	};
+	return render_func_result(&fpe.pr.subunit.decls[idx]);
+};
+
+// Finds the workspace/stdlib entry for a callee identifier list like
+// ["bufio", "newscanner"] or ["foo"]. Mirrors workspace_lookup_aware but
+// works from the AST identifier rather than a byte offset + qualifier
+// scan.
+fn lookup_callee(srv: *server, doc: *document,
+		callee_ident: []str) (*analysis::workspace_entry | void) = {
+	if (len(callee_ident) == 0) return void;
+	const name = callee_ident[len(callee_ident) - 1];
+	if (len(callee_ident) >= 2) {
+		const qualifier = callee_ident[len(callee_ident) - 2];
+		match (analysis::find_in_module(&srv.workspace_index,
+				qualifier, name)) {
+		case let e: *analysis::workspace_entry => return e;
+		case void => void;
+		};
+		const cache = parse_of(doc);
+		const full = full_module_for_qualifier(&cache.pr.subunit, qualifier);
+		defer free(full);
+		const mod_to_index = if (len(full) > 0) full else qualifier;
+		if (ensure_stdlib_module_indexed(srv, mod_to_index)) {
+			return analysis::find_in_module(&srv.stdlib_index,
+				qualifier, name);
+		};
+		return void;
+	};
+	const cache = parse_of(doc);
+	const imports = collect_imported_module_names(&cache.pr.subunit);
+	defer free_str_slice_nav(imports);
+	match (analysis::find_in_imports(&srv.workspace_index, imports, name)) {
+	case let e: *analysis::workspace_entry => return e;
+	case void => void;
+	};
+	return analysis::find_first_by_short_name(&srv.workspace_index, name);
+};
+
+fn render_func_result(d: *ast::decl) (str | void) = {
+	const f = match (d.decl) {
+	case let f: ast::decl_func => yield f;
+	case => return void;
+	};
+	const ft = match (f.prototype.repr) {
+	case let proto: ast::func_type => yield proto;
+	case => return void;
+	};
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	match (unparse::_type(&buf, &unparse::syn_nowrap, ft.result)) {
+	case size => void;
+	case => return void;
+	};
+	return strings::dup(memio::string(&buf)!)!;
+};
+
+// True when at least one expression in `exprs` textually encloses `off`.
+fn case_contains(exprs: []*ast::expr, off: size) bool = {
+	for (let i = 0z; i < len(exprs); i += 1) {
+		const e = exprs[i];
+		if (off >= e.loc.start.off: size && off <= e.loc.end.off: size) {
+			return true;
+		};
+	};
+	return false;
+};
+
+// Walks each expression in a match/switch case body.
+fn walk_case_exprs(srv: *server, doc: *document, data: []u8,
+		exprs: []*ast::expr, name: str, off: size) (str | void) = {
+	let hit: (str | void) = void;
+	for (let i = 0z; i < len(exprs); i += 1) {
+		const child = exprs[i];
+		if (child.loc.start.off: size > off) break;
+		match (walk_for_local(srv, doc, data, child, name, off)) {
+		case let r: str =>
+			match (hit) {
+			case let prev: str => free(prev);
+			case void => void;
+			};
+			hit = r;
+		case void => void;
+		};
+	};
+	return hit;
+};
+
+fn render_match_case_binding(mc: *ast::match_case) str = {
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	match (memio::concat(&buf, "(match binding) ", mc.name, ": ")) {
+	case size => void;
+	case => return strings::dup("(match binding)")!;
+	};
+	match (mc._type) {
+	case let t: *ast::_type =>
+		match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
+		case size => void;
+		case => void;
+		};
+	case null =>
+		match (memio::concat(&buf, "_")) {
+		case size => void;
+		case => void;
+		};
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };
