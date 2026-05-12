@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 
-use fmt;
 use fs;
 use io;
 use os;

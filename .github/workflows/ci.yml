@@ -36,15 +36,15 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and test in Alpine
-        # HAREFLAGS=-j1 keeps `hare build` from spawning one qbe per CPU.
-        # A single qbe compiling the server module already needs several
-        # GB, so the default parallelism easily exhausts the runner.
+        # Trying without HAREFLAGS=-j1 to see whether the qbe-per-CPU
+        # memory pressure that motivated it still trips on the 16 GB
+        # x64 runners. Revert this commit if the runner OOMs.
         run: |
           docker run --rm -v "$PWD":/workspace -w /workspace hare-lsp-ci:latest sh -c '
             set -eux
             free -m
-            make HAREFLAGS=-j1
-            make HAREFLAGS=-j1 test
+            make
+            make test
           '
 
   vscode-extension:

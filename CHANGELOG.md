@@ -45,5 +45,3 @@ vscode-languageclient wrapper. Install with `make vscode-install`.
 
 Out of scope (not advertised, not implemented): documentColor,
 inlineValue, moniker, linkedEditingRange, telemetry, notebookDocument.
-
-158 unit tests passing.

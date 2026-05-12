@@ -6,11 +6,9 @@
 
 use analysis;
 use encoding::json;
-use fmt;
 use fs;
 use io;
 use lsp;
-use memio;
 use os;
 use strings;
 

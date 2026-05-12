@@ -333,7 +333,6 @@ export fn handle_textdocument_diagnostic(s: *server, r: lsp::request) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		send_diag_full([], r);
 		send_to_client(s, r.id, full_report([]));
 		return;
 	};
@@ -418,9 +417,6 @@ fn send_to_client(s: *server, id: lsp::id, result: json::value) void = {
 		slog_error(s, "pull diag response:", io::strerror(e));
 	};
 };
-
-// Stub for the future async write — unused for now.
-fn send_diag_full(_items: []json::value, _r: lsp::request) void = void;
 
 // Thin aliases over the shared lsp::json_* helpers.
 fn params_object_diag(

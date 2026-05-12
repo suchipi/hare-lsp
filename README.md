@@ -65,7 +65,7 @@ This runs `npm install`, packages the extension as a `.vsix`, and installs it vi
 
 ## Configuration
 
-Settings are read from the `hare` namespace. Defaults are in parentheses.
+Settings are read from the `hare` namespace.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -81,6 +81,13 @@ Settings are read from the `hare` namespace. Defaults are in parentheses.
 | `format.insertFinalNewline` | boolean | `true` | Ensure a trailing newline. |
 | `inlayHints.parameterNames` | boolean | `true` | Show parameter-name hints at call sites. |
 | `inlayHints.inferredTypes` | boolean | `true` | Show inferred-type hints on `let`/`const`. |
+| `inlayHints.inferredTypesMaxDepth` | number | `3` | Max recursion depth for inferred-type hints; follows call return types, identifier bindings, and type aliases. Hard-capped at 16. |
+| `limits.maxOpenDocuments` | number | `1024` | Cap on open documents. |
+| `limits.maxTotalBufferBytes` | number | `268435456` | Cap on summed open-buffer bytes (256 MiB). |
+| `limits.maxPendingRequests` | number | `4096` | Cap on in-flight server-initiated requests. |
+| `limits.maxCancelledIds` | number | `256` | Cap on cancelled request ids retained. |
+| `limits.maxDiagnosticsPerFile` | number | `1000` | Cap on diagnostics published per file. Excess collapses into a single trailing diagnostic. |
+| `limits.maxWorkspaceIndexEntries` | number | `1000000` | Cap on workspace-index entries (also the absolute hard ceiling). |
 
 The canonical JSON Schema for these settings is checked in at [editors/vscode/schemas/hare-settings.schema.json](editors/vscode/schemas/hare-settings.schema.json). Editor integrations and external tooling should treat that document as the source of truth.
 
