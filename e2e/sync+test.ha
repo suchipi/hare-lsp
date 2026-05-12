@@ -10,7 +10,6 @@
 //   - textDocument/willSaveWaitUntil
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_did_change_full_replaces_document() void = {

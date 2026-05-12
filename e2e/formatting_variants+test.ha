@@ -5,7 +5,6 @@
 // The full-document path is exercised by format+test.ha.
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_range_formatting_returns_edit_for_selected_decl() void = {

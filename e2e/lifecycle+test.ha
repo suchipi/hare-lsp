@@ -11,7 +11,6 @@
 //   - request received before `initialize` -> SERVER_NOT_INITIALIZED
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_pre_init_request_returns_server_not_initialized() void = {

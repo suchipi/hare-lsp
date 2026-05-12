@@ -5,7 +5,6 @@
 // workspace/executeCommand.
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_code_action_offers_organize_imports() void = {

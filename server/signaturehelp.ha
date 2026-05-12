@@ -13,7 +13,6 @@ use analysis;
 use encoding::json;
 use hare::ast;
 use hare::unparse;
-use io;
 use lsp;
 use memio;
 use strings;

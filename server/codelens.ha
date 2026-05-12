@@ -13,7 +13,6 @@ use bufio;
 use encoding::json;
 use hare::lex;
 use hare::lex::{ltok};
-use io;
 use lsp;
 use memio;
 use strings;

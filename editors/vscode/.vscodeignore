@@ -1,7 +1,9 @@
 .vscode/**
 .vscode-test/**
 src/**
+node_modules/**
 .gitignore
 .vscodeignore
+esbuild.js
 tsconfig.json
-out/**.map
+package-lock.json

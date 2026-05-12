@@ -48,8 +48,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # `npm run package` runs `tsc -p ./` (typecheck + emit) then
-      # `vsce package`, so it covers both compile errors and packaging
-      # regressions in one shot.
+      # `npm run package` runs `tsc --noEmit` (typecheck), then esbuild
+      # (bundle), then `vsce package`, so it covers compile errors,
+      # bundling, and packaging regressions in one shot.
       - name: Typecheck and package
         run: npm run package

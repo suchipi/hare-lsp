@@ -9,7 +9,6 @@
 // references inside it stay clickable.
 
 use fs;
-use hare::ast;
 use hare::module;
 use io;
 use lsp;
