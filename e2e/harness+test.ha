@@ -29,18 +29,26 @@ use unix::signal;
 def BIN_PATH: str = "./hare-lsp";
 
 // Default deadline for any single recv. The server should respond within
-// milliseconds on a healthy machine; 15 seconds is generous enough to
-// survive macOS scheduling stalls under load (dozens of concurrent
-// hare-lsp child processes during `make test`) while still much shorter
-// than vscode-languageclient's own init timeout, so a real regression
+// milliseconds on a healthy machine; 5 seconds is generous and still much
+// faster than vscode-languageclient's own init timeout, so a regression
 // will surface here rather than in the editor.
-def RECV_TIMEOUT: time::duration = 15 * time::SECOND;
+def RECV_TIMEOUT: time::duration = 5 * time::SECOND;
 
 // Handles for an in-flight server process plus the pipes used to talk to it.
 export type session = struct {
 	proc: exec::process,
 	stdin: io::file,
 	stdout: io::file,
+	// Bytes read from `stdout` that don't belong to the frame the
+	// caller asked for yet. Each `recv` call drains as much of this
+	// as it needs, then reads more from the pipe to complete the
+	// frame; leftover bytes after the frame are kept here for the
+	// next call. Without this carry-over, two frames coalescing into
+	// a single `read` (which happens at random under OS-scheduling
+	// pressure) would silently drop the second frame and the next
+	// `recv` would block forever waiting for bytes that already
+	// arrived.
+	read_buf: []u8,
 };
 
 // Spawns the server binary with anonymous pipes on stdin and stdout. The
@@ -78,6 +86,7 @@ fn spawn_session() session = {
 		proc = proc,
 		stdin = in_w,
 		stdout = out_r,
+		read_buf = [],
 	};
 };
 
@@ -85,6 +94,10 @@ fn spawn_session() session = {
 // Safe to call multiple times on the same session in a defer chain — second
 // call is a no-op because the pipes are already closed.
 fn finish_session(s: *session) void = {
+	defer {
+		free(s.read_buf);
+		s.read_buf = [];
+	};
 	// Closing stdin signals EOF to the server, which causes its read loop
 	// to return EXIT_ERROR (per its own semantics). Most tests should do
 	// a clean shutdown/exit before reaching this, but we tolerate either.
@@ -132,28 +145,33 @@ fn send(s: *session, body: const []u8) void = {
 // Reads a single framed LSP message from the server, failing the test if no
 // complete frame is received within RECV_TIMEOUT. The returned slice is owned
 // by the caller and must be freed.
+//
+// Buffering: we operate on the session's persistent `read_buf` rather than
+// a fresh slice per call. The server can write more than one frame's worth
+// of bytes between our reads (the OS happily coalesces tightly-spaced
+// writes into one pipe delivery), and a previous design that discarded
+// `buf` on return silently dropped any bytes past the frame boundary.
+// The next `recv` then blocked on a pipe that had no more bytes to give,
+// because the response had already arrived and been thrown away.
 fn recv(s: *session) []u8 = {
 	const deadline = time::add(time::now(time::clock::MONOTONIC),
 		RECV_TIMEOUT);
-	let buf: []u8 = [];
 	let chunk: [4096]u8 = [0...];
 
-	let body_off: size = 0; // index of first body byte in `buf`, 0 == unknown
-	let body_len: size = 0;
-
 	for (true) {
-		if (body_off > 0 && len(buf) >= body_off + body_len) {
-			let out: []u8 = alloc([0...], body_len)!;
-			out[..] = buf[body_off..body_off + body_len];
-			free(buf);
-			return out;
+		// Try to extract a complete frame from whatever we've
+		// already buffered before reading more from the pipe.
+		match (try_take_frame(&s.read_buf)) {
+		case let body: []u8 =>
+			return body;
+		case void => void;
 		};
 
 		const now = time::now(time::clock::MONOTONIC);
 		if (time::compare(now, deadline) >= 0) {
-			fmt::fatalf("e2e: recv timed out after {} ms (got {} bytes, body_len={})",
+			fmt::fatalf("e2e: recv timed out after {} ms (buffered {} bytes)",
 				RECV_TIMEOUT / time::MILLISECOND,
-				len(buf), body_len);
+				len(s.read_buf));
 		};
 		const remaining_ns = time::diff(now, deadline);
 
@@ -177,22 +195,39 @@ fn recv(s: *session) []u8 = {
 			yield n;
 		case io::EOF =>
 			fmt::fatalf("e2e: server stdout closed after {} bytes (incomplete frame)",
-				len(buf));
+				len(s.read_buf));
 		case let e: io::error =>
 			fmt::fatalf("e2e: read failed: {}", io::strerror(e));
 		};
 		if (n == 0) continue;
-		append(buf, chunk[..n]...)!;
+		append(s.read_buf, chunk[..n]...)!;
+	};
+};
 
-		if (body_off == 0) {
-			match (parse_header(buf)) {
-			case let p: (size, size) =>
-				body_off = p.0;
-				body_len = p.1;
-			case void => void; // headers incomplete, read more
-			};
+// Pulls one complete LSP frame off the front of `buf` if one is present,
+// shifting the remaining bytes (the next frame's prefix, if any) to the
+// start of the slice. Returns void when the buffer doesn't yet contain
+// a complete frame. The returned slice is owned by the caller.
+fn try_take_frame(buf: *[]u8) ([]u8 | void) = {
+	const (body_off, body_len) = match (parse_header(*buf)) {
+	case let p: (size, size) => yield p;
+	case void => return void;
+	};
+	const frame_end = body_off + body_len;
+	if (len(*buf) < frame_end) return void;
+
+	let out: []u8 = alloc([0...], body_len)!;
+	out[..] = (*buf)[body_off..frame_end];
+
+	// Shift any bytes past the frame down to the start of buf.
+	const leftover = len(*buf) - frame_end;
+	if (leftover > 0) {
+		for (let i = 0z; i < leftover; i += 1) {
+			(*buf)[i] = (*buf)[frame_end + i];
 		};
 	};
+	*buf = (*buf)[..leftover];
+	return out;
 };
 
 // Looks for the end of the LSP header block ("\r\n\r\n") in `buf`. If found,
