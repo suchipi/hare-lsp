@@ -37,7 +37,7 @@ use strings;
 // working directory (the repo root when invoked via `make test`).
 def HAREFMT_PATH: str = "./harefmt";
 
-@test fn harefmt_preserves_ast_for_repo_files() void = {
+@test fn e2e_harefmt_preserves_ast_for_repo_files() void = {
 	const root = ".";
 	const files = collect_ast_ha_files(root);
 	defer strings::freeall(files);
