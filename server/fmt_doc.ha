@@ -186,8 +186,9 @@ export fn pretty(
 ) (size | io::error) = {
 	let cur_col = 0z;
 	let written = 0z;
+	let pending_tabs: i32 = 0;
 	render(out, d, render_mode::BROKEN, max_col, indent, 0z,
-		&cur_col, &written)?;
+		&cur_col, &written, &pending_tabs)?;
 	return written;
 };
 
@@ -205,19 +206,20 @@ fn render(
 	tail_width: size,
 	cur_col: *size,
 	written: *size,
+	pending_tabs: *i32,
 ) (void | io::error) = {
 	match (*d) {
 	case let t: doc_text =>
-		emit_str(out, t.content, cur_col, written)?;
+		emit_str(out, t.content, cur_col, written, pending_tabs)?;
 	case let l: doc_line =>
 		switch (mode) {
 		case render_mode::FLAT =>
-			emit_str(out, l.flat, cur_col, written)?;
+			emit_str(out, l.flat, cur_col, written, pending_tabs)?;
 		case render_mode::BROKEN =>
-			emit_break(out, indent, cur_col, written)?;
+			emit_break(out, indent, cur_col, written, pending_tabs)?;
 		};
 	case doc_hardline =>
-		emit_break(out, indent, cur_col, written)?;
+		emit_break(out, indent, cur_col, written, pending_tabs)?;
 	case let g: doc_group =>
 		// Decide flat-or-broken based on remaining columns,
 		// counting both the group's own flat width AND the
@@ -235,26 +237,26 @@ fn render(
 		else
 			render_mode::BROKEN;
 		render_items(out, g.items, child_mode, max_col, indent,
-			tail_width, cur_col, written)?;
+			tail_width, cur_col, written, pending_tabs)?;
 	case let n: doc_nest =>
 		render(out, n.inner, mode, max_col, indent + n.delta,
-			tail_width, cur_col, written)?;
+			tail_width, cur_col, written, pending_tabs)?;
 	case let c: doc_concat =>
 		render_items(out, c.items, mode, max_col, indent,
-			tail_width, cur_col, written)?;
+			tail_width, cur_col, written, pending_tabs)?;
 	case let cm: doc_comment =>
 		// `cm.text` is the raw text after `//` from the source and
 		// includes any leading whitespace the user wrote (typically
 		// one space). Emit `//` with no extra space so we don't
 		// double up.
-		emit_str(out, "//", cur_col, written)?;
-		emit_str(out, cm.text, cur_col, written)?;
-		emit_break(out, indent, cur_col, written)?;
+		emit_str(out, "//", cur_col, written, pending_tabs)?;
+		emit_str(out, cm.text, cur_col, written, pending_tabs)?;
+		emit_break(out, indent, cur_col, written, pending_tabs)?;
 	case let ib: doc_if_broken =>
 		switch (mode) {
 		case render_mode::FLAT => void;
 		case render_mode::BROKEN =>
-			emit_str(out, ib.text, cur_col, written)?;
+			emit_str(out, ib.text, cur_col, written, pending_tabs)?;
 		};
 	};
 };
@@ -272,11 +274,12 @@ fn render_items(
 	outer_tail: size,
 	cur_col: *size,
 	written: *size,
+	pending_tabs: *i32,
 ) (void | io::error) = {
 	for (let i = 0z; i < len(items); i += 1) {
 		const my_tail = tail_after(items, i + 1, mode, outer_tail);
 		render(out, &items[i], mode, max_col, indent, my_tail,
-			cur_col, written)?;
+			cur_col, written, pending_tabs)?;
 	};
 };
 
@@ -285,6 +288,14 @@ fn render_items(
 // BROKEN — a softline). If we can render past every item without
 // hitting such a break, `outer_tail` is added on as the tail beyond
 // this sequence.
+//
+// Recurses through nested doc_group / doc_concat / doc_nest so that a
+// later sibling containing a deep hardline only contributes the chars
+// it would render on the CURRENT line before the break — not
+// WIDTH_INFINITY. Without this, a function signature `group` followed
+// by a compound-body group (which always contains hardlines) would
+// see tail_width = WIDTH_INFINITY, refuse to fit flat, and break the
+// short signature across multiple lines.
 fn tail_after(
 	items: []doc,
 	from: size,
@@ -293,47 +304,64 @@ fn tail_after(
 ) size = {
 	let total = 0z;
 	for (let i = from; i < len(items); i += 1) {
-		match (items[i]) {
-		case let t: doc_text =>
-			total += len(t.content);
-		case let l: doc_line =>
-			switch (mode) {
-			case render_mode::FLAT =>
-				total += len(l.flat);
-			case render_mode::BROKEN =>
-				return total;
-			};
-		case doc_hardline =>
-			return total;
-		case doc_comment =>
-			return total;
-		case doc_if_broken =>
-			switch (mode) {
-			case render_mode::FLAT => void;
-			case render_mode::BROKEN =>
-				// In broken mode an if_broken's text is
-				// always on a previous line by the time
-				// we'd be checking tail_width — but for
-				// safety, count it.
-				void;
-			};
-		case let g: doc_group =>
-			const w = sum_flat_width(g.items);
-			if (w == WIDTH_INFINITY) return WIDTH_INFINITY;
-			total += w;
-		case let n: doc_nest =>
-			const w = flat_width(n.inner);
-			if (w == WIDTH_INFINITY) return WIDTH_INFINITY;
-			total += w;
-		case let c: doc_concat =>
-			const w = sum_flat_width(c.items);
-			if (w == WIDTH_INFINITY) return WIDTH_INFINITY;
-			total += w;
-		};
+		const (w, broke) = line_lead_width(&items[i], mode);
+		total += w;
+		if (broke) return total;
 	};
 	if (outer_tail == WIDTH_INFINITY) return WIDTH_INFINITY;
 	if (total > WIDTH_INFINITY - outer_tail) return WIDTH_INFINITY;
 	return total + outer_tail;
+};
+
+// Returns (width, broke) where `width` is the number of characters
+// `d` would render on the current line before the next inevitable
+// line break, and `broke` is true if `d` contains such a break. For a
+// group whose flat width is finite, the group renders flat and
+// contributes its full flat width. For a group with internal
+// hardlines (flat = WIDTH_INFINITY), the group renders broken and we
+// recurse to find the prefix-on-current-line.
+fn line_lead_width(d: *doc, mode: render_mode) (size, bool) = {
+	match (*d) {
+	case let t: doc_text =>
+		return (len(t.content), false);
+	case let l: doc_line =>
+		switch (mode) {
+		case render_mode::FLAT =>
+			return (len(l.flat), false);
+		case render_mode::BROKEN =>
+			return (0z, true);
+		};
+	case doc_hardline =>
+		return (0z, true);
+	case doc_comment =>
+		return (0z, true);
+	case let ib: doc_if_broken =>
+		switch (mode) {
+		case render_mode::FLAT =>
+			return (0z, false);
+		case render_mode::BROKEN =>
+			return (len(ib.text), false);
+		};
+	case let g: doc_group =>
+		const w = sum_flat_width(g.items);
+		const inner_mode = if (w == WIDTH_INFINITY) render_mode::BROKEN
+			else render_mode::FLAT;
+		return line_lead_items(g.items, inner_mode);
+	case let n: doc_nest =>
+		return line_lead_width(n.inner, mode);
+	case let c: doc_concat =>
+		return line_lead_items(c.items, mode);
+	};
+};
+
+fn line_lead_items(items: []doc, mode: render_mode) (size, bool) = {
+	let total = 0z;
+	for (let i = 0z; i < len(items); i += 1) {
+		const (w, broke) = line_lead_width(&items[i], mode);
+		total += w;
+		if (broke) return (total, true);
+	};
+	return (total, false);
 };
 
 fn fits_all(items: []doc) bool = {
@@ -348,7 +376,17 @@ fn emit_str(
 	s: str,
 	cur_col: *size,
 	written: *size,
+	pending_tabs: *i32,
 ) (void | io::error) = {
+	if (len(s) == 0) return;
+	// Flush any pending indent tabs from a preceding break. If two
+	// breaks fire in a row with no emit_str between, the earlier
+	// pending tabs are dropped — that's what prevents trailing
+	// whitespace on otherwise-blank lines.
+	for (let i: i32 = 0; i < *pending_tabs; i += 1) {
+		*written += io::writeall(out, strings::toutf8("\t"))?;
+	};
+	*pending_tabs = 0;
 	const bytes = strings::toutf8(s);
 	const n = io::writeall(out, bytes)?;
 	*written += n;
@@ -368,12 +406,14 @@ fn emit_break(
 	indent: i32,
 	cur_col: *size,
 	written: *size,
+	pending_tabs: *i32,
 ) (void | io::error) = {
 	const nl = strings::toutf8("\n");
 	*written += io::writeall(out, nl)?;
-	for (let i: i32 = 0; i < indent; i += 1) {
-		*written += io::writeall(out, strings::toutf8("\t"))?;
-	};
+	// Defer the indent until non-whitespace content arrives. If
+	// another emit_break fires before any emit_str, this indent is
+	// discarded — keeping blank lines truly blank.
+	*pending_tabs = if (indent < 0) 0i32 else indent;
 	*cur_col = if (indent < 0) 0z else indent: size;
 };
 

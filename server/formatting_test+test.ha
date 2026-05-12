@@ -174,31 +174,21 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 };
 
 @test fn apply_indent_style_tab_passes_through() void = {
-	let (s, scan, in_buf, out) = fmt_test_server();
-	defer fmt_test_cleanup(&s, scan, in_buf, out);
 	const input = "fn x() void = {\n\treturn;\n};";
-	const r = apply_indent_style(&s, input);
+	const r = apply_indent_style(input, indent_style::TAB, 8);
 	assert(r == input);
 };
 
 @test fn apply_indent_style_space_expands_leading_tabs() void = {
-	let (s, scan, in_buf, out) = fmt_test_server();
-	defer fmt_test_cleanup(&s, scan, in_buf, out);
-	s.config.format_indent_style = indent_style::SPACE;
-	s.config.format_indent_width = 4;
 	const input = "fn x() void = {\n\treturn;\n};";
-	const r = apply_indent_style(&s, input);
+	const r = apply_indent_style(input, indent_style::SPACE, 4);
 	defer free(r);
 	assert(r == "fn x() void = {\n    return;\n};");
 };
 
 @test fn apply_indent_style_handles_multiple_tabs() void = {
-	let (s, scan, in_buf, out) = fmt_test_server();
-	defer fmt_test_cleanup(&s, scan, in_buf, out);
-	s.config.format_indent_style = indent_style::SPACE;
-	s.config.format_indent_width = 2;
 	const input = "if (x) {\n\t\tfoo();\n};";
-	const r = apply_indent_style(&s, input);
+	const r = apply_indent_style(input, indent_style::SPACE, 2);
 	defer free(r);
 	assert(r == "if (x) {\n    foo();\n};");
 };
@@ -206,12 +196,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn apply_indent_style_leaves_tabs_inside_strings_alone() void = {
 	// A tab after a non-whitespace byte (e.g. inside a string literal)
 	// should not be expanded.
-	let (s, scan, in_buf, out) = fmt_test_server();
-	defer fmt_test_cleanup(&s, scan, in_buf, out);
-	s.config.format_indent_style = indent_style::SPACE;
-	s.config.format_indent_width = 4;
 	const input = "let s = \"a\tb\";";
-	const r = apply_indent_style(&s, input);
+	const r = apply_indent_style(input, indent_style::SPACE, 4);
 	defer free(r);
 	assert(r == "let s = \"a\tb\";");
 };

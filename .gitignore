@@ -1,4 +1,5 @@
 /hare-lsp
+/harefmt
 /.cache/
 /.tmp/
 editors/vscode/node_modules/
