@@ -2,13 +2,39 @@
 // (c) hare-lsp authors
 
 use bufio;
+use fmt;
 use fs;
 use io;
 use os;
 use server;
 use strings;
 
+// Version string. Kept in sync with the `serverInfo.version` value
+// returned from `initialize` (see server/server.ha).
+def VERSION: str = "0.0.1";
+
 export fn main() void = {
+	// Handle one-shot CLI subcommands before doing any LSP setup.
+	// `os::args[0]` is the binary name; anything from index 1 is a flag.
+	if (len(os::args) >= 2) {
+		const arg = os::args[1];
+		if (arg == "--doctor") {
+			os::exit(run_doctor());
+		};
+		if (arg == "--help" || arg == "-h") {
+			print_usage();
+			os::exit(0);
+		};
+		if (arg == "--version" || arg == "-V") {
+			fmt::printfln("hare-lsp {}", VERSION)!;
+			os::exit(0);
+		};
+		fmt::fprintfln(os::stderr, "unknown argument: {}", arg)!;
+		fmt::fprintln(os::stderr,
+			"run `hare-lsp --help` for usage")!;
+		os::exit(2);
+	};
+
 	// Optional wire-protocol log. When `HARE_LSP_LOG_DIR` is set in
 	// the environment, we tee everything we read from the client
 	// into `$HARE_LSP_LOG_DIR/hare-lsp-in.log`, everything we
@@ -84,6 +110,24 @@ export fn main() void = {
 	if (code != 0) {
 		os::exit(code);
 	};
+};
+
+fn print_usage() void = {
+	fmt::println("Usage: hare-lsp [OPTION]")!;
+	fmt::println()!;
+	fmt::println("With no arguments, runs the LSP server over stdio.")!;
+	fmt::println()!;
+	fmt::println("Options:")!;
+	fmt::println("  --doctor      Check that hare, hare-json, and "
+		"HAREPATH look healthy.")!;
+	fmt::println("  --version     Print the server version and exit.")!;
+	fmt::println("  --help        Show this message and exit.")!;
+	fmt::println()!;
+	fmt::println("Environment:")!;
+	fmt::println("  HARE_LSP_LOG_DIR     Absolute directory to tee "
+		"wire-protocol logs into.")!;
+	fmt::println("  HARE_LSP_LOG_LEVEL   debug|info|warn|error "
+		"(default: info)")!;
 };
 
 // Opens (or truncates and creates) a per-session log file at
