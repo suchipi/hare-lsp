@@ -17,12 +17,17 @@ jobs:
       # we run the build inside an Alpine container via `docker run`, which
       # the host's docker handles fine on arm64.
       - name: Build and test in Alpine
+        # HAREFLAGS=-j1 keeps `hare build` from spawning one qbe per CPU.
+        # Each qbe instance compiling the server module peaks around 2.7 GB
+        # RSS, so on a 4-core runner the default parallelism easily exceeds
+        # available RAM and the kernel OOM-kills qbe mid-compile.
         run: |
           docker run --rm -v "$PWD":/workspace -w /workspace alpine:edge sh -c '
             set -eux
             apk add --no-cache git make musl-dev gcc bash hare hare-json
-            make
-            make test
+            free -m
+            make HAREFLAGS=-j1
+            make HAREFLAGS=-j1 test
           '
 
   vscode-extension:
