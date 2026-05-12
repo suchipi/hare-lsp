@@ -7,20 +7,21 @@ on:
 
 jobs:
   server:
-    runs-on: ubuntu-24.04-arm
+    # x64 free runners have 16 GB RAM; the arm64 partner runners only have
+    # 8 GB, and qbe compiling the server module overruns that even with
+    # -j1.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      # GHA refuses to run JavaScript actions inside Alpine on arm64
-      # ("JavaScript Actions in Alpine containers are only supported on x64
-      # Linux runners"), so we can't use `container: alpine:edge`. Instead
-      # we run the build inside an Alpine container via `docker run`, which
-      # the host's docker handles fine on arm64.
+      # We run the build inside `docker run alpine:edge` rather than using
+      # `container: alpine:edge` at the job level so actions/checkout
+      # executes on the host and doesn't have to deal with musl/node
+      # quirks.
       - name: Build and test in Alpine
         # HAREFLAGS=-j1 keeps `hare build` from spawning one qbe per CPU.
-        # Each qbe instance compiling the server module peaks around 2.7 GB
-        # RSS, so on a 4-core runner the default parallelism easily exceeds
-        # available RAM and the kernel OOM-kills qbe mid-compile.
+        # A single qbe compiling the server module already needs several
+        # GB, so the default parallelism easily exhausts the runner.
         run: |
           docker run --rm -v "$PWD":/workspace -w /workspace alpine:edge sh -c '
             set -eux
@@ -31,7 +32,7 @@ jobs:
           '
 
   vscode-extension:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: editors/vscode
