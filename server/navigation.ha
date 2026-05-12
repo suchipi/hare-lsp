@@ -42,6 +42,11 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 
 	const data = analysis::bytes(&doc.buf);
 
+	// Struct-member hover: cursor on `<receiver>.<name>`. Tried before
+	// module hover and the bare-ident path because a member ident is
+	// otherwise indistinguishable from a top-level name.
+	if (try_send_struct_member_hover(s, r, doc, data, off)) return;
+
 	// Module-name hover: a `use foo::bar;` statement, a `::`
 	// separator, or a code-position qualifier like `bufio` in
 	// `bufio::newscanner`. If the cursor lands on a resolvable module
@@ -266,6 +271,7 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 	const data = analysis::bytes(&doc.buf);
+	if (try_send_struct_member_definition(s, r, doc, data, off)) return;
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) => yield r;
 	case void =>
