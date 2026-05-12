@@ -2,6 +2,7 @@
 /.cache/
 /.tmp/
 editors/vscode/node_modules/
+editors/vscode/dist/
 editors/vscode/out/
 editors/vscode/*.vsix
 /.claude/*.lock
