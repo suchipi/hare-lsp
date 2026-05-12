@@ -9,7 +9,6 @@ use encoding::json;
 use fmt;
 use io;
 use lsp;
-use os;
 use strings;
 
 // Re-runs the recovering parser on the given document and publishes
@@ -226,8 +225,7 @@ export fn publish_diagnostics(
 		params)) {
 	case size => void;
 	case let e: io::error =>
-		fmt::fprintln(os::stderr, "hare-lsp: publishDiagnostics:",
-			io::strerror(e))!;
+		slog_error(s, "publishDiagnostics:", io::strerror(e));
 	};
 };
 
@@ -338,8 +336,7 @@ fn send_to_client(s: *server, id: lsp::id, result: json::value) void = {
 	match (lsp::encode_response_result(s.out, id, result)) {
 	case size => void;
 	case let e: io::error =>
-		fmt::fprintln(os::stderr, "hare-lsp: pull diag response:",
-			io::strerror(e))!;
+		slog_error(s, "pull diag response:", io::strerror(e));
 	};
 };
 

@@ -9,7 +9,6 @@ use encoding::json;
 use fmt;
 use io;
 use lsp;
-use os;
 use strings;
 
 // State the server carries across the lifetime of a single client connection.
@@ -101,6 +100,11 @@ export type server = struct {
 	// cross-file work doesn't re-read and re-parse the same files on
 	// each keystroke.
 	file_parse_cache: file_parse_cache,
+
+	// Minimum severity of stderr log lines emitted via `slog_*`. See
+	// `log.ha`. Defaults to INFO; can be overridden by setting the
+	// HARE_LSP_LOG_LEVEL env var before launching the binary.
+	log_min_level: log_level,
 };
 
 // Tracks an outgoing request the server is waiting on a response for.
@@ -146,6 +150,7 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	stdlib_index = analysis::new_workspace_index(),
 	indexed_stdlib_modules = [],
 	file_parse_cache = new_file_parse_cache(),
+	log_min_level = log_level_from_env(),
 };
 
 // Releases resources held by the server. Does not close the underlying I/O
@@ -210,7 +215,7 @@ export fn run(s: *server) int = {
 			if (s.state == server_state::SHUTTING_DOWN) {
 				return EXIT_OK;
 			};
-			log_stderr("client closed connection without exit");
+			log_stderr(s, "client closed connection without exit");
 			return EXIT_ERROR;
 		case let e: lsp::transport_error =>
 			// Try to surface the error to the client as a JSON-RPC
@@ -219,7 +224,7 @@ export fn run(s: *server) int = {
 			// further framing, so we still exit. Best-effort: the
 			// send may itself fail if the peer also closed its end.
 			send_error(s, void, lsp::PARSE_ERROR, lsp::strerror(e));
-			log_stderr_strerror("transport error", lsp::strerror(e));
+			log_stderr_strerror(s, "transport error", lsp::strerror(e));
 			return EXIT_ERROR;
 		};
 
@@ -267,14 +272,14 @@ fn dispatch(s: *server, msg: lsp::message) void = {
 fn handle_response(s: *server, r: lsp::response) void = {
 	const id_num = match (r.id) {
 	case let f: f64 => yield f: i64;
-	case let s: str =>
+	case str =>
 		// We never issue string ids ourselves.
-		log_stderr("unexpected string-id response from client; ignoring");
+		log_stderr(s, "unexpected string-id response from client; ignoring");
 		return;
 	};
 	const idx = pending_index(s, id_num);
 	if (idx == -1) {
-		log_stderr("response for unknown request id; ignoring");
+		log_stderr(s, "response for unknown request id; ignoring");
 		return;
 	};
 	const method = s.pending_requests[idx].method;
@@ -293,8 +298,7 @@ fn handle_response(s: *server, r: lsp::response) void = {
 			void;
 		};
 	case let e: lsp::response_error =>
-		fmt::fprintln(os::stderr, "hare-lsp: response error for",
-			method, ":", e.message)!;
+		slog_error(s, "response error for", method, ":", e.message);
 	};
 	// Free and remove the pending entry.
 	free(s.pending_requests[idx].method);
@@ -562,7 +566,7 @@ fn handle_initialize(s: *server, r: lsp::request) void = {
 	match (lsp::encode_response_result(s.out, r.id, result)) {
 	case size => void;
 	case let e: io::error =>
-		log_stderr_strerror("write initialize response", io::strerror(e));
+		log_stderr_strerror(s, "write initialize response", io::strerror(e));
 	};
 	s.state = server_state::INITIALIZING;
 };
@@ -850,7 +854,7 @@ fn handle_shutdown(s: *server, r: lsp::request) void = {
 	match (lsp::encode_response_result(s.out, r.id, result)) {
 	case size => void;
 	case let e: io::error =>
-		log_stderr_strerror("write shutdown response", io::strerror(e));
+		log_stderr_strerror(s, "write shutdown response", io::strerror(e));
 	};
 };
 
@@ -925,16 +929,18 @@ fn send_error(s: *server, id: (lsp::id | void), code: lsp::error_code, msg: str)
 	match (lsp::encode_response_error(s.out, id, err)) {
 	case size => void;
 	case let e: io::error =>
-		log_stderr_strerror("write error response", io::strerror(e));
+		log_stderr_strerror(s, "write error response", io::strerror(e));
 	};
 };
 
-// Logs a message to stderr. Used for unrecoverable transport-level errors;
-// user-visible logging goes through window/logMessage (see server::window).
-fn log_stderr(msg: str) void = {
-	fmt::fprintln(os::stderr, "hare-lsp:", msg)!;
+// Thin wrappers retained so call sites in server.ha don't need to thread
+// the level explicitly. Both emit at ERROR level since every existing
+// site reports a hard I/O or protocol failure. User-visible logging
+// goes through window/logMessage (see server::window).
+fn log_stderr(s: *server, msg: str) void = {
+	slog_error(s, msg);
 };
 
-fn log_stderr_strerror(prefix: str, msg: str) void = {
-	fmt::fprintln(os::stderr, "hare-lsp:", prefix, ":", msg)!;
+fn log_stderr_strerror(s: *server, prefix: str, msg: str) void = {
+	slog_error(s, prefix, ":", msg);
 };

@@ -45,6 +45,15 @@
         "path": "./syntaxes/hare.tmLanguage.json"
       }
     ],
+    "jsonValidation": [
+      {
+        "fileMatch": [
+          ".hare-lsp.json",
+          "hare-lsp.json"
+        ],
+        "url": "./schemas/hare-settings.schema.json"
+      }
+    ],
     "configuration": [
       {
         "title": "Hare LSP",
@@ -97,6 +106,12 @@
             "type": "boolean",
             "default": true,
             "description": "Run `hare build` on save to surface type-check diagnostics."
+          },
+          "hare.diagnostics.buildTimeoutMs": {
+            "type": "number",
+            "default": 60000,
+            "minimum": 0,
+            "description": "Maximum wall-clock ms to wait for `hare build` (or `hare test` / `hare run`) before SIGTERM. 0 disables the timeout."
           },
           "hare.format.indentStyle": {
             "type": "string",

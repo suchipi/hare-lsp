@@ -13,7 +13,6 @@ use encoding::json;
 use fmt;
 use io;
 use lsp;
-use os;
 use strings;
 
 // --- window/logMessage -----------------------------------------------
@@ -24,7 +23,7 @@ export fn log_message(s: *server, kind: lsp::message_type, msg: str) void = {
 	const params = match (build_message_params(kind, msg)) {
 	case let v: json::value => yield v;
 	case nomem =>
-		fallback_log("window/logMessage: out of memory");
+		slog_error(s, "window/logMessage: out of memory");
 		return;
 	};
 	defer json::finish(params);
@@ -49,7 +48,7 @@ export fn show_message(s: *server, kind: lsp::message_type, msg: str) void = {
 	const params = match (build_message_params(kind, msg)) {
 	case let v: json::value => yield v;
 	case nomem =>
-		fallback_log("window/showMessage: out of memory");
+		slog_error(s, "window/showMessage: out of memory");
 		return;
 	};
 	defer json::finish(params);
@@ -251,8 +250,7 @@ fn send_request(s: *server, id: i64, method: str, params: json::value) bool = {
 	case size =>
 		return true;
 	case let e: io::error =>
-		fmt::fprintln(os::stderr, "hare-lsp:",
-			"send_request:", method, ":", io::strerror(e))!;
+		slog_error(s, "send_request:", method, ":", io::strerror(e));
 		return false;
 	};
 };
@@ -261,8 +259,7 @@ fn send_notification(s: *server, method: str, params: json::value) void = {
 	match (lsp::encode_notification(s.out, method, params)) {
 	case size => void;
 	case let e: io::error =>
-		fmt::fprintln(os::stderr, "hare-lsp:",
-			"send_notification:", method, ":", io::strerror(e))!;
+		slog_error(s, "send_notification:", method, ":", io::strerror(e));
 	};
 };
 
@@ -276,7 +273,3 @@ fn build_message_params(kind: lsp::message_type, msg: str) (json::value | nomem)
 	return p;
 };
 
-// Used when even logging through the LSP transport fails.
-fn fallback_log(msg: str) void = {
-	fmt::fprintln(os::stderr, "hare-lsp:", msg)!;
-};

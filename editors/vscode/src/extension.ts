@@ -7,8 +7,14 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 import {
+  CloseAction,
+  CloseHandlerResult,
+  ErrorAction,
+  ErrorHandler,
+  ErrorHandlerResult,
   LanguageClient,
   LanguageClientOptions,
+  Message,
   ServerOptions,
   Trace,
   TransportKind,
@@ -17,6 +23,91 @@ import {
 const execFileAsync = promisify(execFile);
 
 let client: LanguageClient | undefined;
+
+// vscode-languageclient's default ErrorHandler shows a toast after just a
+// handful of restarts and requires the user to click "Restart" to bring
+// the server back. That's reasonable for a server that's expected to be
+// stable; hare-lsp is young enough that crashes are mostly transient
+// (parser blowing up on a half-typed file, a tool subprocess hanging,
+// etc.) and a friction-free auto-restart is more useful.
+//
+// This handler restarts on every clean / unexpected close, up to a
+// sliding-window cap. It uses linear backoff so a tight crash loop
+// doesn't pin the CPU; once the cap is exceeded we surface the toast
+// and stop restarting until the user explicitly restarts via the
+// `hare-lsp.restart` command.
+class HareLspErrorHandler implements ErrorHandler {
+  // Cap consecutive restart attempts in any one window. A real crash
+  // loop will hit this fast; a server that crashes once and stays up
+  // after a restart will let `recent` decay.
+  private static readonly MAX_RESTARTS_IN_WINDOW = 10;
+  // Window over which restarts are counted, in ms. Tight crash loops
+  // tend to be sub-second; this generous window also catches "stable
+  // for a minute, then crashes again" patterns.
+  private static readonly WINDOW_MS = 3 * 60_000;
+  // Linear backoff floor between restart attempts. Keeps the CPU
+  // calm if the server is failing to even start.
+  private static readonly MIN_RESTART_DELAY_MS = 500;
+  // Cap the per-restart delay so the user doesn't sit through minutes
+  // of waiting after a few flaps.
+  private static readonly MAX_RESTART_DELAY_MS = 10_000;
+
+  private recent: number[] = [];
+  private errorCount = 0;
+
+  constructor(private readonly channel: vscode.OutputChannel) {}
+
+  error(
+    error: Error,
+    _message: Message | undefined,
+    count: number | undefined,
+  ): ErrorHandlerResult {
+    this.errorCount = count ?? this.errorCount + 1;
+    this.channel.appendLine(
+      `[hare-lsp] transport error (count=${this.errorCount}): ${error.message}`,
+    );
+    // Continue for a few errors; ask the client to shut down only if the
+    // transport is clearly hosed (matches the default's threshold).
+    if (this.errorCount <= 3) {
+      return { action: ErrorAction.Continue };
+    }
+    return { action: ErrorAction.Shutdown };
+  }
+
+  async closed(): Promise<CloseHandlerResult> {
+    const now = Date.now();
+    this.recent = this.recent.filter(
+      (t) => now - t < HareLspErrorHandler.WINDOW_MS,
+    );
+    this.recent.push(now);
+
+    if (this.recent.length > HareLspErrorHandler.MAX_RESTARTS_IN_WINDOW) {
+      this.channel.appendLine(
+        `[hare-lsp] server exited ${this.recent.length} times in the last ` +
+          `${HareLspErrorHandler.WINDOW_MS / 1000}s; giving up. ` +
+          `Run "Restart Hare LSP" to try again.`,
+      );
+      return {
+        action: CloseAction.DoNotRestart,
+        message: `hare-lsp crashed repeatedly. Check the Hare LSP output channel for details, ` +
+          `then run "Restart Hare LSP" from the command palette.`,
+      };
+    }
+
+    // Linear backoff: 0.5s, 1s, 1.5s, ... up to 10s.
+    const delay = Math.min(
+      HareLspErrorHandler.MIN_RESTART_DELAY_MS * this.recent.length,
+      HareLspErrorHandler.MAX_RESTART_DELAY_MS,
+    );
+    this.channel.appendLine(
+      `[hare-lsp] server exited; auto-restart #${this.recent.length} in ${delay}ms`,
+    );
+    if (delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+    return { action: CloseAction.Restart };
+  }
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   const serverPath = vscode.workspace
@@ -117,6 +208,11 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     outputChannel: traceOutputChannel,
     traceOutputChannel,
+    // Auto-restart on crash with linear backoff. The default handler
+    // surfaces a prompt after a handful of crashes; we instead try
+    // harder before bothering the user, since most early-stage hare-lsp
+    // crashes recover after a clean spawn.
+    errorHandler: new HareLspErrorHandler(traceOutputChannel),
   };
 
   client = new LanguageClient(

@@ -13,7 +13,6 @@ use encoding::json;
 use fmt;
 use io;
 use lsp;
-use os;
 use strings;
 use time;
 
@@ -591,7 +590,7 @@ fn send_result(s: *server, id: lsp::id, result: json::value) void = {
 	match (lsp::encode_response_result(s.out, id, result)) {
 	case size => void;
 	case let e: io::error =>
-		fmt::fprintln(os::stderr, "hare-lsp: send_result:", io::strerror(e))!;
+		slog_error(s, "send_result:", io::strerror(e));
 	};
 };
 
