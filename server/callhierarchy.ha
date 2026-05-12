@@ -139,6 +139,11 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 
 // Handles callHierarchy/outgoingCalls. For each function in the workspace
 // whose name appears within the source function's span, emit an entry.
+// Self (matching the source by uri+name) is excluded - recursive calls
+// would otherwise produce a tree node that loops to itself - and within
+// a single response we dedupe by (uri, name) so multiple workspace
+// entries pointing at the same function definition don't double-emit.
+// Cycle avoidance across calls is the client's responsibility.
 export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	const (item_name, item_uri) = match (parse_call_item(r.params)) {
 	case let v: (str, str) => yield v;
@@ -193,25 +198,18 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 		};
 	};
 
-	// Dedupe (a workspace entry can also have an open doc with the same
-	// fn). Preserve the first-seen uri.
-	let seen_names: []str = [];
-	defer free(seen_names);
+	// Dedupe by (uri, name) and skip self (input item) precisely so two
+	// unrelated functions sharing a short name in different files both
+	// stay in the list.
+	let visited: [](str, str) = [];
+	defer free(visited);
 	let arr: []json::value = [];
 	for (let i = 0z; i < len(candidates); i += 1) {
 		const short_name = candidates[i].0;
 		const cand_uri = candidates[i].1;
-		if (short_name == item_name) continue;
-		let already = false;
-		for (let j = 0z; j < len(seen_names); j += 1) {
-			if (seen_names[j] == short_name) {
-				already = true;
-				break;
-			};
-		};
-		if (already) continue;
+		if (cand_uri == item_uri && short_name == item_name) continue;
+		if (call_visited_has(visited, cand_uri, short_name)) continue;
 		if (!body_contains_token(body, short_name)) continue;
-		append(seen_names, short_name)!;
 
 		// Build "to" CallHierarchyItem.
 		let to = json::newobject();
@@ -249,8 +247,16 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 		json::put(&outgoing, "to", to)!;
 		json::put(&outgoing, "fromRanges", from_ranges: json::value)!;
 		append(arr, outgoing: json::value)!;
+		append(visited, (cand_uri, short_name))!;
 	};
 	send_array_local(s, r.id, arr);
+};
+
+fn call_visited_has(vis: [](str, str), uri: str, name: str) bool = {
+	for (let i = 0z; i < len(vis); i += 1) {
+		if (vis[i].0 == uri && vis[i].1 == name) return true;
+	};
+	return false;
 };
 
 fn body_contains_token(body: []u8, name: str) bool = {

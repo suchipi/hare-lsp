@@ -54,7 +54,12 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 };
 
 // Returns the typeHierarchy supertypes for the given item: every named
-// type referenced by the item type's underlying definition.
+// type referenced by the item type's underlying definition. Self
+// (same uri + same name) is filtered out and within a single response
+// we dedupe by (uri, name) so a name referenced by multiple distinct
+// idents in the underlying doesn't produce duplicate items. Cycle
+// avoidance across calls (e.g. A -> B -> A) is the client's
+// responsibility - the server returns one level per call.
 export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	const item = match (parse_item(r.params)) {
 	case let v: type_item => yield v;
@@ -93,12 +98,16 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	defer analysis::finish_idents(idents);
 
 	// For each referenced ident, look up its TYPE entries in the workspace
-	// and emit one TypeHierarchyItem per match.
+	// and emit one TypeHierarchyItem per match. `visited` is the cycle
+	// guard within this single response.
 	let arr: []json::value = [];
+	let visited: [](str, str) = [];
+	defer free(visited);
 	for (let i = 0z; i < len(idents); i += 1) {
 		if (len(idents[i]) == 0) continue;
 		const short = idents[i][len(idents[i]) - 1];
-		emit_workspace_type_items(s, short, &arr);
+		emit_workspace_type_items(s, short, &arr, &visited,
+			item.uri, item.name);
 	};
 	send_array_th(s, r.id, arr);
 };
@@ -123,6 +132,10 @@ fn load_subunit(s: *server, uri: str) (*ast::subunit | void) = {
 
 // Returns the typeHierarchy subtypes for the given item: every workspace
 // type decl whose underlying definition references the item's name.
+// Self (matching uri + name) is excluded. Within a single response we
+// dedupe by (uri, name) so two decls in the same file that share a
+// short_name don't both emit. Cycle avoidance across calls is the
+// client's responsibility.
 export fn handle_subtypes(s: *server, r: lsp::request) void = {
 	const item = match (parse_item(r.params)) {
 	case let v: type_item => yield v;
@@ -133,6 +146,8 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 	defer free_type_item(item);
 
 	let arr: []json::value = [];
+	let visited: [](str, str) = [];
+	defer free(visited);
 	// Group workspace TYPE entries by file so we re-parse each file once.
 	let seen_paths: []str = [];
 	defer free(seen_paths);
@@ -180,11 +195,13 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 			// Build an item for this decl. Need its short_name and span.
 			const short = decl_type_short_name(d);
 			if (short == "") continue;
-			if (short == item.name) continue; // skip self
+			if (e.uri == item.uri && short == item.name) continue;
+			if (visited_pair_has(visited, e.uri, short)) continue;
 			const sp_off = d.loc.start.off: size;
 			const ep_off = d.loc.end.off: size;
 			append(arr, build_type_item_for_path(s, e.path,
 				e.uri, short, sp_off, ep_off, fpe.text))!;
+			append(visited, (e.uri, short))!;
 		};
 	};
 	send_array_th(s, r.id, arr);
@@ -275,13 +292,23 @@ fn str_in(slice: []str, needle: str) bool = {
 };
 
 // Walks workspace TYPE entries with the given short name and appends a
-// TypeHierarchyItem per match into `arr`.
-fn emit_workspace_type_items(s: *server, name: str, arr: *[]json::value) void = {
+// TypeHierarchyItem per match into `arr`. Skips an entry if its
+// (uri, name) matches `self_uri`+`self_name` (the input item) or is
+// already in `visited` (this-response dedup).
+fn emit_workspace_type_items(
+	s: *server, name: str, arr: *[]json::value,
+	visited: *[](str, str), self_uri: str, self_name: str,
+) void = {
 	let cur = *arr;
+	let vis = *visited;
+	defer { *arr = cur; *visited = vis; };
+
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const e = &s.workspace_index.entries[i];
 		if (e.kind != analysis::symbol_kind::TYPE) continue;
 		if (e.short_name != name) continue;
+		if (e.uri == self_uri && e.short_name == self_name) continue;
+		if (visited_pair_has(vis, e.uri, e.short_name)) continue;
 		// Prefer an open document's bytes if one exists for this URI;
 		// otherwise use the shared on-disk parse cache.
 		const text = match (find_document(s, e.uri)) {
@@ -294,8 +321,15 @@ fn emit_workspace_type_items(s: *server, name: str, arr: *[]json::value) void = 
 		};
 		append(cur, build_type_item_for_path(s, e.path, e.uri,
 			name, e.start_off: size, e.end_off: size, text))!;
+		append(vis, (e.uri, e.short_name))!;
 	};
-	*arr = cur;
+};
+
+fn visited_pair_has(vis: [](str, str), uri: str, name: str) bool = {
+	for (let i = 0z; i < len(vis); i += 1) {
+		if (vis[i].0 == uri && vis[i].1 == name) return true;
+	};
+	return false;
 };
 
 fn build_type_item(

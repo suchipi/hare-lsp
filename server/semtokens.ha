@@ -5,10 +5,17 @@
 // into one of the LSP standard token types, then encode in the LSP
 // 5-tuple format (deltaLine, deltaStart, length, tokenType, modifiers).
 //
-// We support full and range modes. Delta mode currently returns the same
-// data as full (a true diff would compare against a stored result-id'd
-// previous edit; correctness is preserved either way and clients fall
-// back to full when delta isn't actually computed).
+// We support full, range, and delta. Delta mode compares the new token
+// array against the cached one keyed by previousResultId: the diff is the
+// minimal "common prefix / common suffix" splice ([lo..hi_old) replaced by
+// [lo..hi_new), encoded as a single semanticTokensEdit). If the client's
+// previousResultId no longer matches our cache (e.g. server restart or
+// intervening request for a different document), we fall back to /full.
+//
+// Range mode returns the full document encoded; clients filter locally.
+// A true range encoding would only emit the tuples whose absolute line
+// falls inside [start, end), but the savings are small for typical files
+// and the LSP spec lets the server return the full set.
 
 use analysis;
 use bufio;

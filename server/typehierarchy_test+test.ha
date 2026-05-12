@@ -202,6 +202,111 @@ fn th_index(s: *server, path: str, text: str) void = {
 	assert(found_b);
 };
 
+// A self-referential type (e.g. type Node = struct { next: *Node; })
+// must not return itself in supertypes - that would cause clients
+// walking the hierarchy to recurse forever.
+@test fn supertypes_skip_self_for_self_referential_type() void = {
+	let (s, scan, in_buf, out) = th_test_server();
+	defer th_test_cleanup(&s, scan, in_buf, out);
+
+	const text = "type Node = struct { next: *Node };\\n";
+	th_open(&s, "file:///repo/self.ha", text);
+	th_index(&s, "/repo/self.ha", "type Node = struct { next: *Node };\n");
+
+	const params = `{"item":{"name":"Node","kind":23,"uri":"file:///repo/self.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}}}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 10.0,
+		method = strings::dup("typeHierarchy/supertypes")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_supertypes(&s, r);
+	const v = th_skip_to_response(out, 10.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	// The only ident referenced by Node's underlying is Node itself,
+	// which we filter out. Result should be empty.
+	for (let i = 0z; i < len(result); i += 1) {
+		const item = result[i] as json::object;
+		const n = *(json::get(&item, "name") as *json::value) as str;
+		const u = *(json::get(&item, "uri") as *json::value) as str;
+		assert(!(n == "Node" && u == "file:///repo/self.ha"));
+	};
+};
+
+// A self-referential subtype query (e.g. asking for subtypes of the
+// type itself) must not include the input item in the result.
+@test fn subtypes_skip_self_when_underlying_refs_self() void = {
+	let (s, scan, in_buf, out) = th_test_server();
+	defer th_test_cleanup(&s, scan, in_buf, out);
+
+	const path = ".tmp/hare-lsp-th-self-ref-subtypes.ha";
+	const text = "type Node = struct { next: *Node };\n";
+	let _ = match (writefile(path, text)) {
+	case bool => yield true;
+	case => abort("cannot write fixture");
+	};
+	defer rmfile(path);
+
+	th_index(&s, path, text);
+
+	const params_str = strings::concat(`{"item":{"name":"Node","kind":23,"uri":"file://`, path,
+		`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}}}}`)!;
+	defer free(params_str);
+	let pv = json::loadstr(params_str)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 11.0,
+		method = strings::dup("typeHierarchy/subtypes")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_subtypes(&s, r);
+	const v = th_skip_to_response(out, 11.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	// Node refs itself; expect no items returned (filtered as self).
+	assert(len(result) == 0);
+};
+
+// When two distinct workspace entries match a referenced ident, both
+// should appear - they are different types - but the same (uri, name)
+// must not be emitted twice from a single response.
+@test fn supertypes_dedupes_within_single_response() void = {
+	let (s, scan, in_buf, out) = th_test_server();
+	defer th_test_cleanup(&s, scan, in_buf, out);
+
+	// Type T has underlying that references B twice (e.g. T = (B | B)).
+	// `collect_referenced_idents` already dedupes the ident list, but
+	// our visited-set is a belt-and-braces check.
+	const text = "type T = (B | B);\\ntype B = int;\\n";
+	th_open(&s, "file:///repo/dup.ha", text);
+	th_index(&s, "/repo/dup.ha", "type T = (B | B);\ntype B = int;\n");
+
+	const params = `{"item":{"name":"T","kind":23,"uri":"file:///repo/dup.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}}}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 12.0,
+		method = strings::dup("typeHierarchy/supertypes")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_supertypes(&s, r);
+	const v = th_skip_to_response(out, 12.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	let count_b = 0;
+	for (let i = 0z; i < len(result); i += 1) {
+		const item = result[i] as json::object;
+		const n = *(json::get(&item, "name") as *json::value) as str;
+		if (n == "B") count_b += 1;
+	};
+	assert(count_b == 1);
+};
+
 // --- file fixture helpers ---
 
 fn writefile(path: str, text: str) (bool | fs::error) = {
