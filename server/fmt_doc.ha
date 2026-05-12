@@ -47,7 +47,16 @@ export type doc_concat = struct { items: []doc };
 // A line comment, e.g. "foo bar" rendered as "// foo bar". Always
 // forces enclosing groups into broken mode (because trailing tokens
 // after a comment must move to the next line).
-export type doc_comment = struct { text: str };
+//
+// `trailing = true` marks comments that share their source line with
+// the preceding code (e.g. `assert(...);  // note`). Trailing
+// comments emit ` // text` inline (one space + slashes) and do NOT
+// break to a fresh line first; non-trailing comments break to a fresh
+// line at the current indent before emitting.
+export type doc_comment = struct {
+	text: str,
+	trailing: bool,
+};
 
 // Renders to "" in flat mode, `text` in broken mode. Used for the
 // trailing-comma-when-wrapped pattern in arg / field / member lists.
@@ -97,7 +106,11 @@ export fn nest(
 
 export fn concat(items: []doc) doc = doc_concat { items = items };
 
-export fn comment(text: str) doc = doc_comment { text = strings::dup(text)! };
+export fn comment(text: str) doc =
+	doc_comment { text = strings::dup(text)!, trailing = false };
+
+export fn trailing_comment(text: str) doc =
+	doc_comment { text = strings::dup(text)!, trailing = true };
 
 export fn if_broken(s: str) doc = doc_if_broken { text = strings::dup(s)! };
 
@@ -297,24 +310,30 @@ fn render(
 			pending_tabs,
 		)?;
 	case let cm: doc_comment =>
-		if (*cur_col > 0 && *pending_tabs == 0) {
-			// A line comment must always start on a fresh line and ends
-			// with `\n`; if we're mid-line (no preceding break), break
-			// here first so the comment doesn't fuse onto the previous
-			// token (e.g. `};// comment`). When a hardline already
-			// fired (cur_col reset, indent flushed via pending_tabs),
-			// we don't need an extra break - that's how callers like
-			// `build_compound_body` chain `hardline()` + comment
-			// without producing a blank line.
+		// Trailing comments stay glued to the preceding code with
+		// a single space separator (e.g. `assert(...);  // note`).
+		// Non-trailing (full-line) comments must always start on a
+		// fresh line - if we're mid-line, break first.
+		if (cm.trailing) {
+			emit_str(out, " ", cur_col, written, pending_tabs)?;
+		} else if (*cur_col > 0 && *pending_tabs == 0) {
 			emit_break(out, indent, cur_col, written, pending_tabs)?;
 		};
+		// `cm.text` is the raw text after `//` from the source and
+		// includes any leading whitespace the user wrote (typically
+		// one space). Emit `//` with no extra space so we don't
+		// double up.
 		emit_str(out, "//", cur_col, written, pending_tabs)?;
 		emit_str(out, cm.text, cur_col, written, pending_tabs)?;
-		emit_break(out, indent, cur_col, written, pending_tabs)?;
-	// `cm.text` is the raw text after `//` from the source and
-	// includes any leading whitespace the user wrote (typically
-	// one space). Emit `//` with no extra space so we don't
-	// double up.
+		// Full-line comments emit their own trailing break so the
+		// next item starts at a clean indent. Trailing comments
+		// rely on the caller's next `hardline()` (or sibling
+		// statement break) to move off the line - emitting a break
+		// here would double up and produce a blank line.
+		if (!cm.trailing) {
+			emit_break(out, indent,
+				cur_col, written, pending_tabs)?;
+		};
 
 	case let ib: doc_if_broken =>
 		switch (mode) {

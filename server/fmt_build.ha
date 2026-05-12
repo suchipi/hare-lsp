@@ -86,6 +86,12 @@ export fn build_subunit_doc(
 		const imp_end = su.imports[i].loc.end.off: size;
 		const _ = push_comments_before(&items, c, imp_off);
 		append(items, build_import_doc(&su.imports[i]))!;
+		const next_imp_off = if (i + 1 <
+			len(su.imports)) su.imports[i + 1].loc.start.off: size
+			else if (len(su.decls) > 0) su.decls[0].loc.start.off: size
+			else data_len;
+		flush_trailing_comments_to_eol(&items, c, next_imp_off,
+			imp_end, data);
 		append(items, hardline())!;
 		if (i + 1 < len(su.imports)) {
 			const next_off = su.imports[i + 1].loc.start.off: size;
@@ -105,6 +111,25 @@ export fn build_subunit_doc(
 		const decl_off = su.decls[i].loc.start.off: size;
 		const _ = push_comments_before(&items, c, decl_off);
 		append(items, build_decl_doc(&su.decls[i], &bc))!;
+		// Flush trailing comments on the same line as the decl's
+		// closing `;` BEFORE the hardline that ends this decl's
+		// line - otherwise the trailing comment would be picked up
+		// by the next decl's leading flush and emitted with no
+		// break (since trailing-comment doc nodes intentionally
+		// don't emit one), gluing it onto the next decl.
+		const next_decl_off = if (i + 1 <
+			len(su.decls)) su.decls[i + 1].loc.start.off: size
+			else data_len;
+		// `decl.loc.end.off` includes any trailing-line comment
+		// (the lexer's `mkloc` peeks past comments to the next
+		// real token). Use the source-content end derived by
+		// trimming whitespace backward from `next_decl_off`
+		// instead, so the line check inside the flush picks up
+		// the actual closing `;` line.
+		const decl_src_end =
+			source_content_end(data, decl_off, next_decl_off);
+		flush_trailing_comments_to_eol(&items, c, next_decl_off,
+			decl_src_end, data);
 		append(items, hardline())!;
 		if (i + 1 < len(su.decls)) {
 			// Blank line between top-level decls — always emit
@@ -400,6 +425,7 @@ fn build_compound_body(
 	append(outer, text("{"))!;
 
 	let inner: []doc = [];
+	const body_end = body.loc.end.off: size;
 	for (let i = 0z; i < len(cmp.exprs); i += 1) {
 		const stmt = cmp.exprs[i];
 		const stmt_off = stmt.loc.start.off: size;
@@ -408,6 +434,16 @@ fn build_compound_body(
 		const _ = push_comments_before(&inner, bc.c, stmt_off);
 		append(inner, build_expr_doc(stmt, bc))!;
 		append(inner, text(";"))!;
+		// After emitting the statement and its `;`, eagerly flush
+		// any trailing comments that share the statement's source
+		// line. This must happen BEFORE the next iteration's
+		// hardline; otherwise a trailing `// note` would land on
+		// its own line below the code instead of inline with it.
+		const next_stmt_off = if (i + 1 <
+			len(cmp.exprs)) cmp.exprs[i + 1].loc.start.off: size
+			else body_end;
+		flush_trailing_comments_to_eol(&inner, bc.c, next_stmt_off,
+			stmt_end, bc.data);
 		if (i + 1 < len(cmp.exprs)) {
 			const next_off = cmp.exprs[i + 1].loc.start.off: size;
 			if (blank_between(bc.bl, stmt_end, next_off)) {
@@ -415,7 +451,6 @@ fn build_compound_body(
 			};
 		};
 	};
-	const body_end = body.loc.end.off: size;
 	const _ = push_comments_before(&inner, bc.c, body_end);
 
 	append(outer, nest(1, concat(inner)))!;
@@ -436,10 +471,81 @@ fn push_comments_before(
 	if (len(cs) == 0) return;
 	for (let i = 0z; i < len(cs); i += 1) {
 		let cur = *items;
+		// Always emit as full-line here. Trailing comments (the
+		// is_trailing flag) only stay inline when picked up by
+		// `flush_trailing_comments_to_eol` immediately after the
+		// owning code; once a comment lingers long enough to be
+		// popped by `push_comments_before`, the code it would
+		// have trailed has already been emitted (with its own
+		// hardline), and there's no way to put the comment back
+		// on that line. Treat it as a leading comment for the
+		// next construct so it lands on a fresh line.
 		append(cur, comment(cs[i].text))!;
 		*items = cur;
 	};
 	return cs[len(cs) - 1].end_off;
+};
+
+// Flushes any pending trailing comments that fall before `boundary`
+// AND share their source line with the byte offset `code_pos`.
+// Called immediately after emitting a code item (a statement, decl,
+// import) so a trailing `// note` lands inline with that item's
+// closing `;` instead of waiting for the next iteration's leading
+// `push_comments_before` - which fires AFTER a hardline and would
+// therefore drop the comment onto a new line.
+//
+// `code_pos` is any byte offset inside (or at the end of) the
+// just-emitted code; we count `\n`s from start of `data` to find its
+// source line. Only comments on that exact line are popped, so a
+// chain of `case ... =>; // note` lines doesn't fold every note onto
+// the first line emitted.
+fn flush_trailing_comments_to_eol(
+	items: *[]doc,
+	c: *comment_cursor,
+	boundary: size,
+	code_pos: size,
+	data: []u8,
+) void = {
+	const code_line = line_of(data, code_pos);
+	for (c.pos < len(c.comments)) {
+		const ci = &c.comments[c.pos];
+		if (!ci.is_trailing) break;
+		if (ci.start_off >= boundary) break;
+		if (ci.line != code_line) break;
+		let cur = *items;
+		append(cur, trailing_comment(ci.text))!;
+		*items = cur;
+		c.pos += 1;
+	};
+};
+
+// Returns the byte offset of the LAST non-whitespace byte in
+// `data[lo..hi)` - i.e., where the actual code content of a span
+// ends, ignoring any trailing whitespace. Used to find the source
+// line a decl's `;` lives on, since `decl.loc.end.off` from the
+// parser points at the next decl's start (mkloc peeks past
+// intervening comments). Returns `lo` if the span is all whitespace.
+fn source_content_end(data: []u8, lo: size, hi: size) size = {
+	let cap = if (hi > len(data)) len(data) else hi;
+	let i = cap;
+	for (i > lo; i -= 1) {
+		const b = data[i - 1];
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8) {
+			return i - 1;
+		};
+	};
+	return lo;
+};
+
+// Returns the 0-based line number of byte offset `pos` in `data`,
+// counting `\n` bytes before it. `pos` is clamped to `len(data)`.
+fn line_of(data: []u8, pos: size) size = {
+	const p = if (pos > len(data)) len(data) else pos;
+	let count: size = 0;
+	for (let i = 0z; i < p; i += 1) {
+		if (data[i] == '\n': u8) count += 1;
+	};
+	return count;
 };
 
 // ----- Types --------------------------------------------------------
@@ -1108,18 +1214,32 @@ fn build_binarithm_expr(
 	const need_outer_parens = prec < parent_prec;
 	if (need_outer_parens) append(items, text("("))!;
 
-	let inner: []doc = [];
-	append(inner, build_binexpr_operand(b.lvalue, bc, prec))!;
-	append(inner, text(" "))!;
-	append(inner, text(binarithm_op_str(b.op)))!;
-	append(inner, line(" "))!;
-	append(inner, build_binexpr_operand(b.rvalue, bc, prec))!;
+	// Only the lowest-precedence operators (`&&`, `||`, `^^`) get a
+	// soft break point AFTER the operator; arithmetic, shift, and
+	// comparison operators stay on one line, since wrapping a
+	// `len(id) >\n\t0` mid-comparison is uglier than letting the
+	// line run a few cols past 80. Logical chains commonly span
+	// lines (e.g. `if (a && b &&\n\t\tc && d)`) so they keep their
+	// soft break.
+	const sep: doc = if (prec <= binprec_lor()) line(" ") else text(" ");
+	append(items, build_binexpr_operand(b.lvalue, bc, prec))!;
+	append(items, text(" "))!;
+	append(items, text(binarithm_op_str(b.op)))!;
+	append(items, sep)!;
+	append(items, build_binexpr_operand(b.rvalue, bc, prec))!;
 
-	append(items, group(inner))!;
-
-	if (need_outer_parens) append(items, text(")"))!;
+	if (need_outer_parens) {
+		append(items, text(")"))!;
+		return concat(items);
+	};
+	if (prec <= binprec_lor()) return group(items);
 	return concat(items);
 };
+
+// The precedence of `&&` (the lowest non-logical-XOR boolean).
+// Anything at this precedence or below gets a soft-break inside
+// `build_binarithm_expr`; everything above stays on one line.
+fn binprec_lor() uint = 2;
 
 fn build_binexpr_operand(
 	e: *ast::expr,
@@ -1368,8 +1488,14 @@ fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
 		append(body_inner, text(" "))!;
 		append(body_inner, build_expr_doc(i.tbranch, bc))!;
 	} else {
-		append(body_inner, line(" "))!;
-		append(body_inner, nest(1, build_expr_doc(i.tbranch, bc)))!;
+		// Wrap the leading line+body as a single nested unit so
+		// that, in broken mode, the line-break indents the body
+		// one level past `if`. Nesting only the body would leave
+		// the break itself at the outer indent.
+		let tb: []doc = [];
+		append(tb, line(" "))!;
+		append(tb, build_expr_doc(i.tbranch, bc))!;
+		append(body_inner, nest(1, concat(tb)))!;
 	};
 
 	match (i.fbranch) {
@@ -1387,8 +1513,10 @@ fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
 			append(body_inner, text(" "))!;
 			append(body_inner, build_expr_doc(e, bc))!;
 		} else {
-			append(body_inner, line(" "))!;
-			append(body_inner, nest(1, build_expr_doc(e, bc)))!;
+			let fb: []doc = [];
+			append(fb, line(" "))!;
+			append(fb, build_expr_doc(e, bc))!;
+			append(body_inner, nest(1, concat(fb)))!;
 		};
 	};
 
@@ -1550,8 +1678,24 @@ fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
 	let inner: []doc = [];
 	for (let i = 0z; i < len(exprs); i += 1) {
 		append(inner, hardline())!;
+		// Flush comments that live BEFORE this case-body
+		// expression in the source. Without this, a comment
+		// like `case X =>\n\t// note\n\tbody;` would leave the
+		// `// note` in the cursor and it would be re-emitted at
+		// the next match boundary - past the closing `}`,
+		// detached from the code it documents.
+		const _ = push_comments_before(
+			&inner,
+			bc.c,
+			exprs[i].loc.start.off: size,
+		);
 		append(inner, build_expr_doc(exprs[i], bc))!;
 		append(inner, text(";"))!;
+		const next_off = if (i + 1 <
+			len(exprs)) exprs[i + 1].loc.start.off: size
+			else ~0z;
+		flush_trailing_comments_to_eol(&inner, bc.c, next_off,
+			exprs[i].loc.end.off: size, bc.data);
 	};
 	return nest(1, concat(inner));
 };
