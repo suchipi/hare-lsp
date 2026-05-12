@@ -4,7 +4,8 @@
 use strings;
 
 @test fn index_collects_function_decls() void = {
-	const src = `export fn alpha() void = void;
+	const src =
+		`export fn alpha() void = void;
 
 fn beta() void = void;
 
@@ -39,7 +40,8 @@ type alias = int;
 };
 
 @test fn index_distinguishes_const_vs_global() void = {
-	const src = `let counter: int = 0;
+	const src =
+		`let counter: int = 0;
 const greeting: str = "hi";
 def MAX: int = 100;
 `;

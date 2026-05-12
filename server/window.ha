@@ -15,12 +15,12 @@ use io;
 use lsp;
 
 // --- window/logMessage -----------------------------------------------
-
 // Sends a window/logMessage notification. Per LSP spec, type 1=Error, 2=Warning,
 // 3=Info, 4=Log, 5=Debug. The client decides how to display it.
 export fn log_message(s: *server, kind: lsp::message_type, msg: str) void = {
 	const params = match (build_message_params(kind, msg)) {
-	case let v: json::value => yield v;
+	case let v: json::value =>
+		yield v;
 	case nomem =>
 		slog_error(s, "window/logMessage: out of memory");
 		return;
@@ -30,22 +30,25 @@ export fn log_message(s: *server, kind: lsp::message_type, msg: str) void = {
 };
 
 // Convenience wrappers.
-export fn log_error(s: *server, msg: str) void =
-	log_message(s, lsp::message_type::ERROR, msg);
-export fn log_warning(s: *server, msg: str) void =
-	log_message(s, lsp::message_type::WARNING, msg);
-export fn log_info(s: *server, msg: str) void =
-	log_message(s, lsp::message_type::INFO, msg);
-export fn log_debug(s: *server, msg: str) void =
-	log_message(s, lsp::message_type::DEBUG, msg);
+export fn log_error(s: *server, msg: str) void = log_message(s,
+	lsp::message_type::ERROR, msg);
+
+export fn log_warning(s: *server, msg: str) void = log_message(s,
+	lsp::message_type::WARNING, msg);
+
+export fn log_info(s: *server, msg: str) void = log_message(s,
+	lsp::message_type::INFO, msg);
+
+export fn log_debug(s: *server, msg: str) void = log_message(s,
+	lsp::message_type::DEBUG, msg);
 
 // --- window/showMessage ----------------------------------------------
-
 // Sends a window/showMessage notification. Use sparingly — clients typically
 // surface this as a UI toast/popup.
 export fn show_message(s: *server, kind: lsp::message_type, msg: str) void = {
 	const params = match (build_message_params(kind, msg)) {
-	case let v: json::value => yield v;
+	case let v: json::value =>
+		yield v;
 	case nomem =>
 		slog_error(s, "window/showMessage: out of memory");
 		return;
@@ -55,7 +58,6 @@ export fn show_message(s: *server, kind: lsp::message_type, msg: str) void = {
 };
 
 // --- window/logTrace -------------------------------------------------
-
 // Sends a $/logTrace notification at the requested verbosity. No-op when
 // trace is OFF, regardless of the requested verbosity.
 //
@@ -73,7 +75,6 @@ export fn log_trace(s: *server, message: str, verbose: str) void = {
 };
 
 // --- window/showMessageRequest ---------------------------------------
-
 // Sends a window/showMessageRequest with the given actions. Returns the id of
 // the outgoing request so the caller can correlate the eventual response, or
 // void if the message could not be sent. The id is also remembered in the
@@ -87,7 +88,7 @@ export fn show_message_request(
 	const id = next_outgoing_id(s);
 	let params = json::newobject();
 	defer json::finish(params);
-	json::put(&params, "type", (kind: int): f64)!;
+	json::put(&params, "type", kind: int: f64)!;
 	json::set(&params, "message", message: json::value)!;
 	if (len(actions) > 0) {
 		let arr: []json::value = [];
@@ -115,7 +116,6 @@ export fn show_message_request(
 };
 
 // --- window/showDocument ---------------------------------------------
-
 // Sends a window/showDocument request. Returns the request id or void on
 // transport failure.
 export fn show_document(
@@ -138,7 +138,6 @@ export fn show_document(
 };
 
 // --- window/workDoneProgress/create + $/progress + cancel -----------
-
 // Server-initiated work-done progress. Lifecycle:
 //   1. progress_create(token) — request the client allocate a progress reporter
 //   2. progress_begin/report/end — emit $/progress notifications
@@ -146,7 +145,6 @@ export fn show_document(
 //
 // The token is a string chosen by the server; we use sequential numeric tokens
 // rendered as strings.
-
 export type progress_token = str;
 
 // Reserves a fresh progress token and asks the client to create a progress
@@ -234,7 +232,6 @@ fn send_progress(s: *server, token: progress_token, value: json::value) void = {
 };
 
 // --- low-level helpers -----------------------------------------------
-
 fn next_outgoing_id(s: *server) i64 = {
 	const id = s.next_request_id;
 	s.next_request_id += 1;
@@ -262,13 +259,15 @@ fn send_notification(s: *server, method: str, params: json::value) void = {
 	};
 };
 
-fn build_message_params(kind: lsp::message_type, msg: str) (json::value | nomem) = {
+fn build_message_params(
+	kind: lsp::message_type,
+	msg: str,
+) (json::value | nomem) = {
 	let p = json::newobject();
 	let ok = false;
 	defer if (!ok) json::finish(p);
-	json::put(&p, "type", (kind: int): f64)?;
+	json::put(&p, "type", kind: int: f64)?;
 	json::set(&p, "message", msg: json::value)?;
 	ok = true;
 	return p;
 };
-

@@ -46,10 +46,12 @@ fn uri_to_local_path(uri: str) str = lsp::uri_decode_path(uri);
 // watcher-event is a common race on macOS/FSEvents). Returns null
 // in either failure mode.
 export fn cached_parse_or_drop_stale(
-	s: *server, path: str,
+	s: *server,
+	path: str,
 ) nullable *file_parse_entry = {
 	match (file_parse_cache_get(&s.file_parse_cache, path)) {
-	case let p: *file_parse_entry => return p;
+	case let p: *file_parse_entry =>
+		return p;
 	case null =>
 		if (file_path_missing(path)) {
 			analysis::drop_file(&s.workspace_index, path);
@@ -77,8 +79,10 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 	ensure_full_stdlib_indexed(s);
 
 	const query_str = match (extract_query(r.params)) {
-	case let s: str => yield s;
-	case void => yield "";
+	case let s: str =>
+		yield s;
+	case void =>
+		yield "";
 	};
 
 	let arr: []json::value = [];
@@ -94,8 +98,7 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 	let cap: size = 0;
 	let cancelled = false;
 	if (len(query_str) == 0) {
-		total = len(s.workspace_index.entries) +
-			len(s.stdlib_index.entries);
+		total = len(s.workspace_index.entries) + len(s.stdlib_index.entries);
 		cap = if (total < WORKSPACE_SYMBOL_CAP) total else WORKSPACE_SYMBOL_CAP;
 		// Emit workspace entries first so they outrank stdlib in
 		// the truncated set.
@@ -105,24 +108,21 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 				cancelled = true;
 				break;
 			};
-			append(arr, encode_workspace_symbol(
-				&s.workspace_index.entries[i]))!;
+			append(arr, encode_workspace_symbol(&s.workspace_index.entries[i]))!;
 		};
-		if (!cancelled) for (let i = 0z; i < len(s.stdlib_index.entries); i += 1) {
-			if (len(arr) >= cap) break;
-			if (i % 32 == 0 && check_cancel(s, r.id)) {
-				cancelled = true;
-				break;
+		if (!cancelled)
+			for (let i = 0z; i < len(s.stdlib_index.entries); i += 1) {
+				if (len(arr) >= cap) break;
+				if (i % 32 == 0 && check_cancel(s, r.id)) {
+					cancelled = true;
+					break;
+				};
+				append(arr, encode_workspace_symbol(&s.stdlib_index.entries[i]))!;
 			};
-			append(arr, encode_workspace_symbol(
-				&s.stdlib_index.entries[i]))!;
-		};
 	} else {
-		const ws = analysis::fuzzy_search(&s.workspace_index,
-			query_str);
+		const ws = analysis::fuzzy_search(&s.workspace_index, query_str);
 		defer free(ws);
-		const stdlib = analysis::fuzzy_search(&s.stdlib_index,
-			query_str);
+		const stdlib = analysis::fuzzy_search(&s.stdlib_index, query_str);
 		defer free(stdlib);
 		total = len(ws) + len(stdlib);
 		cap = if (total < WORKSPACE_SYMBOL_CAP) total else WORKSPACE_SYMBOL_CAP;
@@ -132,18 +132,17 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 				cancelled = true;
 				break;
 			};
-			append(arr, encode_workspace_symbol(
-				&s.workspace_index.entries[ws[i]]))!;
+			append(arr, encode_workspace_symbol(&s.workspace_index.entries[ws[i]]))!;
 		};
-		if (!cancelled) for (let i = 0z; i < len(stdlib); i += 1) {
-			if (len(arr) >= cap) break;
-			if (i % 32 == 0 && check_cancel(s, r.id)) {
-				cancelled = true;
-				break;
+		if (!cancelled)
+			for (let i = 0z; i < len(stdlib); i += 1) {
+				if (len(arr) >= cap) break;
+				if (i % 32 == 0 && check_cancel(s, r.id)) {
+					cancelled = true;
+					break;
+				};
+				append(arr, encode_workspace_symbol(&s.stdlib_index.entries[stdlib[i]]))!;
 			};
-			append(arr, encode_workspace_symbol(
-				&s.stdlib_index.entries[stdlib[i]]))!;
-		};
 	};
 	if (cancelled) return;
 
@@ -171,12 +170,14 @@ export fn handle_workspace_symbol_resolve(s: *server, r: lsp::request) void = {
 	const v: json::value = match (r.params) {
 	case let v: json::value =>
 		yield match (json::dup(v)) {
-		case let copy: json::value => yield copy;
+		case let copy: json::value =>
+			yield copy;
 		case nomem =>
 			send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
 			return;
 		};
-	case void => yield json::_null: json::value;
+	case void =>
+		yield json::_null: json::value;
 	};
 	defer json::finish(v);
 	match (lsp::encode_response_result(s.out, r.id, v)) {
@@ -214,32 +215,44 @@ fn encode_workspace_symbol(e: *analysis::workspace_entry) json::value = {
 
 fn workspace_entry_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 	switch (k) {
-	case analysis::symbol_kind::FUNCTION => return 12.0;
-	case analysis::symbol_kind::TYPE => return 23.0;
-	case analysis::symbol_kind::CONST => return 14.0;
-	case analysis::symbol_kind::GLOBAL => return 13.0;
-	case analysis::symbol_kind::DEF => return 14.0;
-	case => return 13.0; // Variable, conservative fallback for new variants.
+	case analysis::symbol_kind::FUNCTION =>
+		return 12.0;
+	case analysis::symbol_kind::TYPE =>
+		return 23.0;
+	case analysis::symbol_kind::CONST =>
+		return 14.0;
+	case analysis::symbol_kind::GLOBAL =>
+		return 13.0;
+	case analysis::symbol_kind::DEF =>
+		return 14.0;
+	case =>
+		return 13.0; // Variable, conservative fallback for new variants.
 	};
 };
 
 fn extract_query(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	match (json::get(&obj, "query")) {
 	case let p: *json::value =>
 		match (*p) {
 		case let s: str =>
 			return s;
-		case => return void;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 };
 
@@ -251,7 +264,11 @@ fn extract_query(p: (json::value | void)) (str | void) = {
 // source set), but the parser would abort on non-Hare bytes. We also
 // ignore anything inside our own `.cache/` since the Hare compiler
 // drops `*.o.tmp.s` artifacts there.
-export fn workspace_handle_file_event(s: *server, uri: str, event_type: int) void = {
+export fn workspace_handle_file_event(
+	s: *server,
+	uri: str,
+	event_type: int,
+) void = {
 	const path = uri_to_local_path(uri);
 	defer free(path);
 	if (!is_indexable_path(path)) return;
@@ -265,8 +282,10 @@ export fn workspace_handle_file_event(s: *server, uri: str, event_type: int) voi
 	case 1, 2 =>
 		// Created or Changed: re-index the file.
 		const f = match (open_file_for_read(path)) {
-		case let b: []u8 => yield b;
-		case void => return;
+		case let b: []u8 =>
+			yield b;
+		case void =>
+			return;
 		};
 		defer free(f);
 		analysis::index_file(&s.workspace_index, path, f);
@@ -287,8 +306,10 @@ export fn is_indexable_path(path_str: str) bool = {
 
 fn open_file_for_read(path_str: str) ([]u8 | void) = {
 	const f = match (os_open_helper(path_str)) {
-	case let f: io_file_helper => yield f;
-	case void => return void;
+	case let f: io_file_helper =>
+		yield f;
+	case void =>
+		return void;
 	};
 	defer io_close_helper(f);
 	let buf: []u8 = [];
@@ -297,7 +318,8 @@ fn open_file_for_read(path_str: str) ([]u8 | void) = {
 		match (io_read_helper(f, chunk[..])) {
 		case let n: size =>
 			append(buf, chunk[..n]...)!;
-		case void => break;
+		case void =>
+			break;
 		};
 	};
 	return buf;
@@ -309,8 +331,10 @@ type io_file_helper = io::file;
 
 fn os_open_helper(path_str: str) (io_file_helper | void) = {
 	match (os::open(path_str)) {
-	case let f: io::file => return f;
-	case fs::error => return void;
+	case let f: io::file =>
+		return f;
+	case fs::error =>
+		return void;
 	};
 };
 
@@ -320,9 +344,11 @@ fn io_close_helper(f: io_file_helper) void = {
 
 fn io_read_helper(f: io_file_helper, buf: []u8) (size | void) = {
 	match (io::read(f, buf)) {
-	case let n: size => return n;
-	case io::EOF => return void;
-	case io::error => return void;
+	case let n: size =>
+		return n;
+	case io::EOF =>
+		return void;
+	case io::error =>
+		return void;
 	};
 };
-

@@ -15,7 +15,6 @@
 // [[apply_settings]]); the analysis-side
 // `analysis::MAX_INDEX_ENTRIES` is a hard ceiling the configurable
 // value cannot exceed.
-
 // Runtime-configurable resource caps. Populated from `hare.limits.*`
 // settings; defaults via [[default_limits]].
 export type limits = struct {
@@ -24,28 +23,23 @@ export type limits = struct {
 	// orders of magnitude of headroom while bounding the per-message
 	// scan cost in find_document.
 	max_open_documents: size,
-
 	// Maximum total bytes summed across all open document buffers.
 	max_total_buffer_bytes: size,
-
 	// Maximum number of in-flight server-initiated requests awaiting a
 	// response. A misbehaving client that never replies could
 	// otherwise grow the pending_requests slice without bound.
 	max_pending_requests: size,
-
 	// Maximum number of cancelled-but-not-yet-cleared request ids. A
 	// client that cancels phantom ids (or whose handler completed
 	// before the cancel arrived) would otherwise grow s.cancelled_ids
 	// forever, with O(n) scan per message.
 	max_cancelled_ids: size,
-
 	// Maximum number of diagnostics published for a single file. A
 	// file with thousands of parse errors makes for a useless
 	// diagnostic list and a large publishDiagnostics payload; we
 	// truncate and append a synthesised "(N more)" diagnostic so the
 	// user knows there are more.
 	max_diagnostics_per_file: size,
-
 	// Maximum number of workspace_index entries. Each entry is roughly
 	// a hundred bytes plus owned strings; the default is enough for
 	// several hundred thousand-file repositories and well short of

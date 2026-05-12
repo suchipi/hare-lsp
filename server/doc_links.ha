@@ -125,7 +125,8 @@ fn resolve_ref(s: *server, doc: *document, ref: str) (ref_target | void) = {
 			return target_for_entry(s, e);
 		case void => void;
 		};
-		const full_imports = analysis::collect_imported_module_paths(&cache.pr.subunit);
+		const full_imports = analysis::collect_imported_module_paths(
+			&cache.pr.subunit);
 		defer analysis::free_str_slice(full_imports);
 		for (let i = 0z; i < len(full_imports); i += 1) {
 			const _ = ensure_stdlib_module_indexed(s, full_imports[i]);
@@ -143,7 +144,8 @@ fn resolve_ref(s: *server, doc: *document, ref: str) (ref_target | void) = {
 		match (analysis::find_first_by_short_name(&s.stdlib_index, name)) {
 		case let e: *analysis::workspace_entry =>
 			return target_for_entry(s, e);
-		case void => return void;
+		case void =>
+			return void;
 		};
 	};
 
@@ -168,7 +170,8 @@ fn resolve_ref(s: *server, doc: *document, ref: str) (ref_target | void) = {
 		match (analysis::find_in_module(&s.stdlib_index, qualifier_short, name)) {
 		case let e: *analysis::workspace_entry =>
 			return target_for_entry(s, e);
-		case void => return void;
+		case void =>
+			return void;
 		};
 	};
 	return void;
@@ -189,7 +192,11 @@ fn split_qualified(s: str) []str = {
 
 fn join_segments(segs: []str) str = strings::join("::", segs...)!;
 
-fn target_for_local(s: *server, doc: *document, sym: *analysis::symbol) (ref_target | void) = {
+fn target_for_local(
+	s: *server,
+	doc: *document,
+	sym: *analysis::symbol,
+) (ref_target | void) = {
 	const data = analysis::bytes(&doc.buf);
 	const enc = position_encoding(s);
 	const pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
@@ -201,10 +208,15 @@ fn target_for_local(s: *server, doc: *document, sym: *analysis::symbol) (ref_tar
 	};
 };
 
-fn target_for_entry(s: *server, e: *analysis::workspace_entry) (ref_target | void) = {
+fn target_for_entry(
+	s: *server,
+	e: *analysis::workspace_entry,
+) (ref_target | void) = {
 	const fpe = match (cached_parse_or_drop_stale(s, e.path)) {
-	case let p: *file_parse_entry => yield p;
-	case null => return void;
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
 	};
 	const line_index = analysis::build_line_index(fpe.text);
 	defer free(line_index);
@@ -236,8 +248,8 @@ fn format_ref_link(label: str, t: ref_target) str = {
 	defer free(args_json);
 	const encoded = percent_encode_uri_component(args_json);
 	defer free(encoded);
-	return strings::concat("[", label,
-		"](command:hare-lsp.openLocation?", encoded, ")")!;
+	return strings::concat("[", label, "](command:hare-lsp.openLocation?", encoded,
+		")")!;
 };
 
 // Percent-encodes `s` for use inside a URI's query/path component.
@@ -263,11 +275,10 @@ fn is_unreserved(b: u8) bool = {
 	if (b >= 'a': u8 && b <= 'z': u8) return true;
 	if (b >= 'A': u8 && b <= 'Z': u8) return true;
 	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '-': u8 || b == '_': u8
-		|| b == '.': u8 || b == '~': u8;
+	return b == '-': u8 || b == '_': u8 || b == '.': u8 || b == '~': u8;
 };
 
 fn hex_nibble(n: u8) u8 = {
 	if (n < 10) return '0': u8 + n;
-	return 'A': u8 + (n - 10);
+	return 'A': u8 + n - 10;
 };

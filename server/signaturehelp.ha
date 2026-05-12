@@ -19,13 +19,15 @@ use strings;
 
 export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos_sh(r.params)) {
-	case let v: (str, lsp::position) => yield v;
+	case let v: (str, lsp::position) =>
+		yield v;
 	case void =>
 		send_null_sh(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_null_sh(s, r.id);
 		return;
@@ -35,7 +37,8 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 	const ctx = match (find_call_context(data, off)) {
-	case let c: call_context => yield c;
+	case let c: call_context =>
+		yield c;
 	case void =>
 		send_null_sh(s, r.id);
 		return;
@@ -44,8 +47,10 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 
 	// Resolve the callee in the file's index, then in the workspace index.
 	const cache = parse_of(doc);
-	const decl_idx = match (find_decl_by_short_name(&cache.pr.subunit, ctx.callee_name)) {
-	case let i: size => yield i;
+	const decl_idx = match (find_decl_by_short_name(&cache.pr.subunit,
+		ctx.callee_name)) {
+	case let i: size =>
+		yield i;
 	case void =>
 		// Try workspace.
 		send_workspace_signature(s, r.id, ctx);
@@ -76,7 +81,7 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	json::put(&result, "signatures", signatures: json::value)!;
 	json::put(&result, "activeSignature", 0: f64)!;
 	const active = if (ctx.active_param < param_count) ctx.active_param else 0z;
-	json::put(&result, "activeParameter", (active: u64): f64)!;
+	json::put(&result, "activeParameter", active: u64: f64)!;
 	const v: json::value = result;
 	defer json::finish(v);
 	match (lsp::encode_response_result(s.out, r.id, v)) {
@@ -113,7 +118,8 @@ fn send_workspace_signature(s: *server, id: lsp::id, ctx: call_context) void = {
 };
 
 type call_context = struct {
-	callee_name: str, // owned; caller must free
+	callee_name: str,
+	// owned; caller must free
 	active_param: size,
 };
 
@@ -161,7 +167,9 @@ fn find_call_context(data: []u8, off: size) (call_context | void) = {
 	// The callee name ends just before open_at, possibly preceded by
 	// spaces.
 	let e = open_at;
-	for (e > 0 && (data[e - 1] == ' ': u8 || data[e - 1] == '\t': u8); e -= 1) void;
+	for (e > 0 &&
+	(data[e - 1] == ' ': u8 ||
+	data[e - 1] == '\t': u8); e -= 1) void;
 	let ns = e;
 	for (ns > 0; ns -= 1) {
 		const cb = data[ns - 1];
@@ -192,11 +200,16 @@ fn find_decl_by_short_name(su: *ast::subunit, name: str) (size | void) = {
 
 fn decl_ident_sh(d: *ast::decl) ast::ident = {
 	match (d.decl) {
-	case let f: ast::decl_func => return f.ident;
-	case let t: ast::decl_type => return t.ident;
-	case let g: ast::decl_global => return g.ident;
-	case let c: ast::decl_const => return c.ident;
-	case ast::assert_expr => return [];
+	case let f: ast::decl_func =>
+		return f.ident;
+	case let t: ast::decl_type =>
+		return t.ident;
+	case let g: ast::decl_global =>
+		return g.ident;
+	case let c: ast::decl_const =>
+		return c.ident;
+	case ast::assert_expr =>
+		return [];
 	};
 };
 
@@ -206,9 +219,11 @@ fn count_params(d: *ast::decl) size = {
 		match (f.prototype.repr) {
 		case let proto: ast::func_type =>
 			return len(proto.params);
-		case => return 0;
+		case =>
+			return 0;
 		};
-	case => return 0;
+	case =>
+		return 0;
 	};
 };
 
@@ -217,7 +232,8 @@ fn render_decl_signature_local(d: *ast::decl) str = {
 	defer lsp::safe_close(&buf);
 	match (unparse::decl(&buf, &unparse::syn_nowrap, d)) {
 	case size => void;
-	case => return strings::dup("<unparse error>")!;
+	case =>
+		return strings::dup("<unparse error>")!;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };
@@ -229,43 +245,56 @@ fn fmt_size_local(n: size) str = {
 	let v = n;
 	for (v > 0; v /= 10) {
 		i -= 1;
-		buf[i] = ('0': u8) + (v % 10): u8;
+		buf[i] = '0': u8 + (v % 10): u8;
 	};
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
 fn parse_pos_sh(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const td = match (json::get(&obj, "textDocument")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const uri = match (json::get(&td, "uri")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
-		case => return void;
+		case let s: str =>
+			yield s;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const pos = match (json::get(&obj, "position")) {
 	case let p: *json::value =>
 		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position => yield pos;
-		case lsp::bad_message => return void;
+		case let pos: lsp::position =>
+			yield pos;
+		case lsp::bad_message =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	return (uri, pos);
 };

@@ -10,7 +10,9 @@ use memio;
 use strconv;
 use strings;
 
-fn ref_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn ref_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -18,7 +20,12 @@ fn ref_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) =
 	return (s, scan, in_buf, out);
 };
 
-fn ref_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn ref_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -28,15 +35,19 @@ fn ref_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, o
 };
 
 fn ref_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -79,10 +90,12 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn references_returns_all_textual_occurrences() void = {
 	let (s, scan, in_buf, out) = ref_test_server();
 	defer ref_test_cleanup(&s, scan, in_buf, out);
-	ref_open(&s, "file:///x.ha", "fn target() void = void;\\nfn caller() void = target();\\n");
+	ref_open(&s, "file:///x.ha",
+		"fn target() void = void;\\nfn caller() void = target();\\n");
 
 	// Position cursor on "target" in the decl.
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4},"context":{"includeDeclaration":true}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4},"context":{"includeDeclaration":true}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -94,7 +107,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_references(&s, r);
 	const v = ref_skip_to_response(out, 1.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// Two occurrences: the decl and the call site.
 	assert(len(result) == 2);
 };
@@ -104,7 +118,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer ref_test_cleanup(&s, scan, in_buf, out);
 	ref_open(&s, "file:///x.ha", "fn name() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -116,7 +131,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_prepare_rename(&s, r);
 	const v = ref_skip_to_response(out, 2.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	// Should be a Range.
 	const start = *(json::get(&result, "start") as *json::value) as json::object;
 	assert(*(json::get(&start, "character") as *json::value) as f64 == 3.0);
@@ -127,7 +143,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer ref_test_cleanup(&s, scan, in_buf, out);
 	ref_open(&s, "file:///x.ha", "fn target() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4},"newName":"fn"}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4},"newName":"fn"}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -149,7 +166,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer ref_test_cleanup(&s, scan, in_buf, out);
 	ref_open(&s, "file:///x.ha", "fn target() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4},"newName":"renamed"}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4},"newName":"renamed"}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -161,9 +179,12 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_rename(&s, r);
 	const v = ref_skip_to_response(out, 4.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const changes = *(json::get(&result, "changes") as *json::value) as json::object;
-	const edits = *(json::get(&changes, "file:///x.ha") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const changes =
+		*(json::get(&result, "changes") as *json::value) as json::object;
+	const edits =
+		*(json::get(&changes, "file:///x.ha") as *json::value) as []json::value;
 	assert(len(edits) >= 1);
 	const e0 = edits[0] as json::object;
 	assert(*(json::get(&e0, "newText") as *json::value) as str == "renamed");
@@ -175,10 +196,12 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// Buffer has 'target' as a decl name and also inside a //-comment,
 	// inside a string literal, and inside a /* */ block comment.
 	// Only the decl and the actual call site should match.
-	const src = "fn target() void = void;\\n// target referenced in a comment\\nfn caller() void = {\\n\\tconst note = \\\"call target with this\\\";\\n\\t/* target in block comment */\\n\\ttarget();\\n};\\n";
+	const src =
+		"fn target() void = void;\\n// target referenced in a comment\\nfn caller() void = {\\n\\tconst note = \\\"call target with this\\\";\\n\\t/* target in block comment */\\n\\ttarget();\\n};\\n";
 	ref_open(&s, "file:///cmt.ha", src);
 
-	const params = `{"textDocument":{"uri":"file:///cmt.ha"},"position":{"line":0,"character":4},"context":{"includeDeclaration":true}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///cmt.ha"},"position":{"line":0,"character":4},"context":{"includeDeclaration":true}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -190,7 +213,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_references(&s, r);
 	const v = ref_skip_to_response(out, 5.0);
 	defer json::finish(v);
-	const arr = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const arr =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// Decl + call site = 2 hits exactly. Comments/strings must NOT match.
 	assert(len(arr) == 2);
 };

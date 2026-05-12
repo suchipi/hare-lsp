@@ -18,49 +18,40 @@ use strings;
 export type config = struct {
 	// Path to the `hare` binary. Defaults to the value found in PATH.
 	hare_path: str,
-
 	// Colon-separated list of directories searched for Hare modules
 	// (mirrors the $HAREPATH env var). Empty string means "use $HAREPATH
 	// from the environment, falling back to the platform default".
 	harepath: str,
-
 	// Build tags passed to `hare build` and module resolution. e.g.
 	// ["+linux", "+x86_64"].
 	tags: []str,
-
 	// Diagnostics debounce interval in milliseconds. After the last
 	// document change, the server waits this long before invoking
 	// `hare build` for type-check diagnostics. Defaults to 300.
 	diagnostics_debounce_ms: u32,
-
 	// Whether to surface `hare build` (type-check) diagnostics in addition
 	// to in-process parse diagnostics. Defaults to true.
 	enable_build_diagnostics: bool,
-
 	// Maximum wall-clock milliseconds to wait for a `hare build`
 	// subprocess to finish before SIGTERM'ing it. A hung build (deep
 	// macro recursion, deadlocked test, etc.) would otherwise block
 	// the entire LSP main loop indefinitely. Defaults to 60000 (60s);
 	// set to 0 to disable the timeout.
 	build_timeout_ms: u32,
-
 	// Format options.
 	format_indent_style: indent_style,
 	format_indent_width: u32,
 	format_trim_final_newlines: bool,
 	format_insert_final_newline: bool,
-
 	// Whether to render inlay hints for parameter names and inferred types.
 	inlay_hints_parameter_names: bool,
 	inlay_hints_inferred_types: bool,
-
 	// Max recursion depth for inferred-type hints. 0 disables anything
 	// beyond literals + declared types; higher values follow function-
 	// call return types, identifier bindings, and type aliases. The
 	// server clamps the effective value at [[INLAY_DEPTH_HARD_MAX]] to
 	// guard against pathological lookups.
 	inlay_hints_inferred_types_max_depth: u32,
-
 	// Configurable resource caps. See [[limits]] / [[default_limits]].
 	limits: limits,
 };
@@ -138,8 +129,10 @@ export fn request_configuration(s: *server) (i64 | void) = {
 // section "hare", so we expect a single-element array.
 export fn apply_configuration_response(s: *server, result: json::value) void = {
 	const arr = match (result) {
-	case let a: []json::value => yield a;
-	case => return;
+	case let a: []json::value =>
+		yield a;
+	case =>
+		return;
 	};
 	if (len(arr) == 0) return;
 	const old_debounce = s.config.diagnostics_debounce_ms;
@@ -148,8 +141,8 @@ export fn apply_configuration_response(s: *server, result: json::value) void = {
 	const old_ih_inferred = s.config.inlay_hints_inferred_types;
 	apply_settings(s, arr[0]);
 	apply_limits_to_indexes(s);
-	refresh_after_config_change(s, old_debounce, old_enable_build,
-		old_ih_params, old_ih_inferred);
+	refresh_after_config_change(s, old_debounce, old_enable_build, old_ih_params,
+		old_ih_inferred);
 };
 
 // Propagates the configurable max-entries cap into the live workspace
@@ -172,19 +165,28 @@ fn apply_limits_to_indexes(s: *server) void = {
 //
 // If the field is null (e.g. some clients send `{"settings":null}` then expect
 // the server to re-pull), we issue a fresh workspace/configuration request.
-export fn handle_did_change_configuration(s: *server, n: lsp::notification) void = {
+export fn handle_did_change_configuration(
+	s: *server,
+	n: lsp::notification,
+) void = {
 	const params = match (n.params) {
-	case let v: json::value => yield v;
-	case void => return;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return;
 	};
 	const obj = match (params) {
-	case let o: json::object => yield o;
-	case => return;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return;
 	};
 	const settings = match (json::get(&obj, "settings")) {
-	case let p: *json::value => yield *p;
+	case let p: *json::value =>
+		yield *p;
+	// Fall back to a pull.
+
 	case =>
-		// Fall back to a pull.
 		request_configuration(s);
 		return;
 	};
@@ -208,9 +210,8 @@ export fn handle_did_change_configuration(s: *server, n: lsp::notification) void
 		case let p: *json::value =>
 			apply_settings(s, *p);
 			apply_limits_to_indexes(s);
-			refresh_after_config_change(s,
-				old_debounce, old_enable_build,
-				old_ih_params, old_ih_inferred);
+			refresh_after_config_change(s, old_debounce, old_enable_build, old_ih_params,
+				old_ih_inferred);
 			return;
 		case => void;
 		};
@@ -218,21 +219,25 @@ export fn handle_did_change_configuration(s: *server, n: lsp::notification) void
 	};
 	apply_settings(s, settings);
 	apply_limits_to_indexes(s);
-	refresh_after_config_change(s, old_debounce, old_enable_build,
-		old_ih_params, old_ih_inferred);
+	refresh_after_config_change(s, old_debounce, old_enable_build, old_ih_params,
+		old_ih_inferred);
 };
 
 // Re-publishes diagnostics and sends inlayHint/refresh when the
 // corresponding settings actually changed.
 fn refresh_after_config_change(
 	s: *server,
-	old_debounce: u32, old_enable_build: bool,
-	old_ih_params: bool, old_ih_inferred: bool,
+	old_debounce: u32,
+	old_enable_build: bool,
+	old_ih_params: bool,
+	old_ih_inferred: bool,
 ) void = {
-	const diag_changed = (old_debounce != s.config.diagnostics_debounce_ms) ||
-		(old_enable_build != s.config.enable_build_diagnostics);
-	const ih_changed = (old_ih_params != s.config.inlay_hints_parameter_names) ||
-		(old_ih_inferred != s.config.inlay_hints_inferred_types);
+	const diag_changed =
+		old_debounce != s.config.diagnostics_debounce_ms ||
+		old_enable_build != s.config.enable_build_diagnostics;
+	const ih_changed =
+		old_ih_params != s.config.inlay_hints_parameter_names ||
+		old_ih_inferred != s.config.inlay_hints_inferred_types;
 
 	if (diag_changed) {
 		// Republish parse diagnostics for every open doc immediately
@@ -252,8 +257,10 @@ fn refresh_after_config_change(
 // existing values.
 export fn apply_settings(s: *server, v: json::value) void = {
 	const o = match (v) {
-	case let o: json::object => yield o;
-	case => return;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return;
 	};
 
 	match (json::get(&o, "path")) {

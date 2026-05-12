@@ -52,7 +52,8 @@ use strings;
 };
 
 @test fn decode_response_error() void = {
-	const body = `{"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"nope"}}`;
+	const body =
+		`{"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"nope"}}`;
 	const m = decode(strings::toutf8(body)) as message;
 	defer finish_message(m);
 	const r = m as response;
@@ -72,7 +73,8 @@ use strings;
 };
 
 @test fn decode_rejects_response_with_both_result_and_error() void = {
-	const body = `{"jsonrpc":"2.0","id":1,"result":1,"error":{"code":1,"message":""}}`;
+	const body =
+		`{"jsonrpc":"2.0","id":1,"result":1,"error":{"code":1,"message":""}}`;
 	assert(decode(strings::toutf8(body)) is decode_error);
 };
 

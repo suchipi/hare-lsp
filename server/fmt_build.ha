@@ -31,15 +31,15 @@ use strings;
 // the literal-renderer can peek at source bytes (for detecting raw
 // strings, which the AST otherwise throws away).
 //
-// `rune_to_byte` maps the lexer's rune-index offsets (which is what
-// `ast::location.off` actually stores — see hare::lex::lexloc, which
-// increments by 1 per rune regardless of UTF-8 byte width) into byte
-// offsets for slicing `data`. Built once per format call.
+// `loc.start.off` and `loc.end.off` on every AST node are byte
+// offsets into `data` - `analysis::parse_recover` runs
+// `fixup_parse_result` to translate the lexer's native rune indices
+// up front, so callers slicing `data` here can use those offsets
+// directly without further conversion.
 export type build_ctx = struct {
 	c: *comment_cursor,
 	bl: blank_lines,
 	data: []u8,
-	rune_to_byte: []size,
 };
 
 // Builds the doc for an entire compilation subunit (a single .ha
@@ -53,11 +53,7 @@ export fn build_subunit_doc(
 	data: []u8,
 ) doc = {
 	const data_len = len(data);
-	const r2b = build_rune_to_byte(data);
-	defer free(r2b);
-	let bc = build_ctx {
-		c = c, bl = bl, data = data, rune_to_byte = r2b,
-	};
+	let bc = build_ctx { c = c, bl = bl, data = data };
 	let items: []doc = [];
 
 	// Boundary for "file header" comments: the start of whichever
@@ -90,6 +86,11 @@ export fn build_subunit_doc(
 		const imp_end = su.imports[i].loc.end.off: size;
 		const _ = push_comments_before(&items, c, imp_off);
 		append(items, build_import_doc(&su.imports[i]))!;
+		const next_imp_off = if (i + 1 < len(su.imports))
+			su.imports[i + 1].loc.start.off: size
+			else if (len(su.decls) > 0) su.decls[0].loc.start.off: size
+			else data_len;
+		flush_trailing_comments_to_eol(&items, c, next_imp_off, imp_end, data);
 		append(items, hardline())!;
 		if (i + 1 < len(su.imports)) {
 			const next_off = su.imports[i + 1].loc.start.off: size;
@@ -109,6 +110,23 @@ export fn build_subunit_doc(
 		const decl_off = su.decls[i].loc.start.off: size;
 		const _ = push_comments_before(&items, c, decl_off);
 		append(items, build_decl_doc(&su.decls[i], &bc))!;
+		// Flush trailing comments on the same line as the decl's
+		// closing `;` BEFORE the hardline that ends this decl's
+		// line - otherwise the trailing comment would be picked up
+		// by the next decl's leading flush and emitted with no
+		// break (since trailing-comment doc nodes intentionally
+		// don't emit one), gluing it onto the next decl.
+		const next_decl_off = if (i + 1 < len(su.decls))
+			su.decls[i + 1].loc.start.off: size
+			else data_len;
+		// `decl.loc.end.off` includes any trailing-line comment
+		// (the lexer's `mkloc` peeks past comments to the next
+		// real token). Use the source-content end derived by
+		// trimming whitespace backward from `next_decl_off`
+		// instead, so the line check inside the flush picks up
+		// the actual closing `;` line.
+		const decl_src_end = source_content_end(data, decl_off, next_decl_off);
+		flush_trailing_comments_to_eol(&items, c, next_decl_off, decl_src_end, data);
 		append(items, hardline())!;
 		if (i + 1 < len(su.decls)) {
 			// Blank line between top-level decls — always emit
@@ -138,11 +156,7 @@ export fn build_decls_range_doc(
 	bl: blank_lines,
 	data: []u8,
 ) doc = {
-	const r2b = build_rune_to_byte(data);
-	defer free(r2b);
-	let bc = build_ctx {
-		c = c, bl = bl, data = data, rune_to_byte = r2b,
-	};
+	let bc = build_ctx { c = c, bl = bl, data = data };
 	let items: []doc = [];
 	for (let i = first; i <= last; i += 1) {
 		const decl_off = su.decls[i].loc.start.off: size;
@@ -155,7 +169,6 @@ export fn build_decls_range_doc(
 };
 
 // ----- Decls --------------------------------------------------------
-
 export fn build_decl_doc(d: *ast::decl, bc: *build_ctx) doc = {
 	let items: []doc = [];
 
@@ -183,11 +196,7 @@ export fn build_decl_doc(d: *ast::decl, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
-fn build_decl_func(
-	d: *ast::decl,
-	f: ast::decl_func,
-	bc: *build_ctx,
-) doc = {
+fn build_decl_func(d: *ast::decl, f: ast::decl_func, bc: *build_ctx) doc = {
 	let items: []doc = [];
 
 	switch (f.attrs) {
@@ -288,11 +297,21 @@ fn build_decl_type(t: ast::decl_type, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
-// Wraps an init value in a group that breaks BEFORE the value if the
-// `key = value` form doesn't fit on one line. In flat mode renders as
-// ` value`; in broken mode renders as `\n\tvalue` at the current
-// indent + 1.
+// Emits the ` = <value>` half of a binding. For RHS expressions that
+// can wrap INTERNALLY (calls, struct/array/tuple literals, match,
+// switch, if-else, for, compound bodies) the value stays adjacent to
+// `=` and any wrapping happens inside the value. For atomic RHSs
+// (a single string literal, a plain identifier, a number) there's no
+// inside to wrap, so the value is wrapped in a `group` that breaks at
+// `=` if the line would overflow - that's the only handle the
+// formatter has to keep the line under 80 cols.
 fn build_init_value_doc(e: *ast::expr, bc: *build_ctx) doc = {
+	if (rhs_can_wrap_internally(e)) {
+		let items: []doc = [];
+		append(items, text(" "))!;
+		append(items, build_expr_doc(e, bc))!;
+		return concat(items);
+	};
 	let inner: []doc = [];
 	append(inner, line(" "))!;
 	append(inner, build_expr_doc(e, bc))!;
@@ -301,8 +320,77 @@ fn build_init_value_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	return group(g_items);
 };
 
-// ----- Imports ------------------------------------------------------
+// Returns true iff the RHS expression `e` has internal break points
+// (separators / softlines inside its rendering). For these, we'd
+// rather wrap inside the expression than break at `=`.
+fn rhs_can_wrap_internally(e: *ast::expr) bool = {
+	match (e.expr) {
+	case ast::call_expr =>
+		return true;
+	case ast::match_expr =>
+		return true;
+	case ast::switch_expr =>
+		return true;
+	case ast::for_expr =>
+		return true;
+	case ast::compound_expr =>
+		return true;
+	case let i: ast::if_expr =>
+		return i.fbranch != null;
+	case let l: ast::literal_expr =>
+		match (l) {
+		case ast::struct_literal =>
+			return true;
+		case ast::array_literal =>
+			return true;
+		case ast::tuple_literal =>
+			return true;
+		case ast::plain_literal =>
+			return false;
+		};
+	case =>
+		return false;
+	};
+};
 
+// Kept for callers that still consult the predicate directly. With
+// `build_init_value_doc` no longer breaking at `=`, the practical
+// distinction these constructs once carried (block-introducing vs
+// other) only matters for unrelated layout decisions.
+fn rhs_introduces_own_block(e: *ast::expr) bool = {
+	match (e.expr) {
+	case ast::match_expr =>
+		return true;
+	case ast::switch_expr =>
+		return true;
+	case ast::for_expr =>
+		return true;
+	case ast::compound_expr =>
+		return true;
+	case let i: ast::if_expr =>
+		return i.fbranch != null;
+	// An `if` without an `else` branch can render flat as a
+	// single line (`if (cond) value`); only when there's an
+	// else branch does it span multiple lines and benefit
+	// from staying glued to `=`.
+
+	case let l: ast::literal_expr =>
+		match (l) {
+		case ast::struct_literal =>
+			return true;
+		case ast::array_literal =>
+			return true;
+		case ast::tuple_literal =>
+			return true;
+		case ast::plain_literal =>
+			return false;
+		};
+	case =>
+		return false;
+	};
+};
+
+// ----- Imports ------------------------------------------------------
 export fn build_import_doc(im: *ast::import) doc = {
 	let items: []doc = [];
 	append(items, text("use "))!;
@@ -346,7 +434,6 @@ fn build_member_list(members: []str) doc = {
 };
 
 // ----- Compound body & statements ----------------------------------
-
 fn build_compound_body(
 	body: *ast::expr,
 	cmp: *ast::compound_expr,
@@ -361,6 +448,7 @@ fn build_compound_body(
 	append(outer, text("{"))!;
 
 	let inner: []doc = [];
+	const body_end = body.loc.end.off: size;
 	for (let i = 0z; i < len(cmp.exprs); i += 1) {
 		const stmt = cmp.exprs[i];
 		const stmt_off = stmt.loc.start.off: size;
@@ -369,6 +457,16 @@ fn build_compound_body(
 		const _ = push_comments_before(&inner, bc.c, stmt_off);
 		append(inner, build_expr_doc(stmt, bc))!;
 		append(inner, text(";"))!;
+		// After emitting the statement and its `;`, eagerly flush
+		// any trailing comments that share the statement's source
+		// line. This must happen BEFORE the next iteration's
+		// hardline; otherwise a trailing `// note` would land on
+		// its own line below the code instead of inline with it.
+		const next_stmt_off = if (i + 1 < len(cmp.exprs))
+			cmp.exprs[i + 1].loc.start.off: size
+			else body_end;
+		flush_trailing_comments_to_eol(&inner, bc.c, next_stmt_off, stmt_end,
+			bc.data);
 		if (i + 1 < len(cmp.exprs)) {
 			const next_off = cmp.exprs[i + 1].loc.start.off: size;
 			if (blank_between(bc.bl, stmt_end, next_off)) {
@@ -376,7 +474,6 @@ fn build_compound_body(
 			};
 		};
 	};
-	const body_end = body.loc.end.off: size;
 	const _ = push_comments_before(&inner, bc.c, body_end);
 
 	append(outer, nest(1, concat(inner)))!;
@@ -397,14 +494,93 @@ fn push_comments_before(
 	if (len(cs) == 0) return;
 	for (let i = 0z; i < len(cs); i += 1) {
 		let cur = *items;
+		// Preserve user-authored blank lines between consecutive
+		// comment groups. If two adjacent popped comments are
+		// more than one source line apart, emit an extra
+		// `hardline()` between them so the rendered output
+		// keeps the blank line. Without this, two paragraph-
+		// style comment blocks would silently merge into one.
+		if (i > 0 && cs[i].line > cs[i - 1].line + 1) {
+			append(cur, hardline())!;
+		};
+		// Always emit as full-line here. Trailing comments (the
+		// is_trailing flag) only stay inline when picked up by
+		// `flush_trailing_comments_to_eol` immediately after the
+		// owning code; once a comment lingers long enough to be
+		// popped by `push_comments_before`, the code it would
+		// have trailed has already been emitted (with its own
+		// hardline), and there's no way to put the comment back
+		// on that line. Treat it as a leading comment for the
+		// next construct so it lands on a fresh line.
 		append(cur, comment(cs[i].text))!;
 		*items = cur;
 	};
 	return cs[len(cs) - 1].end_off;
 };
 
-// ----- Types --------------------------------------------------------
+// Flushes any pending trailing comments that fall before `boundary`
+// AND share their source line with the byte offset `code_pos`.
+// Called immediately after emitting a code item (a statement, decl,
+// import) so a trailing `// note` lands inline with that item's
+// closing `;` instead of waiting for the next iteration's leading
+// `push_comments_before` - which fires AFTER a hardline and would
+// therefore drop the comment onto a new line.
+//
+// `code_pos` is any byte offset inside (or at the end of) the
+// just-emitted code; we count `\n`s from start of `data` to find its
+// source line. Only comments on that exact line are popped, so a
+// chain of `case ... =>; // note` lines doesn't fold every note onto
+// the first line emitted.
+fn flush_trailing_comments_to_eol(
+	items: *[]doc,
+	c: *comment_cursor,
+	boundary: size,
+	code_pos: size,
+	data: []u8,
+) void = {
+	const code_line = line_of(data, code_pos);
+	for (c.pos < len(c.comments)) {
+		const ci = &c.comments[c.pos];
+		if (!ci.is_trailing) break;
+		if (ci.start_off >= boundary) break;
+		if (ci.line != code_line) break;
+		let cur = *items;
+		append(cur, trailing_comment(ci.text))!;
+		*items = cur;
+		c.pos += 1;
+	};
+};
 
+// Returns the byte offset of the LAST non-whitespace byte in
+// `data[lo..hi)` - i.e., where the actual code content of a span
+// ends, ignoring any trailing whitespace. Used to find the source
+// line a decl's `;` lives on, since `decl.loc.end.off` from the
+// parser points at the next decl's start (mkloc peeks past
+// intervening comments). Returns `lo` if the span is all whitespace.
+fn source_content_end(data: []u8, lo: size, hi: size) size = {
+	let cap = if (hi > len(data)) len(data) else hi;
+	let i = cap;
+	for (i > lo; i -= 1) {
+		const b = data[i - 1];
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8) {
+			return i - 1;
+		};
+	};
+	return lo;
+};
+
+// Returns the 0-based line number of byte offset `pos` in `data`,
+// counting `\n` bytes before it. `pos` is clamped to `len(data)`.
+fn line_of(data: []u8, pos: size) size = {
+	const p = if (pos > len(data)) len(data) else pos;
+	let count: size = 0;
+	for (let i = 0z; i < p; i += 1) {
+		if (data[i] == '\n': u8) count += 1;
+	};
+	return count;
+};
+
+// ----- Types --------------------------------------------------------
 export fn build_type_doc(t: *ast::_type, bc: *build_ctx) doc = {
 	match (t.repr) {
 	case let a: ast::alias_type =>
@@ -469,8 +645,7 @@ fn build_func_proto_doc(t: *ast::func_type, bc: *build_ctx) doc = {
 			append(inner, text(" = "))!;
 			append(inner, build_expr_doc(&e, bc))!;
 		};
-		const more = i + 1 < len(t.params)
-			|| t.variadism == ast::variadism::C;
+		const more = i + 1 < len(t.params) || t.variadism == ast::variadism::C;
 		if (more) {
 			append(inner, text(","))!;
 			append(inner, line(" "))!;
@@ -501,6 +676,11 @@ fn build_func_proto_doc(t: *ast::func_type, bc: *build_ctx) doc = {
 };
 
 fn build_enum_type(e: *ast::enum_type, bc: *build_ctx) doc = {
+	// Always render multi-line (one variant per line, trailing
+	// comma). Per project convention enums are not collapsed onto
+	// a single line even when they would fit, since editing a
+	// constant set of names is easier when each lives on its own
+	// line and version-control diffs touch one line per change.
 	let inner: []doc = [];
 	for (let i = 0z; i < len(e.values); i += 1) {
 		append(inner, hardline())!;
@@ -564,10 +744,24 @@ fn build_struct_union_type(t: *ast::_type, bc: *build_ctx) doc = {
 	case => abort();
 	};
 
+	// Softline-separated members so a tiny struct (e.g.
+	// `struct { x: int, y: int }`) renders inline if it fits within
+	// 80 cols. Per the Hare style guide, single-line struct uses
+	// `{ field, field }` (spaces, no trailing comma); multi-line
+	// uses one field per line with a required trailing comma.
+	const force_break = source_opens_multiline(bc, t.loc, ['{': u8]);
 	let inner: []doc = [];
+	append(inner, leading_softline(force_break, " "))!;
 	for (let i = 0z; i < len(members); i += 1) {
-		append(inner, hardline())!;
 		const m = &members[i];
+		// Flush comments above this field. Approximation: use the
+		// field's `_type` loc as the boundary - per-field doc
+		// comments live on the line(s) just before the type. The
+		// struct_member AST node itself has no loc.
+		const field_off = struct_member_off(m);
+		if (field_off != 0z) {
+			const _ = push_comments_before(&inner, bc.c, field_off);
+		};
 		match (m.member) {
 		case let f: ast::struct_field =>
 			append(inner, text(f.name))!;
@@ -581,13 +775,37 @@ fn build_struct_union_type(t: *ast::_type, bc: *build_ctx) doc = {
 		case let a: ast::struct_alias =>
 			append(inner, text(render_ident(a)))!;
 		};
-		append(inner, text(","))!;
+		if (i + 1 < len(members)) {
+			append(inner, text(","))!;
+			append(inner, line(" "))!;
+		};
+	};
+	// Flush any comments that appear after the last field but
+	// before the closing `}` (file-internal trailing notes).
+	const struct_end = t.loc.end.off: size;
+	const _ = push_comments_before(&inner, bc.c, struct_end);
+	if (len(members) > 0) {
+		append(inner, if_broken(","))!;
 	};
 
 	append(outer, nest(1, concat(inner)))!;
-	append(outer, hardline())!;
+	append(outer, line(" "))!;
 	append(outer, text("}"))!;
-	return concat(outer);
+	return group(outer);
+};
+
+// Best-effort byte offset for the start of a struct/union member.
+// Returns 0 for struct_alias members (the alias is a bare ident with
+// no loc reachable here).
+fn struct_member_off(m: *ast::struct_member) size = {
+	match (m.member) {
+	case let f: ast::struct_field =>
+		return f._type.loc.start.off: size;
+	case let e: ast::struct_embedded =>
+		return (e: *ast::_type).loc.start.off: size;
+	case ast::struct_alias =>
+		return 0z;
+	};
 };
 
 fn build_tagged_type(tt: ast::tagged_type, bc: *build_ctx) doc = {
@@ -637,7 +855,6 @@ fn build_tuple_type(tt: ast::tuple_type, bc: *build_ctx) doc = {
 };
 
 // ----- Expressions --------------------------------------------------
-
 export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	match (e.expr) {
 	case let a: ast::access_expr =>
@@ -709,7 +926,7 @@ export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	case let cmp: ast::compound_expr =>
 		return build_compound_body(e, &cmp, bc);
 	case let m: ast::match_expr =>
-		return build_match_expr(&m, bc);
+		return build_match_expr(&m, e.loc, bc);
 	case let l: ast::len_expr =>
 		let items: []doc = [];
 		append(items, text("len("))!;
@@ -749,7 +966,7 @@ export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	case let s: ast::slice_expr =>
 		return build_slice_expr(&s, bc);
 	case let s: ast::switch_expr =>
-		return build_switch_expr(&s, bc);
+		return build_switch_expr(&s, e.loc, bc);
 	case let u: ast::unarithm_expr =>
 		return build_unarithm_expr(&u, bc);
 	case ast::undefined_expr =>
@@ -916,62 +1133,106 @@ fn build_assign_expr(a: *ast::assign_expr, bc: *build_ctx) doc = {
 
 fn assign_op_str(op: binarithm_op) str = {
 	switch (op) {
-	case binarithm_op::BAND => return "&=";
-	case binarithm_op::LAND => return "&&=";
-	case binarithm_op::BOR => return "|=";
-	case binarithm_op::LOR => return "||=";
-	case binarithm_op::DIV => return "/=";
-	case binarithm_op::LSHIFT => return "<<=";
-	case binarithm_op::MINUS => return "-=";
-	case binarithm_op::MODULO => return "%=";
-	case binarithm_op::PLUS => return "+=";
-	case binarithm_op::RSHIFT => return ">>=";
-	case binarithm_op::TIMES => return "*=";
-	case binarithm_op::BXOR => return "^=";
-	case binarithm_op::LXOR => return "^^=";
+	case binarithm_op::BAND =>
+		return "&=";
+	case binarithm_op::LAND =>
+		return "&&=";
+	case binarithm_op::BOR =>
+		return "|=";
+	case binarithm_op::LOR =>
+		return "||=";
+	case binarithm_op::DIV =>
+		return "/=";
+	case binarithm_op::LSHIFT =>
+		return "<<=";
+	case binarithm_op::MINUS =>
+		return "-=";
+	case binarithm_op::MODULO =>
+		return "%=";
+	case binarithm_op::PLUS =>
+		return "+=";
+	case binarithm_op::RSHIFT =>
+		return ">>=";
+	case binarithm_op::TIMES =>
+		return "*=";
+	case binarithm_op::BXOR =>
+		return "^=";
+	case binarithm_op::LXOR =>
+		return "^^=";
 	case => abort("non-assignable op");
 	};
 };
 
 fn binarithm_op_str(op: binarithm_op) str = {
 	switch (op) {
-	case binarithm_op::BAND => return "&";
-	case binarithm_op::BOR => return "|";
-	case binarithm_op::DIV => return "/";
-	case binarithm_op::GT => return ">";
-	case binarithm_op::GTEQ => return ">=";
-	case binarithm_op::LAND => return "&&";
-	case binarithm_op::LEQUAL => return "==";
-	case binarithm_op::LESS => return "<";
-	case binarithm_op::LESSEQ => return "<=";
-	case binarithm_op::LOR => return "||";
-	case binarithm_op::LSHIFT => return "<<";
-	case binarithm_op::LXOR => return "^^";
-	case binarithm_op::MINUS => return "-";
-	case binarithm_op::MODULO => return "%";
-	case binarithm_op::NEQUAL => return "!=";
-	case binarithm_op::PLUS => return "+";
-	case binarithm_op::RSHIFT => return ">>";
-	case binarithm_op::TIMES => return "*";
-	case binarithm_op::BXOR => return "^";
+	case binarithm_op::BAND =>
+		return "&";
+	case binarithm_op::BOR =>
+		return "|";
+	case binarithm_op::DIV =>
+		return "/";
+	case binarithm_op::GT =>
+		return ">";
+	case binarithm_op::GTEQ =>
+		return ">=";
+	case binarithm_op::LAND =>
+		return "&&";
+	case binarithm_op::LEQUAL =>
+		return "==";
+	case binarithm_op::LESS =>
+		return "<";
+	case binarithm_op::LESSEQ =>
+		return "<=";
+	case binarithm_op::LOR =>
+		return "||";
+	case binarithm_op::LSHIFT =>
+		return "<<";
+	case binarithm_op::LXOR =>
+		return "^^";
+	case binarithm_op::MINUS =>
+		return "-";
+	case binarithm_op::MODULO =>
+		return "%";
+	case binarithm_op::NEQUAL =>
+		return "!=";
+	case binarithm_op::PLUS =>
+		return "+";
+	case binarithm_op::RSHIFT =>
+		return ">>";
+	case binarithm_op::TIMES =>
+		return "*";
+	case binarithm_op::BXOR =>
+		return "^";
 	};
 };
 
 fn binprec(op: binarithm_op) uint = {
 	switch (op) {
-	case binarithm_op::DIV, binarithm_op::MODULO,
-		binarithm_op::TIMES => return 10;
-	case binarithm_op::MINUS, binarithm_op::PLUS => return 9;
-	case binarithm_op::LSHIFT, binarithm_op::RSHIFT => return 8;
-	case binarithm_op::BAND => return 7;
-	case binarithm_op::BXOR => return 6;
-	case binarithm_op::BOR => return 5;
-	case binarithm_op::GT, binarithm_op::GTEQ,
-		binarithm_op::LESS, binarithm_op::LESSEQ => return 4;
-	case binarithm_op::LEQUAL, binarithm_op::NEQUAL => return 3;
-	case binarithm_op::LAND => return 2;
-	case binarithm_op::LXOR => return 1;
-	case binarithm_op::LOR => return 0;
+	case binarithm_op::DIV, binarithm_op::MODULO, binarithm_op::TIMES =>
+		return 10;
+	case binarithm_op::MINUS, binarithm_op::PLUS =>
+		return 9;
+	case binarithm_op::LSHIFT, binarithm_op::RSHIFT =>
+		return 8;
+	case binarithm_op::BAND =>
+		return 7;
+	case binarithm_op::BXOR =>
+		return 6;
+	case binarithm_op::BOR =>
+		return 5;
+	case binarithm_op::GT,
+	binarithm_op::GTEQ,
+	binarithm_op::LESS,
+	binarithm_op::LESSEQ =>
+		return 4;
+	case binarithm_op::LEQUAL, binarithm_op::NEQUAL =>
+		return 3;
+	case binarithm_op::LAND =>
+		return 2;
+	case binarithm_op::LXOR =>
+		return 1;
+	case binarithm_op::LOR =>
+		return 0;
 	};
 };
 
@@ -985,18 +1246,32 @@ fn build_binarithm_expr(
 	const need_outer_parens = prec < parent_prec;
 	if (need_outer_parens) append(items, text("("))!;
 
-	let inner: []doc = [];
-	append(inner, build_binexpr_operand(b.lvalue, bc, prec))!;
-	append(inner, text(" "))!;
-	append(inner, text(binarithm_op_str(b.op)))!;
-	append(inner, line(" "))!;
-	append(inner, build_binexpr_operand(b.rvalue, bc, prec))!;
+	// Only the lowest-precedence operators (`&&`, `||`, `^^`) get a
+	// soft break point AFTER the operator; arithmetic, shift, and
+	// comparison operators stay on one line, since wrapping a
+	// `len(id) >\n\t0` mid-comparison is uglier than letting the
+	// line run a few cols past 80. Logical chains commonly span
+	// lines (e.g. `if (a && b &&\n\t\tc && d)`) so they keep their
+	// soft break.
+	const sep: doc = if (prec <= binprec_lor()) line(" ") else text(" ");
+	append(items, build_binexpr_operand(b.lvalue, bc, prec))!;
+	append(items, text(" "))!;
+	append(items, text(binarithm_op_str(b.op)))!;
+	append(items, sep)!;
+	append(items, build_binexpr_operand(b.rvalue, bc, prec))!;
 
-	append(items, group(inner))!;
-
-	if (need_outer_parens) append(items, text(")"))!;
+	if (need_outer_parens) {
+		append(items, text(")"))!;
+		return concat(items);
+	};
+	if (prec <= binprec_lor()) return group(items);
 	return concat(items);
 };
+
+// The precedence of `&&` (the lowest non-logical-XOR boolean).
+// Anything at this precedence or below gets a soft-break inside
+// `build_binarithm_expr`; everything above stays on one line.
+fn binprec_lor() uint = 2;
 
 fn build_binexpr_operand(
 	e: *ast::expr,
@@ -1017,17 +1292,16 @@ fn build_binexpr_operand(
 	};
 };
 
-fn build_binding_expr(
-	b: *ast::binding_expr,
-	bc: *build_ctx,
-	op: str,
-) doc = {
+fn build_binding_expr(b: *ast::binding_expr, bc: *build_ctx, op: str) doc = {
 	let items: []doc = [];
 	if (b.is_static) append(items, text("static "))!;
 	switch (b.kind) {
-	case ast::binding_kind::DEF => append(items, text("def "))!;
-	case ast::binding_kind::CONST => append(items, text("const "))!;
-	case ast::binding_kind::LET => append(items, text("let "))!;
+	case ast::binding_kind::DEF =>
+		append(items, text("def "))!;
+	case ast::binding_kind::CONST =>
+		append(items, text("const "))!;
+	case ast::binding_kind::LET =>
+		append(items, text("let "))!;
 	};
 	for (let i = 0z; i < len(b.bindings); i += 1) {
 		const bi = b.bindings[i];
@@ -1101,28 +1375,51 @@ fn build_call_expr(c: *ast::call_expr, bc: *build_ctx) doc = {
 	append(items, build_expr_doc(c.lvalue, bc))!;
 	if (np) append(items, text(")"))!;
 
-	let inner: []doc = [];
-	append(inner, line(""))!;
-	for (let i = 0z; i < len(c.args); i += 1) {
-		append(inner, build_expr_doc(c.args[i], bc))!;
-		if (i + 1 < len(c.args)) {
-			append(inner, text(","))!;
-			append(inner, line(" "))!;
-		};
-	};
-	if (c.variadic) {
-		append(inner, text("..."))!;
-	};
-	if (len(c.args) > 0 && !c.variadic) {
-		append(inner, if_broken(","))!;
+	if (len(c.args) == 0 && !c.variadic) {
+		append(items, text("()"))!;
+		return concat(items);
 	};
 
-	let g_items: []doc = [];
-	append(g_items, text("("))!;
-	append(g_items, nest(1, concat(inner)))!;
-	append(g_items, line(""))!;
-	append(g_items, text(")"))!;
-	append(items, group(g_items))!;
+	// Pack arguments into fill mode so when the call doesn't fit
+	// on a single line, args wrap greedily - as many per line as
+	// fit at indent + 1 - rather than being forced one-per-line or
+	// breaking at a fixed point. Matches the style guide's first
+	// code block (`fn(arg1, arg2, arg3,\n\targ4, arg5)`).
+	//
+	// Variadic spreads (`fn(a, b, args...)`) glue the trailing
+	// `...` directly onto the last argument with no space and no
+	// leading comma, so the last arg + `...` are folded into a
+	// single fill content item.
+	let fill_items: []doc = [];
+	for (let i = 0z; i < len(c.args); i += 1) {
+		let arg_pieces: []doc = [];
+		append(arg_pieces, build_expr_doc(c.args[i], bc))!;
+		const is_last = i + 1 == len(c.args);
+		if (is_last && c.variadic) {
+			append(arg_pieces, text("..."))!;
+		} else if (!is_last) {
+			append(arg_pieces, text(","))!;
+		};
+		append(fill_items, concat(arg_pieces))!;
+		if (!is_last) {
+			append(fill_items, line(" "))!;
+		};
+	};
+
+	// Fill the args directly inside `( ... )` with `(` adjacent to
+	// the first arg. The trailing `)` is wrapped in a `group` with
+	// a leading softline so it stays glued to the last arg when
+	// that line still has room (for the trailing tail like `?;`),
+	// but moves to its own line when the last arg + `)` + tail
+	// would overflow. This gives the compact wrap from the style
+	// guide's first code block by default, with the longer
+	// `(\n\t...\n)` form as a fallback only when needed.
+	let close_group: []doc = [];
+	append(close_group, line(""))!;
+	append(close_group, text(")"))!;
+	append(items, text("("))!;
+	append(items, nest(1, fill(fill_items)))!;
+	append(items, group(close_group))!;
 	return concat(items);
 };
 
@@ -1158,10 +1455,14 @@ fn build_for_expr(f: *ast::for_expr, bc: *build_ctx) doc = {
 	append(items, text("("))!;
 
 	const op = switch (f.kind) {
-	case ast::for_kind::ACCUMULATOR => yield "=";
-	case ast::for_kind::EACH_VALUE => yield "..";
-	case ast::for_kind::EACH_POINTER => yield "&..";
-	case ast::for_kind::ITERATOR => yield "=>";
+	case ast::for_kind::ACCUMULATOR =>
+		yield "=";
+	case ast::for_kind::EACH_VALUE =>
+		yield "..";
+	case ast::for_kind::EACH_POINTER =>
+		yield "&..";
+	case ast::for_kind::ITERATOR =>
+		yield "=>";
 	};
 
 	match (f.bindings) {
@@ -1195,7 +1496,7 @@ fn build_for_expr(f: *ast::for_expr, bc: *build_ctx) doc = {
 };
 
 fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
-	// `if (cond) tbranch else fbranch` — fits flat as one line, or
+	// `if (cond) tbranch else fbranch` - fits flat as one line, or
 	// breaks to:
 	//
 	//     if (cond)
@@ -1203,49 +1504,121 @@ fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
 	//     else
 	//             fbranch
 	//
-	// Compound `{ ... }` branches always inline with the keyword,
-	// since the compound itself wraps its contents.
+	// else-if chains are FLATTENED into one group so the outer
+	// fit-or-break decision applies to every branch in the chain;
+	// without that, a long chain like `if (a) X else if (b) Y else
+	// if (c) Z else W` could break only the outer `if`'s body and
+	// leave the rest mashed onto one line. Compound `{ ... }`
+	// branches always inline with the keyword, since the compound
+	// itself wraps its contents.
+	let body_inner: []doc = [];
+	append_if_chain_branches(&body_inner, i, bc, false);
 	let items: []doc = [];
 	append(items, text("if ("))!;
-	append(items, build_expr_doc(i.cond, bc))!;
+	// Per the Hare style guide: "If the following line would be
+	// indented due to the introduction of a new block, the
+	// continuation line MUST be indented twice to visually
+	// distinguish it from the block." The if's body is at indent +
+	// 1, so any wrapped continuation of the cond goes at indent +
+	// 2. `nest(2, ...)` only affects line breaks inside the cond
+	// (e.g. a long `&&` chain that wraps); a single-line cond
+	// emits flat at the surrounding indent and the nest is a no-op.
+	append(items, nest(2, build_expr_doc(i.cond, bc)))!;
 	append(items, text(")"))!;
-
-	const tbranch_compound = i.tbranch.expr is ast::compound_expr;
-
-	let body_inner: []doc = [];
-	if (tbranch_compound) {
-		append(body_inner, text(" "))!;
-		append(body_inner, build_expr_doc(i.tbranch, bc))!;
-	} else {
-		append(body_inner, line(" "))!;
-		append(body_inner, nest(1, build_expr_doc(i.tbranch, bc)))!;
-	};
-
-	match (i.fbranch) {
-	case null => void;
-	case let e: *ast::expr =>
-		const else_compound = e.expr is ast::compound_expr;
-		const else_if = e.expr is ast::if_expr;
-		if (tbranch_compound) {
-			append(body_inner, text(" else"))!;
-		} else {
-			append(body_inner, line(" "))!;
-			append(body_inner, text("else"))!;
-		};
-		if (else_compound || else_if) {
-			append(body_inner, text(" "))!;
-			append(body_inner, build_expr_doc(e, bc))!;
-		} else {
-			append(body_inner, line(" "))!;
-			append(body_inner, nest(1, build_expr_doc(e, bc)))!;
-		};
-	};
-
 	append(items, group(body_inner))!;
 	return concat(items);
 };
 
-fn build_match_expr(m: *ast::match_expr, bc: *build_ctx) doc = {
+// Recursively appends an if-else-if chain's branches to `out`.
+// Walks each `else if` link, appending `tbranch`, then `else if (cond)`
+// (or `else`), then the next branch, all into the SAME `out` slice
+// so they share one group. Each branch's body is wrapped in its own
+// `group` so it stays inline with `(cond)` if there's room
+// (`if (a) X`), but moves to its own line indented once if not
+// (`if (a)\n\tX`). The chain itself goes multiline when ANY branch
+// has to wrap. `prev_compound` is unused now but kept for future
+// spacing decisions.
+fn append_if_chain_branches(
+	out: *[]doc,
+	i: *ast::if_expr,
+	bc: *build_ctx,
+	prev_compound: bool,
+) void = {
+	const tbranch_compound = i.tbranch.expr is ast::compound_expr;
+
+	let cur = *out;
+	if (tbranch_compound) {
+		append(cur, text(" "))!;
+		append(cur, build_expr_doc(i.tbranch, bc))!;
+	} else {
+		// Per-branch group: tries `(cond) body` flat, else
+		// `(cond)\n\tbody` with the body on its own line at
+		// indent + 1.
+		let body_g: []doc = [];
+		append(body_g, line(" "))!;
+		append(body_g, build_expr_doc(i.tbranch, bc))!;
+		let g_items: []doc = [];
+		append(g_items, nest(1, concat(body_g)))!;
+		append(cur, group(g_items))!;
+	};
+	*out = cur;
+
+	match (i.fbranch) {
+	case null => void;
+	case let e: *ast::expr =>
+		let cur = *out;
+		if (tbranch_compound) {
+			append(cur, text(" else"))!;
+		} else {
+			// Wrap `line(" ") + "else"` in a `nest(1, ...)`
+			// so the line break itself emits at indent + 1,
+			// not the outer indent. Without the nest, the
+			// continuation `else if`s would land at column 0.
+			let pre: []doc = [];
+			append(pre, line(" "))!;
+			append(pre, text("else"))!;
+			append(cur, nest(1, concat(pre)))!;
+		};
+		*out = cur;
+		match (e.expr) {
+		case let nested: ast::if_expr =>
+			// `else if (cond)`: glue the nested cond to this
+			// branch's `else` so the chain reads as one
+			// statement. Then recurse with the nested if's
+			// own branches.
+			let cur = *out;
+			append(cur, text(" if ("))!;
+			append(cur, build_expr_doc(nested.cond, bc))!;
+			append(cur, text(")"))!;
+			*out = cur;
+			append_if_chain_branches(out, &nested, bc, tbranch_compound);
+		case =>
+			const else_compound = e.expr is ast::compound_expr;
+			let cur = *out;
+			if (else_compound) {
+				append(cur, text(" "))!;
+				append(cur, build_expr_doc(e, bc))!;
+			} else {
+				// Same per-branch grouping as the tbranch
+				// path above so `else big_body;` can wrap
+				// to its own indented line when too long.
+				let body_g: []doc = [];
+				append(body_g, line(" "))!;
+				append(body_g, build_expr_doc(e, bc))!;
+				let g_items: []doc = [];
+				append(g_items, nest(1, concat(body_g)))!;
+				append(cur, group(g_items))!;
+			};
+			*out = cur;
+		};
+	};
+};
+
+fn build_match_expr(
+	m: *ast::match_expr,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
 	let outer: []doc = [];
 	append(outer, text("match "))!;
 	if (m.label != "") {
@@ -1280,15 +1653,45 @@ fn build_match_expr(m: *ast::match_expr, bc: *build_ctx) doc = {
 		};
 		append(inner, text(" =>"))!;
 		append(inner, build_case_exprs(cs.exprs, bc))!;
+		// Flush any trailing comments inside this case body (e.g.
+		// `case => abort(); // unreachable`) before moving on.
+		// Boundary is the next case's start, or - for the last
+		// case - the byte before the closing `}`.
+		const boundary = if (i + 1 < len(m.cases))
+			case_boundary_match(&m.cases[i + 1])
+			else loc.end.off: size;
+		const _ = push_comments_before(&inner, bc.c, boundary);
 	};
 
-	append(outer, nest(1, concat(inner)))!;
+	// Per the Hare style guide, `case` labels align with the `match`
+	// keyword's column - they are NOT nested inside the braces. The
+	// case bodies (after `=>`) get indented one level deeper, which
+	// `build_case_exprs` handles via its own `nest(1, ...)` wrapper.
+	append(outer, concat(inner))!;
 	append(outer, hardline())!;
 	append(outer, text("}"))!;
 	return concat(outer);
 };
 
-fn build_switch_expr(s: *ast::switch_expr, bc: *build_ctx) doc = {
+// Best-effort byte offset for the start of a match case. The match
+// case AST has no loc of its own, so we approximate using the first
+// available child loc - the binding type, then the first body expr.
+// Returns 0 (no flush) when nothing usable is reachable.
+fn case_boundary_match(cs: *ast::match_case) size = {
+	match (cs._type) {
+	case let t: *ast::_type =>
+		return t.loc.start.off: size;
+	case null => void;
+	};
+	if (len(cs.exprs) > 0) return cs.exprs[0].loc.start.off: size;
+	return 0z;
+};
+
+fn build_switch_expr(
+	s: *ast::switch_expr,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
 	let outer: []doc = [];
 	append(outer, text("switch "))!;
 	if (s.label != "") {
@@ -1321,12 +1724,27 @@ fn build_switch_expr(s: *ast::switch_expr, bc: *build_ctx) doc = {
 			append(inner, group(opts))!;
 		};
 		append(inner, build_case_exprs(cs.exprs, bc))!;
+		// See the matching comment in `build_match_expr`. Flush
+		// trailing case-body comments (e.g. `case => abort(); //
+		// unreachable`) at each case boundary or before `}`.
+		const boundary = if (i + 1 < len(s.cases))
+			case_boundary_switch(&s.cases[i + 1])
+			else loc.end.off: size;
+		const _ = push_comments_before(&inner, bc.c, boundary);
 	};
 
-	append(outer, nest(1, concat(inner)))!;
+	// `case` labels align with the `switch` keyword's column - see
+	// the matching comment in `build_match_expr`.
+	append(outer, concat(inner))!;
 	append(outer, hardline())!;
 	append(outer, text("}"))!;
 	return concat(outer);
+};
+
+fn case_boundary_switch(cs: *ast::switch_case) size = {
+	if (len(cs.options) > 0) return cs.options[0].loc.start.off: size;
+	if (len(cs.exprs) > 0) return cs.exprs[0].loc.start.off: size;
+	return 0z;
 };
 
 fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
@@ -1352,8 +1770,19 @@ fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
 	let inner: []doc = [];
 	for (let i = 0z; i < len(exprs); i += 1) {
 		append(inner, hardline())!;
+		// Flush comments that live BEFORE this case-body
+		// expression in the source. Without this, a comment
+		// like `case X =>\n\t// note\n\tbody;` would leave the
+		// `// note` in the cursor and it would be re-emitted at
+		// the next match boundary - past the closing `}`,
+		// detached from the code it documents.
+		const _ = push_comments_before(&inner, bc.c, exprs[i].loc.start.off: size);
 		append(inner, build_expr_doc(exprs[i], bc))!;
 		append(inner, text(";"))!;
+		const next_off = if (i + 1 < len(exprs)) exprs[i + 1].loc.start.off: size
+			else ~0z;
+		flush_trailing_comments_to_eol(&inner, bc.c, next_off,
+			exprs[i].loc.end.off: size, bc.data);
 	};
 	return nest(1, concat(inner));
 };
@@ -1361,11 +1790,16 @@ fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
 fn build_unarithm_expr(u: *ast::unarithm_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	const op_str = switch (u.op) {
-	case ast::unarithm_op::ADDR => yield "&";
-	case ast::unarithm_op::BNOT => yield "~";
-	case ast::unarithm_op::DEREF => yield "*";
-	case ast::unarithm_op::LNOT => yield "!";
-	case ast::unarithm_op::MINUS => yield "-";
+	case ast::unarithm_op::ADDR =>
+		yield "&";
+	case ast::unarithm_op::BNOT =>
+		yield "~";
+	case ast::unarithm_op::DEREF =>
+		yield "*";
+	case ast::unarithm_op::LNOT =>
+		yield "!";
+	case ast::unarithm_op::MINUS =>
+		yield "-";
 	};
 	append(items, text(op_str))!;
 	const needs_parens = match (u.operand.expr) {
@@ -1442,17 +1876,28 @@ fn build_literal_expr(
 	// at the literal's location to recover the lexical form.
 	match (l) {
 	case let p: ast::plain_literal =>
-		// For STRING literals, prefer the verbatim source text over
-		// upstream's `unparse` rendering. The upstream renderer
-		// only escapes `\` and `"` — not `\r`, `\n`, `\t`, etc. —
-		// so a literal containing escape sequences round-trips
-		// through `unparse` as raw bytes inside `"..."`, breaking
-		// any file that uses things like "\r\n". This also
-		// preserves the original lexical form: backtick raw
-		// strings stay as raw strings, adjacent concatenated
-		// literals stay concatenated, etc.
 		if (p.storage == ast::builtin_type::STR) {
+			// For STRING literals, prefer the verbatim source text over
+			// upstream's `unparse` rendering. The upstream renderer
+			// only escapes `\` and `"` — not `\r`, `\n`, `\t`, etc. —
+			// so a literal containing escape sequences round-trips
+			// through `unparse` as raw bytes inside `"..."`, breaking
+			// any file that uses things like "\r\n". This also
+			// preserves the original lexical form: backtick raw
+			// strings stay as raw strings, adjacent concatenated
+			// literals stay concatenated, etc.
 			match (verbatim_string_at(bc, loc)) {
+			case let s: str =>
+				return text(s);
+			case void => void;
+			};
+		};
+		if (is_numeric_or_rune_storage(p.storage)) {
+			// Numeric and rune literals: preserve the user's chosen
+			// base, digit grouping, suffix, and escape form. `unparse`
+			// would normalize 0x80 -> 128, 0o755 -> 493, 1_000_000 ->
+			// 1000000, etc.
+			match (verbatim_token_at(bc, loc)) {
 			case let s: str =>
 				return text(s);
 			case void => void;
@@ -1460,46 +1905,12 @@ fn build_literal_expr(
 		};
 		return text(render_literal(l));
 	case let a: ast::array_literal =>
-		return build_array_literal(&a, bc);
+		return build_array_literal(&a, loc, bc);
 	case let s: ast::struct_literal =>
-		return build_struct_literal(&s, bc);
+		return build_struct_literal(&s, loc, bc);
 	case let t: ast::tuple_literal =>
-		return build_tuple_literal(t, bc);
+		return build_tuple_literal(t, loc, bc);
 	};
-};
-
-// Walks `data` once and returns a slice mapping rune index → byte
-// offset. `rune_to_byte[i]` is the byte offset of the start of the
-// i-th rune. Length is `(rune count) + 1` so callers can also map
-// the past-the-end position. For pure-ASCII input, every entry is
-// `i`, but multi-byte UTF-8 sequences cause divergence.
-fn build_rune_to_byte(data: []u8) []size = {
-	let out: []size = [];
-	let byte_off = 0z;
-	for (byte_off < len(data)) {
-		append(out, byte_off)!;
-		const b = data[byte_off];
-		// UTF-8 continuation bytes start with 10xxxxxx; leading
-		// bytes have other patterns.
-		const width: size = if (b < 0x80) 1z
-			else if (b < 0xc0) 1z   // shouldn't happen at start
-			else if (b < 0xe0) 2z
-			else if (b < 0xf0) 3z
-			else 4z;
-		byte_off += width;
-		if (byte_off > len(data)) {
-			byte_off = len(data);
-		};
-	};
-	append(out, len(data))!;
-	return out;
-};
-
-// Translates a lexer rune-offset to a byte offset into `data`. Out-
-// of-range indices clamp to `len(data)`.
-fn rune_to_byte_off(bc: *build_ctx, rune_off: size) size = {
-	if (rune_off >= len(bc.rune_to_byte)) return len(bc.data);
-	return bc.rune_to_byte[rune_off];
 };
 
 // Returns true iff the source bytes immediately before `loc.start`
@@ -1509,7 +1920,7 @@ fn rune_to_byte_off(bc: *build_ctx, rune_off: size) size = {
 // `_type`, which calls `try(lexer, ltok::CONST)?;` and never stores
 // the result).
 fn type_has_const_prefix(bc: *build_ctx, loc: ast::location) bool = {
-	const start = rune_to_byte_off(bc, loc.start.off: size);
+	const start = loc.start.off: size;
 	if (start < 6) return false;
 	// Walk backwards through whitespace to find the previous non-
 	// whitespace byte run.
@@ -1530,9 +1941,10 @@ fn type_has_const_prefix(bc: *build_ctx, loc: ast::location) bool = {
 	// like `xconst`.
 	if (i == 5) return true;
 	const before = bc.data[i - 6];
-	return before == ' ': u8 || before == '\t': u8 || before == '\n': u8
-		|| before == '(': u8 || before == ',': u8
-		|| before == '=': u8;
+	return before == ' ': u8 || before == '\t': u8 || before == '\n': u8 ||
+	before == '(': u8 ||
+	before == ',': u8 ||
+	before == '=': u8;
 };
 
 // Returns the verbatim source text of a string literal at `loc`,
@@ -1549,9 +1961,11 @@ fn type_has_const_prefix(bc: *build_ctx, loc: ast::location) bool = {
 // whitespace between them.
 fn verbatim_string_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 	const data = bc.data;
-	const start = rune_to_byte_off(bc, loc.start.off: size);
-	const end_rune = (loc.end.off: size) + 1;
-	const end = rune_to_byte_off(bc, end_rune);
+	const start = loc.start.off: size;
+	// loc.end.off is the byte offset of the LAST byte of the literal
+	// (inclusive); +1 turns it into an exclusive end suitable for
+	// slicing.
+	const end = loc.end.off: size + 1;
 	if (start >= len(data) || end > len(data) || end <= start) {
 		return;
 	};
@@ -1562,16 +1976,16 @@ fn verbatim_string_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 	if (close >= len(data)) return;
 	// If end loc only covers this one segment, return just it.
 	if (close + 1 >= end) {
-		return strings::dup(strings::fromutf8(
-			data[start..close + 1])!)!;
+		return strings::dup(strings::fromutf8(data[start..close + 1])!)!;
 	};
 	// Concatenated strings — extend through every adjacent segment
 	// the AST's loc.end covers.
 	let final_close = close;
 	let i = close + 1;
 	for (i < end) {
-		for (i < end && (data[i] == ' ': u8 || data[i] == '\t': u8
-				|| data[i] == '\n': u8); i += 1) void;
+		for (i < end &&
+		(data[i] == ' ': u8 || data[i] == '\t': u8 ||
+		data[i] == '\n': u8); i += 1) void;
 		if (i >= end) break;
 		const delim = data[i];
 		if (delim != '`': u8 && delim != '"': u8) break;
@@ -1580,8 +1994,117 @@ fn verbatim_string_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 		final_close = nclose;
 		i = nclose + 1;
 	};
-	return strings::dup(strings::fromutf8(
-		data[start..final_close + 1])!)!;
+	return strings::dup(strings::fromutf8(data[start..final_close + 1])!)!;
+};
+
+// Returns true if `s` is a builtin storage type whose source form
+// carries information `hare::unparse` would lose - integer base
+// (0x/0o/0b), digit grouping (1_000), explicit suffix (100u8), float
+// representation (1.0 vs 1.0f64), or rune escape form ('\n' vs '\x0a').
+fn is_numeric_or_rune_storage(s: ast::builtin_type) bool = {
+	switch (s) {
+	case ast::builtin_type::INT,
+	ast::builtin_type::I8,
+	ast::builtin_type::I16,
+	ast::builtin_type::I32,
+	ast::builtin_type::I64,
+	ast::builtin_type::SIZE,
+	ast::builtin_type::UINT,
+	ast::builtin_type::U8,
+	ast::builtin_type::U16,
+	ast::builtin_type::U32,
+	ast::builtin_type::U64,
+	ast::builtin_type::UINTPTR,
+	ast::builtin_type::F32,
+	ast::builtin_type::F64,
+	ast::builtin_type::RUNE,
+	ast::builtin_type::ICONST,
+	ast::builtin_type::FCONST,
+	ast::builtin_type::RCONST =>
+		return true;
+	// Untyped (suffix-less) integer / float / rune literals
+	// land here; they're the common case (`0x80`, `1.5`,
+	// `'a'` all parse as the *CONST variant unless an
+	// explicit suffix or context-required type narrows them).
+
+	case =>
+		return false;
+	};
+};
+
+// Returns true if the source bytes between the opening delimiter
+// (`{`, `[`, or `(`) at or after `loc.start.off` and the first
+// non-whitespace byte after it contain a `\n`. Mirrors prettier's
+// "magic newline" heuristic: if the user wrote the container's
+// opening brace on its own line, treat that as an explicit request
+// to keep the container expanded across multiple lines even when
+// the contents would fit inline.
+//
+// `open_chars` is the set of byte values that count as the opening
+// delimiter (e.g. `['{': u8]` for struct literals). The scan starts
+// at `loc.start.off` and walks forward until one of those bytes is
+// found; everything before is treated as the type alias / keyword
+// prefix. Returns false if no opening delimiter is found within
+// `loc`'s range or if the next non-whitespace byte after it is
+// reached without seeing a `\n`.
+fn source_opens_multiline(
+	bc: *build_ctx,
+	loc: ast::location,
+	open_chars: []u8,
+) bool = {
+	const data = bc.data;
+	const start = loc.start.off: size;
+	const end = loc.end.off: size + 1;
+	if (start >= len(data) || end > len(data) || end <= start) {
+		return false;
+	};
+	let i = start;
+	for (i < end) {
+		const b = data[i];
+		let is_open = false;
+		for (let j = 0z; j < len(open_chars); j += 1) {
+			if (b == open_chars[j]) {
+				is_open = true;
+				break;
+			};
+		};
+		if (is_open) break;
+		i += 1;
+	};
+	if (i >= end) return false;
+	i += 1;
+	for (i < end) {
+		const b = data[i];
+		if (b == '\n': u8) return true;
+		if (b != ' ': u8 && b != '\t': u8) return false;
+		i += 1;
+	};
+	return false;
+};
+
+// Returns the verbatim source bytes covered by `loc`, or void if the
+// loc is out of range. Used for non-string literals (numbers, runes)
+// where we want to preserve the user's chosen lexical form rather
+// than re-emit through `hare::unparse`.
+//
+// `loc.end.off` is reported INCLUSIVELY for some node kinds (a const
+// init at `... = 1;` has start=end pointing at `1`) and EXCLUSIVELY
+// for others (a switch case option `case 1 =>` has end one byte
+// past the `1`). To avoid pulling stray trailing whitespace into the
+// captured token in the latter case, trim any trailing space/tab/
+// newline before returning - numbers and runes never legitimately
+// end in whitespace.
+fn verbatim_token_at(bc: *build_ctx, loc: ast::location) (str | void) = {
+	const data = bc.data;
+	const start = loc.start.off: size;
+	let end = loc.end.off: size + 1;
+	if (start >= len(data) || end > len(data) || end <= start) return;
+	for (end > start + 1) {
+		const b = data[end - 1];
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8) break;
+		end -= 1;
+	};
+	return strings::dup(strings::fromutf8(data[start..end])!)!;
 };
 
 // Given a byte offset of the opening delimiter of a string literal
@@ -1594,17 +2117,21 @@ fn end_first_string_segment(data: []u8, start: size) size = {
 	const delim = data[start];
 	let i = start + 1;
 	for (i < len(data) && data[i] != delim; i += 1) {
-		if (delim == '"': u8 && data[i] == '\\': u8
-				&& i + 1 < len(data)) {
+		if (delim == '"': u8 && data[i] == '\\': u8 && i + 1 < len(data)) {
 			i += 1;
 		};
 	};
 	return i;
 };
 
-fn build_array_literal(a: *ast::array_literal, bc: *build_ctx) doc = {
+fn build_array_literal(
+	a: *ast::array_literal,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
+	const force_break = source_opens_multiline(bc, loc, ['[': u8]);
 	let inner: []doc = [];
-	append(inner, line(""))!;
+	append(inner, leading_softline(force_break, ""))!;
 	for (let i = 0z; i < len(a.values); i += 1) {
 		append(inner, build_expr_doc(a.values[i], bc))!;
 		if (i + 1 < len(a.values)) {
@@ -1627,9 +2154,14 @@ fn build_array_literal(a: *ast::array_literal, bc: *build_ctx) doc = {
 	return group(g_items);
 };
 
-fn build_tuple_literal(t: ast::tuple_literal, bc: *build_ctx) doc = {
+fn build_tuple_literal(
+	t: ast::tuple_literal,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
+	const force_break = source_opens_multiline(bc, loc, ['(': u8]);
 	let inner: []doc = [];
-	append(inner, line(""))!;
+	append(inner, leading_softline(force_break, ""))!;
 	for (let i = 0z; i < len(t); i += 1) {
 		append(inner, build_expr_doc(t[i], bc))!;
 		if (i + 1 < len(t)) {
@@ -1649,7 +2181,23 @@ fn build_tuple_literal(t: ast::tuple_literal, bc: *build_ctx) doc = {
 	return group(g_items);
 };
 
-fn build_struct_literal(s: *ast::struct_literal, bc: *build_ctx) doc = {
+// Returns the leading separator inside a container body. When
+// `force_break` is true (the source opened the container with a
+// trailing newline after `{`/`[`/`(`), emit a `hardline()` so the
+// enclosing group renders broken even if the contents would fit.
+// Otherwise emit the usual softline. `flat_text` is what the softline
+// renders as in flat mode (`""` for `[]`/`()` containers, `" "` for
+// `{}` containers per the Hare style guide).
+fn leading_softline(force_break: bool, flat_text: str) doc = {
+	if (force_break) return hardline();
+	return line(flat_text);
+};
+
+fn build_struct_literal(
+	s: *ast::struct_literal,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
 	let outer: []doc = [];
 	if (len(s.alias) > 0) {
 		append(outer, text(render_ident(s.alias)))!;
@@ -1658,9 +2206,14 @@ fn build_struct_literal(s: *ast::struct_literal, bc: *build_ctx) doc = {
 	};
 	append(outer, text(" {"))!;
 
+	// Softline-separated members so a small struct literal can
+	// render as `point { x = 1, y = 2 }` on a single line. The
+	// trailing autofill / undefined markers (`...`, `@undefined...`)
+	// stay attached to the field list with the same softline spacing.
+	const force_break = source_opens_multiline(bc, loc, ['{': u8]);
 	let inner: []doc = [];
+	append(inner, leading_softline(force_break, " "))!;
 	for (let i = 0z; i < len(s.fields); i += 1) {
-		append(inner, hardline())!;
 		match (s.fields[i]) {
 		case let v: ast::struct_value =>
 			append(inner, text(v.name))!;
@@ -1676,78 +2229,116 @@ fn build_struct_literal(s: *ast::struct_literal, bc: *build_ctx) doc = {
 			append(inner, text(" = "))!;
 			append(inner, build_expr_doc(v.init, bc))!;
 		case let nested: *ast::struct_literal =>
-			append(inner, build_struct_literal(nested, bc))!;
+			append(inner, build_struct_literal(nested, loc, bc))!;
+		// Nested literal: use the parent loc as a stand-in
+		// (the AST doesn't expose a per-nested-literal loc
+		// here). The magic-newline check will likely return
+		// the parent's answer, which is the right default.
+
 		};
-		append(inner, text(","))!;
+		if (i + 1 < len(s.fields)) {
+			append(inner, text(","))!;
+			append(inner, line(" "))!;
+		};
 	};
 	if (s.undefined) {
-		append(inner, hardline())!;
+		if (len(s.fields) > 0) {
+			append(inner, text(","))!;
+			append(inner, line(" "))!;
+		};
 		append(inner, text("@undefined..."))!;
 	} else if (s.autofill) {
-		append(inner, hardline())!;
+		if (len(s.fields) > 0) {
+			append(inner, text(","))!;
+			append(inner, line(" "))!;
+		};
 		append(inner, text("..."))!;
+	} else if (len(s.fields) > 0) {
+		append(inner, if_broken(","))!;
 	};
 
 	append(outer, nest(1, concat(inner)))!;
-	append(outer, hardline())!;
+	append(outer, line(" "))!;
 	append(outer, text("}"))!;
-	return concat(outer);
+	return group(outer);
 };
 
 // ----- Helpers ------------------------------------------------------
-
 // Reuses upstream is_postfix / is_unary / is_cast semantics so we
 // emit the same parenthesization unparse does.
-
 fn is_plain(e: *ast::expr) bool = {
 	match (e.expr) {
-	case ast::literal_expr => return true;
-	case ast::access_identifier => return true;
-	case => return false;
+	case ast::literal_expr =>
+		return true;
+	case ast::access_identifier =>
+		return true;
+	case =>
+		return false;
 	};
 };
 
 fn is_builtin(e: *ast::expr) bool = {
 	if (is_plain(e)) return true;
 	match (e.expr) {
-	case ast::alloc_expr => return true;
-	case ast::assert_expr => return true;
-	case ast::variadic_expr => return true;
-	case ast::len_expr => return true;
-	case ast::align_expr => return true;
-	case ast::size_expr => return true;
-	case ast::offset_expr => return true;
-	case ast::append_expr => return true;
-	case ast::insert_expr => return true;
-	case => return false;
+	case ast::alloc_expr =>
+		return true;
+	case ast::assert_expr =>
+		return true;
+	case ast::variadic_expr =>
+		return true;
+	case ast::len_expr =>
+		return true;
+	case ast::align_expr =>
+		return true;
+	case ast::size_expr =>
+		return true;
+	case ast::offset_expr =>
+		return true;
+	case ast::append_expr =>
+		return true;
+	case ast::insert_expr =>
+		return true;
+	case =>
+		return false;
 	};
 };
 
 fn is_postfix(e: *ast::expr) bool = {
 	if (is_builtin(e)) return true;
 	match (e.expr) {
-	case ast::call_expr => return true;
-	case ast::access_expr => return true;
-	case ast::slice_expr => return true;
-	case ast::error_assert_expr => return true;
-	case ast::propagate_expr => return true;
-	case => return false;
+	case ast::call_expr =>
+		return true;
+	case ast::access_expr =>
+		return true;
+	case ast::slice_expr =>
+		return true;
+	case ast::error_assert_expr =>
+		return true;
+	case ast::propagate_expr =>
+		return true;
+	case =>
+		return false;
 	};
 };
 
 fn is_unary(e: *ast::expr) bool = {
 	if (is_postfix(e)) return true;
 	match (e.expr) {
-	case ast::compound_expr => return true;
-	case ast::match_expr => return true;
-	case ast::switch_expr => return true;
-	case ast::unarithm_expr => return true;
-	case => return false;
+	case ast::compound_expr =>
+		return true;
+	case ast::match_expr =>
+		return true;
+	case ast::switch_expr =>
+		return true;
+	case ast::unarithm_expr =>
+		return true;
+	case =>
+		return false;
 	};
 };
 
 fn is_cast(e: *ast::expr) bool = {
-	return is_unary(e) || (e.expr is ast::cast_expr);
+	return is_unary(e) || e.expr is ast::cast_expr;
 };
 
 // Renders a literal (plain / struct) via unparse for the bits whose
@@ -1755,14 +2346,14 @@ fn is_cast(e: *ast::expr) bool = {
 // sequences, …). The result is always a single line.
 fn render_literal(l: ast::literal_expr) str = {
 	let buf = memio::dynamic();
-	defer match (io::close(&buf)) { case => void; };
-	const wrapper = ast::expr {
-		loc = ast::location { ... },
-		expr = l,
+	defer match (io::close(&buf)) {
+	case => void;
 	};
+	const wrapper = ast::expr { loc = ast::location { ... }, expr = l };
 	match (unparse::expr(&buf, &unparse::syn_nowrap, &wrapper)) {
 	case size => void;
-	case => return strings::dup("<unparse error>")!;
+	case =>
+		return strings::dup("<unparse error>")!;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };

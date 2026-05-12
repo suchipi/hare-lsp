@@ -28,25 +28,50 @@ use strings;
 
 // LSP token type indices, matching the order advertised in the legend.
 def TT_NAMESPACE: u32 = 0;
+
 def TT_TYPE: u32 = 1;
+
 def TT_FUNCTION: u32 = 2;
+
 def TT_PARAMETER: u32 = 3;
+
 def TT_VARIABLE: u32 = 4;
+
 def TT_PROPERTY: u32 = 5;
+
 def TT_KEYWORD: u32 = 6;
+
 def TT_COMMENT: u32 = 7;
+
 def TT_STRING: u32 = 8;
+
 def TT_NUMBER: u32 = 9;
+
 def TT_OPERATOR: u32 = 10;
+
 def TT_ENUM_MEMBER: u32 = 11;
 
 const TOKEN_TYPES: [_]str = [
-	"namespace", "type", "function", "parameter", "variable", "property",
-	"keyword", "comment", "string", "number", "operator", "enumMember",
+	"namespace",
+	"type",
+	"function",
+	"parameter",
+	"variable",
+	"property",
+	"keyword",
+	"comment",
+	"string",
+	"number",
+	"operator",
+	"enumMember",
 ];
 
 const TOKEN_MODIFIERS: [_]str = [
-	"declaration", "definition", "readonly", "static", "deprecated",
+	"declaration",
+	"definition",
+	"readonly",
+	"static",
+	"deprecated",
 ];
 
 export fn token_legend() json::value = {
@@ -66,13 +91,15 @@ export fn token_legend() json::value = {
 
 export fn handle_semantic_tokens_full(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_st(r.params)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_empty_tokens(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_empty_tokens(s, r.id);
 		return;
@@ -95,15 +122,20 @@ export fn handle_semantic_tokens_full(s: *server, r: lsp::request) void = {
 // Delta encoding for semantic tokens. If the client's previousResultId
 // matches our stored id, we compute a coarse diff and emit a single edit
 // covering the differing slice. Otherwise we fall back to /full.
-export fn handle_semantic_tokens_full_delta(s: *server, r: lsp::request) void = {
+export fn handle_semantic_tokens_full_delta(
+	s: *server,
+	r: lsp::request,
+) void = {
 	const obj = match (params_obj_st(r.params)) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case void =>
 		handle_semantic_tokens_full(s, r);
 		return;
 	};
 	const uri = match (uri_from_st(r.params)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_empty_tokens(s, r.id);
 		return;
@@ -111,7 +143,8 @@ export fn handle_semantic_tokens_full_delta(s: *server, r: lsp::request) void = 
 	const prev_id = match (json::get(&obj, "previousResultId")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
+		case let s: str =>
+			yield s;
 		case =>
 			handle_semantic_tokens_full(s, r);
 			return;
@@ -121,7 +154,8 @@ export fn handle_semantic_tokens_full_delta(s: *server, r: lsp::request) void = 
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_empty_tokens(s, r.id);
 		return;
@@ -211,13 +245,14 @@ fn next_semantic_id(s: *server) str = {
 	};
 	for (v > 0; v /= 10) {
 		i -= 1;
-		buf[i] = ('0': u8) + (v % 10): u8;
+		buf[i] = '0': u8 + (v % 10): u8;
 	};
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
-fn params_obj_st(p: (json::value | void)) (json::object | void) =
-	lsp::params_object(p);
+fn params_obj_st(
+	p: (json::value | void),
+) (json::object | void) = lsp::params_object(p);
 
 // Returns a flat []u32 of LSP-encoded token tuples for the given source.
 fn compute_semantic_tokens(s: *server, data: []u8) []u32 = {
@@ -232,8 +267,10 @@ fn compute_semantic_tokens(s: *server, data: []u8) []u32 = {
 	let prev_col: u32 = 0;
 	for (true) {
 		const tok = match (lex::lex(&lexer)) {
-		case let t: lex::token => yield t;
-		case lex::error => break;
+		case let t: lex::token =>
+			yield t;
+		case lex::error =>
+			break;
 		};
 		if (tok.0 == ltok::EOF) break;
 		const tt = classify_token(tok.0);
@@ -265,37 +302,104 @@ fn classify_token(t: ltok) u32 = {
 	switch (t) {
 	case ltok::LIT_STR, ltok::LIT_RCONST =>
 		return TT_STRING;
-	case ltok::LIT_U8, ltok::LIT_U16, ltok::LIT_U32, ltok::LIT_U64,
-		ltok::LIT_I8, ltok::LIT_I16, ltok::LIT_I32, ltok::LIT_I64,
-		ltok::LIT_UINT, ltok::LIT_INT, ltok::LIT_SIZE, ltok::LIT_F32,
-		ltok::LIT_F64, ltok::LIT_FCONST, ltok::LIT_ICONST =>
+	case ltok::LIT_U8,
+	ltok::LIT_U16,
+	ltok::LIT_U32,
+	ltok::LIT_U64,
+	ltok::LIT_I8,
+	ltok::LIT_I16,
+	ltok::LIT_I32,
+	ltok::LIT_I64,
+	ltok::LIT_UINT,
+	ltok::LIT_INT,
+	ltok::LIT_SIZE,
+	ltok::LIT_F32,
+	ltok::LIT_F64,
+	ltok::LIT_FCONST,
+	ltok::LIT_ICONST =>
 		return TT_NUMBER;
 	case ltok::NAME =>
 		return TT_VARIABLE;
+	// Punctuation and operators all fall here.
+
 	case =>
-		// Punctuation and operators all fall here.
 		return TT_OPERATOR;
 	};
 };
 
 fn is_keyword(t: ltok) bool = {
 	switch (t) {
-	case ltok::ABORT, ltok::ALIGN, ltok::ALLOC, ltok::APPEND, ltok::AS,
-		ltok::ASSERT, ltok::BOOL, ltok::BREAK, ltok::CASE, ltok::CONST,
-		ltok::CONTINUE, ltok::DEF, ltok::DEFER, ltok::DELETE,
-		ltok::DONE, ltok::ELSE, ltok::ENUM, ltok::EXPORT, ltok::F32,
-		ltok::F64, ltok::FALSE, ltok::FN, ltok::FOR, ltok::FREE,
-		ltok::I16, ltok::I32, ltok::I64, ltok::I8, ltok::IF,
-		ltok::INSERT, ltok::INT, ltok::IS, ltok::LEN, ltok::LET,
-		ltok::MATCH, ltok::NEVER, ltok::NOMEM, ltok::NULL,
-		ltok::NULLABLE, ltok::OFFSET, ltok::OPAQUE, ltok::RETURN,
-		ltok::RUNE, ltok::SIZE, ltok::STATIC, ltok::STR, ltok::STRUCT,
-		ltok::SWITCH, ltok::TRUE, ltok::TYPE, ltok::U16, ltok::U32,
-		ltok::U64, ltok::U8, ltok::UINT, ltok::UINTPTR, ltok::UNION,
-		ltok::USE, ltok::VAARG, ltok::VAEND, ltok::VALIST,
-		ltok::VASTART, ltok::VOID, ltok::YIELD, ltok::ATTR_FINI,
-		ltok::ATTR_INIT, ltok::ATTR_PACKED, ltok::ATTR_SYMBOL,
-		ltok::ATTR_TEST, ltok::ATTR_THREADLOCAL, ltok::ATTR_UNDEFINED =>
+	case ltok::ABORT,
+	ltok::ALIGN,
+	ltok::ALLOC,
+	ltok::APPEND,
+	ltok::AS,
+	ltok::ASSERT,
+	ltok::BOOL,
+	ltok::BREAK,
+	ltok::CASE,
+	ltok::CONST,
+	ltok::CONTINUE,
+	ltok::DEF,
+	ltok::DEFER,
+	ltok::DELETE,
+	ltok::DONE,
+	ltok::ELSE,
+	ltok::ENUM,
+	ltok::EXPORT,
+	ltok::F32,
+	ltok::F64,
+	ltok::FALSE,
+	ltok::FN,
+	ltok::FOR,
+	ltok::FREE,
+	ltok::I16,
+	ltok::I32,
+	ltok::I64,
+	ltok::I8,
+	ltok::IF,
+	ltok::INSERT,
+	ltok::INT,
+	ltok::IS,
+	ltok::LEN,
+	ltok::LET,
+	ltok::MATCH,
+	ltok::NEVER,
+	ltok::NOMEM,
+	ltok::NULL,
+	ltok::NULLABLE,
+	ltok::OFFSET,
+	ltok::OPAQUE,
+	ltok::RETURN,
+	ltok::RUNE,
+	ltok::SIZE,
+	ltok::STATIC,
+	ltok::STR,
+	ltok::STRUCT,
+	ltok::SWITCH,
+	ltok::TRUE,
+	ltok::TYPE,
+	ltok::U16,
+	ltok::U32,
+	ltok::U64,
+	ltok::U8,
+	ltok::UINT,
+	ltok::UINTPTR,
+	ltok::UNION,
+	ltok::USE,
+	ltok::VAARG,
+	ltok::VAEND,
+	ltok::VALIST,
+	ltok::VASTART,
+	ltok::VOID,
+	ltok::YIELD,
+	ltok::ATTR_FINI,
+	ltok::ATTR_INIT,
+	ltok::ATTR_PACKED,
+	ltok::ATTR_SYMBOL,
+	ltok::ATTR_TEST,
+	ltok::ATTR_THREADLOCAL,
+	ltok::ATTR_UNDEFINED =>
 		return true;
 	case =>
 		return false;
@@ -319,7 +423,12 @@ fn send_tokens(s: *server, id: lsp::id, tokens: []u32) void = {
 	send_tokens_with_id(s, id, tokens, "");
 };
 
-fn send_tokens_with_id(s: *server, id: lsp::id, tokens: []u32, result_id: str) void = {
+fn send_tokens_with_id(
+	s: *server,
+	id: lsp::id,
+	tokens: []u32,
+	result_id: str,
+) void = {
 	let arr: []json::value = [];
 	for (let i = 0z; i < len(tokens); i += 1) {
 		append(arr, tokens[i]: f64: json::value)!;
@@ -344,27 +453,37 @@ fn send_empty_tokens(s: *server, id: lsp::id) void = {
 
 fn uri_from_st(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const td = match (json::get(&obj, "textDocument")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	match (json::get(&td, "uri")) {
 	case let p: *json::value =>
 		match (*p) {
-		case let s: str => return s;
-		case => return void;
+		case let s: str =>
+			return s;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 };

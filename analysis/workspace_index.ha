@@ -168,15 +168,19 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 // The returned string is always freshly allocated; caller frees.
 export fn module_from_path(file_path: str) str = {
 	const last_slash = match (strings::rindex(file_path, '/')) {
-	case let i: size => yield i;
-	case void => return strings::dup("")!;
+	case let i: size =>
+		yield i;
+	case void =>
+		return strings::dup("")!;
 	};
 	if (last_slash == 0) return strings::dup("")!;
 	let dir = strings::sub(file_path, 0, last_slash);
 	for (true) {
 		const prev = match (strings::rindex(dir, '/')) {
-		case let i: size => yield i + 1;
-		case void => yield 0z;
+		case let i: size =>
+			yield i + 1;
+		case void =>
+			yield 0z;
 		};
 		const seg = strings::sub(dir, prev, strings::end);
 		if (len(seg) == 0) return strings::dup("")!;
@@ -227,15 +231,20 @@ export fn free_path_slice(paths: []str) void = {
 
 fn walk_collect(dir: str, out: *[]str) void = {
 	const it = match (os::iter(dir)) {
-	case let it: *fs::iterator => yield it;
-	case fs::error => return;
+	case let it: *fs::iterator =>
+		yield it;
+	case fs::error =>
+		return;
 	};
 	defer fs::finish(it);
 	for (true) {
 		const entry = match (fs::next(it)) {
-		case let e: fs::dirent => yield e;
-		case done => break;
-		case let e: fs::error => break;
+		case let e: fs::dirent =>
+			yield e;
+		case done =>
+			break;
+		case let e: fs::error =>
+			break;
 		};
 		if (entry.name == "." || entry.name == "..") continue;
 		const sub = strings::concat(dir, "/", entry.name)!;
@@ -261,10 +270,14 @@ fn walk_collect(dir: str, out: *[]str) void = {
 // process one file per tick.
 export fn read_and_index_file(idx: *workspace_index, path: str) bool = {
 	const f = match (os::open(path)) {
-	case let f: io::file => yield f;
-	case fs::error => return false;
+	case let f: io::file =>
+		yield f;
+	case fs::error =>
+		return false;
 	};
-	defer match (io::close(f)) { case => void; };
+	defer match (io::close(f)) {
+	case => void;
+	};
 	let buf: []u8 = [];
 	let chunk: [4096]u8 = [0...];
 	for (true) {
@@ -284,7 +297,10 @@ export fn read_and_index_file(idx: *workspace_index, path: str) bool = {
 
 // Looks up entries by short name. Returns a borrowed slice; callers must
 // not mutate the index while holding it.
-export fn lookup_by_short_name(idx: *workspace_index, name: str) []workspace_entry = {
+export fn lookup_by_short_name(
+	idx: *workspace_index,
+	name: str,
+) []workspace_entry = {
 	let out: []workspace_entry = [];
 	for (let i = 0z; i < len(idx.entries); i += 1) {
 		if (idx.entries[i].short_name == name) {
@@ -297,7 +313,10 @@ export fn lookup_by_short_name(idx: *workspace_index, name: str) []workspace_ent
 // Returns a borrowed pointer to the first entry whose short_name matches,
 // or void if none exists. Used by navigation features (hover, definition,
 // etc.) that take "any" hit when falling back from per-file resolution.
-export fn find_first_by_short_name(idx: *workspace_index, name: str) (*workspace_entry | void) = {
+export fn find_first_by_short_name(
+	idx: *workspace_index,
+	name: str,
+) (*workspace_entry | void) = {
 	for (let i = 0z; i < len(idx.entries); i += 1) {
 		if (idx.entries[i].short_name == name) {
 			return &idx.entries[i];
@@ -308,7 +327,11 @@ export fn find_first_by_short_name(idx: *workspace_index, name: str) (*workspace
 
 // Returns the first entry matching (module, short_name). Used for
 // qualified references like `mod::name`.
-export fn find_in_module(idx: *workspace_index, module: str, name: str) (*workspace_entry | void) = {
+export fn find_in_module(
+	idx: *workspace_index,
+	module: str,
+	name: str,
+) (*workspace_entry | void) = {
 	for (let i = 0z; i < len(idx.entries); i += 1) {
 		const e = &idx.entries[i];
 		if (e.short_name == name && e.module == module) {
@@ -365,7 +388,7 @@ fn ascii_lower(s: str) str = {
 	for (let i = 0z; i < len(bytes); i += 1) {
 		let b = bytes[i];
 		if (b >= 'A': u8 && b <= 'Z': u8) {
-			b += ('a': u8 - 'A': u8);
+			b += 'a': u8 - 'A': u8;
 		};
 		append(buf, b)!;
 	};

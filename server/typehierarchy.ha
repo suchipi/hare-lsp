@@ -21,13 +21,15 @@ use strings;
 
 export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos_th(r.params)) {
-	case let v: (str, lsp::position) => yield v;
+	case let v: (str, lsp::position) =>
+		yield v;
 	case void =>
 		send_array_th(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_array_th(s, r.id, []);
 		return;
@@ -38,7 +40,8 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 		analysis::position { line = pos.line, character = pos.character });
 	const cache = parse_of(doc);
 	const sym = match (analysis::symbol_at(&cache.idx, off)) {
-	case let p: *analysis::symbol => yield p;
+	case let p: *analysis::symbol =>
+		yield p;
 	case void =>
 		send_array_th(s, r.id, []);
 		return;
@@ -62,7 +65,8 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 // responsibility - the server returns one level per call.
 export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	const item = match (parse_item(r.params)) {
-	case let v: type_item => yield v;
+	case let v: type_item =>
+		yield v;
 	case void =>
 		send_array_th(s, r.id, []);
 		return;
@@ -73,7 +77,8 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	// we have it; otherwise hit the shared on-disk file_parse_cache so
 	// repeated supertype queries against the same file don't re-parse.
 	const su = match (load_subunit(s, item.uri)) {
-	case let su: *ast::subunit => yield su;
+	case let su: *ast::subunit =>
+		yield su;
 	case void =>
 		send_array_th(s, r.id, []);
 		return;
@@ -81,13 +86,15 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 
 	// Find the matching type decl.
 	const decl = match (find_type_decl(su, item.name)) {
-	case let d: *ast::decl => yield d;
+	case let d: *ast::decl =>
+		yield d;
 	case void =>
 		send_array_th(s, r.id, []);
 		return;
 	};
 	const underlying = match (analysis::type_decl_underlying(decl)) {
-	case let t: *ast::_type => yield t;
+	case let t: *ast::_type =>
+		yield t;
 	case void =>
 		send_array_th(s, r.id, []);
 		return;
@@ -115,30 +122,30 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 		const name = path[len(path) - 1];
 		// `foo::bar::baz` -> qualifier "bar" (the single-segment
 		// module name workspace_entry.module records).
-		const qualifier = if (len(path) >= 2)
-			path[len(path) - 2]
-		else
-			"";
+		const qualifier = if (len(path) >= 2) path[len(path) - 2] else "";
 		const entry = match (analysis::workspace_lookup_for_subunit(
-				&s.workspace_index, su, item_module,
-				qualifier, name)) {
-		case let e: *analysis::workspace_entry => yield e;
-		case void => continue;
+			&s.workspace_index, su, item_module, qualifier, name)) {
+		case let e: *analysis::workspace_entry =>
+			yield e;
+		case void =>
+			continue;
 		};
 		if (entry.kind != analysis::symbol_kind::TYPE) continue;
 		if (entry.uri == item.uri && entry.short_name == item.name) continue;
 		if (visited_pair_has(visited, entry.uri, entry.short_name)) continue;
 		const text = match (find_document(s, entry.uri)) {
-		case let d: *document => yield analysis::bytes(&d.buf);
+		case let d: *document =>
+			yield analysis::bytes(&d.buf);
 		case null =>
 			yield match (cached_parse_or_drop_stale(s, entry.path)) {
-			case let p: *file_parse_entry => yield p.text;
-			case null => continue;
+			case let p: *file_parse_entry =>
+				yield p.text;
+			case null =>
+				continue;
 			};
 		};
 		append(arr, build_type_item_for_path(s, entry.path, entry.uri,
-			entry.short_name, entry.start_off: size,
-			entry.end_off: size, text))!;
+			entry.short_name, entry.start_off: size, entry.end_off: size, text))!;
 		append(visited, (entry.uri, entry.short_name))!;
 	};
 	send_array_th(s, r.id, arr);
@@ -156,8 +163,10 @@ fn load_subunit(s: *server, uri: str) (*ast::subunit | void) = {
 	const path = uri_to_path_th(uri);
 	defer free(path);
 	const fpe = match (cached_parse_or_drop_stale(s, path)) {
-	case let p: *file_parse_entry => yield p;
-	case null => return void;
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
 	};
 	return &fpe.pr.subunit;
 };
@@ -170,7 +179,8 @@ fn load_subunit(s: *server, uri: str) (*ast::subunit | void) = {
 // client's responsibility.
 export fn handle_subtypes(s: *server, r: lsp::request) void = {
 	const item = match (parse_item(r.params)) {
-	case let v: type_item => yield v;
+	case let v: type_item =>
+		yield v;
 	case void =>
 		send_array_th(s, r.id, []);
 		return;
@@ -182,9 +192,9 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 	// by short name only.
 	const item_path = uri_to_path_th(item.uri);
 	defer free(item_path);
-	const expected = match (find_workspace_type_entry(s, item_path,
-			item.name)) {
-	case let e: *analysis::workspace_entry => yield e;
+	const expected = match (find_workspace_type_entry(s, item_path, item.name)) {
+	case let e: *analysis::workspace_entry =>
+		yield e;
 	case void =>
 		// Unindexed file or fresh type: fall back to short-name
 		// matching (no regression vs prior behavior).
@@ -208,8 +218,10 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 		append(seen_paths, e.path)!;
 
 		const fpe = match (cached_parse_or_drop_stale(s, e.path)) {
-		case let p: *file_parse_entry => yield p;
-		case null => continue;
+		case let p: *file_parse_entry =>
+			yield p;
+		case null =>
+			continue;
 		};
 
 		const file_module = analysis::module_from_path(e.path);
@@ -218,13 +230,15 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 		for (let j = 0z; j < len(fpe.pr.subunit.decls); j += 1) {
 			const d = &fpe.pr.subunit.decls[j];
 			match (d.decl) {
-			case ast::decl_type =>
-				void;
-			case => continue;
+			case ast::decl_type => void;
+			case =>
+				continue;
 			};
 			const underlying = match (analysis::type_decl_underlying(d)) {
-			case let t: *ast::_type => yield t;
-			case void => continue;
+			case let t: *ast::_type =>
+				yield t;
+			case void =>
+				continue;
 			};
 			let idents = analysis::collect_referenced_idents(underlying);
 			defer analysis::finish_idents(idents);
@@ -241,19 +255,12 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 				case null =>
 					matched = true;
 				case let exp: *analysis::workspace_entry =>
-					const qualifier = if (len(path) >= 2)
-						path[len(path) - 2]
-					else
-						"";
-					match (analysis::workspace_lookup_for_subunit(
-							&s.workspace_index,
-							&fpe.pr.subunit,
-							file_module,
-							qualifier, item.name)) {
+					const qualifier = if (len(path) >= 2) path[len(path) - 2] else "";
+					match (analysis::workspace_lookup_for_subunit(&s.workspace_index,
+						&fpe.pr.subunit, file_module, qualifier, item.name)) {
 					case let r: *analysis::workspace_entry =>
-						if (r.path == exp.path &&
-							r.short_name == exp.short_name &&
-							r.kind == exp.kind) {
+						if (r.path == exp.path && r.short_name == exp.short_name &&
+								r.kind == exp.kind) {
 							matched = true;
 						};
 					case void => void;
@@ -269,8 +276,8 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 			if (visited_pair_has(visited, e.uri, short)) continue;
 			const sp_off = d.loc.start.off: size;
 			const ep_off = d.loc.end.off: size;
-			append(arr, build_type_item_for_path(s, e.path,
-				e.uri, short, sp_off, ep_off, fpe.text))!;
+			append(arr, build_type_item_for_path(s, e.path, e.uri, short, sp_off, ep_off,
+				fpe.text))!;
 			append(visited, (e.uri, short))!;
 		};
 	};
@@ -280,7 +287,9 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 // Returns the workspace_entry for the TYPE decl at (path, name), or
 // void when none exists. Used to anchor the supertypes/subtypes filter.
 fn find_workspace_type_entry(
-	s: *server, path: str, name: str,
+	s: *server,
+	path: str,
+	name: str,
 ) (*analysis::workspace_entry | void) = {
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const e = &s.workspace_index.entries[i];
@@ -293,7 +302,6 @@ fn find_workspace_type_entry(
 };
 
 // --- helpers ---
-
 type type_item = struct {
 	name: str,
 	uri: str,
@@ -301,33 +309,44 @@ type type_item = struct {
 
 fn parse_item(p: (json::value | void)) (type_item | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const item = match (json::get(&obj, "item")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const name = match (json::get(&item, "name")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield strings::dup(s)!;
-		case => return void;
+		case let s: str =>
+			yield strings::dup(s)!;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const uri = match (json::get(&item, "uri")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield strings::dup(s)!;
+		case let s: str =>
+			yield strings::dup(s)!;
 		case =>
 			free(name);
 			return void;
@@ -363,7 +382,8 @@ fn decl_type_short_name(d: *ast::decl) str = {
 	case let t: ast::decl_type =>
 		if (len(t.ident) > 0) return t.ident[len(t.ident) - 1];
 		return "";
-	case => return "";
+	case =>
+		return "";
 	};
 };
 
@@ -381,12 +401,19 @@ fn str_in(slice: []str, needle: str) bool = {
 // (uri, name) matches `self_uri`+`self_name` (the input item) or is
 // already in `visited` (this-response dedup).
 fn emit_workspace_type_items(
-	s: *server, name: str, arr: *[]json::value,
-	visited: *[](str, str), self_uri: str, self_name: str,
+	s: *server,
+	name: str,
+	arr: *[]json::value,
+	visited: *[](str, str),
+	self_uri: str,
+	self_name: str,
 ) void = {
 	let cur = *arr;
 	let vis = *visited;
-	defer { *arr = cur; *visited = vis; };
+	defer {
+		*arr = cur;
+		*visited = vis;
+	};
 
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const e = &s.workspace_index.entries[i];
@@ -397,15 +424,18 @@ fn emit_workspace_type_items(
 		// Prefer an open document's bytes if one exists for this URI;
 		// otherwise use the shared on-disk parse cache.
 		const text = match (find_document(s, e.uri)) {
-		case let d: *document => yield analysis::bytes(&d.buf);
+		case let d: *document =>
+			yield analysis::bytes(&d.buf);
 		case null =>
 			yield match (cached_parse_or_drop_stale(s, e.path)) {
-			case let p: *file_parse_entry => yield p.text;
-			case null => continue;
+			case let p: *file_parse_entry =>
+				yield p.text;
+			case null =>
+				continue;
 			};
 		};
-		append(cur, build_type_item_for_path(s, e.path, e.uri,
-			name, e.start_off: size, e.end_off: size, text))!;
+		append(cur, build_type_item_for_path(s, e.path, e.uri, name,
+			e.start_off: size, e.end_off: size, text))!;
 		append(vis, (e.uri, e.short_name))!;
 	};
 };
@@ -418,8 +448,12 @@ fn visited_pair_has(vis: [](str, str), uri: str, name: str) bool = {
 };
 
 fn build_type_item(
-	s: *server, doc: *document, uri: str, name: str,
-	start_off: size, end_off: size,
+	s: *server,
+	doc: *document,
+	uri: str,
+	name: str,
+	start_off: size,
+	end_off: size,
 ) json::value = {
 	let item = json::newobject();
 	json::set(&item, "name", name: json::value)!;
@@ -427,7 +461,8 @@ fn build_type_item(
 	json::set(&item, "uri", uri: json::value)!;
 	const enc = position_encoding(s);
 	const data = analysis::bytes(&doc.buf);
-	const sp = analysis::byte_to_position(data, doc.buf.line_index, enc, start_off);
+	const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		start_off);
 	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, end_off);
 	json::put(&item, "range", encode_range_th(sp, ep))!;
 	json::put(&item, "selectionRange", encode_range_th(sp, ep))!;
@@ -435,8 +470,13 @@ fn build_type_item(
 };
 
 fn build_type_item_for_path(
-	s: *server, path: str, uri: str, name: str,
-	start_off: size, end_off: size, text: []u8,
+	s: *server,
+	path: str,
+	uri: str,
+	name: str,
+	start_off: size,
+	end_off: size,
+	text: []u8,
 ) json::value = {
 	let item = json::newobject();
 	json::set(&item, "name", name: json::value)!;
@@ -456,41 +496,57 @@ fn build_type_item_for_path(
 
 fn parse_pos_th(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const td = match (json::get(&obj, "textDocument")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const uri = match (json::get(&td, "uri")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
-		case => return void;
+		case let s: str =>
+			yield s;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const pos = match (json::get(&obj, "position")) {
 	case let p: *json::value =>
 		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position => yield pos;
-		case lsp::bad_message => return void;
+		case let pos: lsp::position =>
+			yield pos;
+		case lsp::bad_message =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	return (uri, pos);
 };
 
-fn encode_range_th(start: analysis::position, end: analysis::position) json::value = {
+fn encode_range_th(
+	start: analysis::position,
+	end: analysis::position,
+) json::value = {
 	let r = json::newobject();
 	let s_obj = json::newobject();
 	json::put(&s_obj, "line", start.line: f64)!;

@@ -30,8 +30,8 @@ fn make_dir(p: str) void = {
 };
 
 fn write_test_file(path: str, content: str) void = {
-	const f = os::create(path, 0o644: fs::mode,
-		fs::flag::WRONLY | fs::flag::TRUNC)!;
+	const f =
+		os::create(path, 0o644: fs::mode, fs::flag::WRONLY | fs::flag::TRUNC)!;
 	defer io::close(f)!;
 	io::writeall(f, strings::toutf8(content))!;
 };
@@ -118,8 +118,10 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	cleanup(root);
 	make_dir(root);
 	defer cleanup(root);
-	write_test_file(strings::concat(root, "/keep.skip.ha")!, "fn k() void = void;\n");
-	write_test_file(strings::concat(root, "/noise.skip.ha")!, "fn n() void = void;\n");
+	write_test_file(strings::concat(root, "/keep.skip.ha")!,
+		"fn k() void = void;\n");
+	write_test_file(strings::concat(root, "/noise.skip.ha")!,
+		"fn n() void = void;\n");
 	write_test_file(strings::concat(root, "/.harefmtignore")!,
 		"*.skip.ha\n!keep.skip.ha\n");
 
@@ -148,8 +150,7 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 		"fn k() void = void;\n");
 	write_test_file(strings::concat(root, "/.harefmtignore")!,
 		"vendor/\n!vendor/keep.ha\n");
-	write_test_file(strings::concat(root, "/top.ha")!,
-		"fn t() void = void;\n");
+	write_test_file(strings::concat(root, "/top.ha")!, "fn t() void = void;\n");
 
 	const abs = os::resolve(root);
 	const paths = walk_collect(abs, default_opts());
@@ -242,8 +243,7 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	make_dir(root);
 	defer cleanup(root);
 	make_dir(strings::concat(root, "/real")!);
-	write_test_file(strings::concat(root, "/real/a.ha")!,
-		"fn a() void = void;\n");
+	write_test_file(strings::concat(root, "/real/a.ha")!, "fn a() void = void;\n");
 	// Symlink at root level pointing to the real dir.
 	const link_path = strings::concat(root, "/link")!;
 	defer free(link_path);
@@ -268,8 +268,7 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	make_dir(root);
 	defer cleanup(root);
 	make_dir(strings::concat(root, "/real")!);
-	write_test_file(strings::concat(root, "/real/a.ha")!,
-		"fn a() void = void;\n");
+	write_test_file(strings::concat(root, "/real/a.ha")!, "fn a() void = void;\n");
 	make_symlink("real", strings::concat(root, "/link")!);
 
 	let opts = default_opts();
@@ -290,8 +289,7 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	cleanup(root);
 	make_dir(root);
 	defer cleanup(root);
-	write_test_file(strings::concat(root, "/real.ha")!,
-		"fn r() void = void;\n");
+	write_test_file(strings::concat(root, "/real.ha")!, "fn r() void = void;\n");
 	make_symlink("real.ha", strings::concat(root, "/link.ha")!);
 
 	const abs = os::resolve(root);
@@ -310,8 +308,7 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	cleanup(root);
 	make_dir(root);
 	defer cleanup(root);
-	write_test_file(strings::concat(root, "/real.ha")!,
-		"fn r() void = void;\n");
+	write_test_file(strings::concat(root, "/real.ha")!, "fn r() void = void;\n");
 	make_symlink("real.ha", strings::concat(root, "/link.ha")!);
 
 	let opts = default_opts();

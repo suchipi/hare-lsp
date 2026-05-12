@@ -19,13 +19,15 @@ use strings;
 // the cursor isn't on a function).
 export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos_local(r.params)) {
-	case let v: (str, lsp::position) => yield v;
+	case let v: (str, lsp::position) =>
+		yield v;
 	case void =>
 		send_array_local(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_array_local(s, r.id, []);
 		return;
@@ -36,7 +38,8 @@ export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
 		analysis::position { line = pos.line, character = pos.character });
 	const cache = parse_of(doc);
 	const sym = match (analysis::symbol_at(&cache.idx, off)) {
-	case let p: *analysis::symbol => yield p;
+	case let p: *analysis::symbol =>
+		yield p;
 	case void =>
 		send_array_local(s, r.id, []);
 		return;
@@ -54,7 +57,8 @@ export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
 // item's name appears as a textual word — same scan logic as references.
 export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 	const (item_name, item_uri) = match (parse_call_item(r.params)) {
-	case let v: (str, str) => yield v;
+	case let v: (str, str) =>
+		yield v;
 	case void =>
 		send_array_local(s, r.id, []);
 		return;
@@ -123,8 +127,10 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 		for (let j = 0z; j < len(grouped[i].1); j += 1) {
 			const o = grouped[i].1[j] as json::object;
 			let r = match (json::dup(*(json::get(&o, "range") as *json::value))) {
-			case let v: json::value => yield v;
-			case nomem => continue;
+			case let v: json::value =>
+				yield v;
+			case nomem =>
+				continue;
 			};
 			append(from_ranges, r)!;
 		};
@@ -146,7 +152,8 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 // Cycle avoidance across calls is the client's responsibility.
 export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	const (item_name, item_uri) = match (parse_call_item(r.params)) {
-	case let v: (str, str) => yield v;
+	case let v: (str, str) =>
+		yield v;
 	case void =>
 		send_array_local(s, r.id, []);
 		return;
@@ -156,7 +163,8 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 
 	// Find the source function's span by re-parsing the file.
 	const doc = match (find_document(s, item_uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_array_local(s, r.id, []);
 		return;
@@ -164,7 +172,8 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const cache = parse_of(doc);
 	const src_sym = match (analysis::find_by_short_name(&cache.idx, item_name)) {
-	case let p: *analysis::symbol => yield p;
+	case let p: *analysis::symbol =>
+		yield p;
 	case void =>
 		send_array_local(s, r.id, []);
 		return;
@@ -285,7 +294,10 @@ fn is_word_char(b: u8) bool = {
 };
 
 fn build_call_hierarchy_item(
-	s: *server, sym: *analysis::symbol, uri: str, doc: *document,
+	s: *server,
+	sym: *analysis::symbol,
+	uri: str,
+	doc: *document,
 ) json::value = {
 	let item = json::newobject();
 	json::set(&item, "name", sym.short_name: json::value)!;
@@ -304,36 +316,49 @@ fn build_call_hierarchy_item(
 
 fn parse_call_item(p: (json::value | void)) ((str, str) | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const item = match (json::get(&obj, "item")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const name = match (json::get(&item, "name")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield strings::dup(s)!;
-		case => return void;
+		case let s: str =>
+			yield strings::dup(s)!;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const uri = match (json::get(&item, "uri")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield strings::dup(s)!;
-		case => return void;
+		case let s: str =>
+			yield strings::dup(s)!;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	return (name, uri);
 };
@@ -345,8 +370,10 @@ fn scan_calls_in_doc(doc: *document, name: str) []json::value = {
 
 fn scan_calls_in_file(path: str, name: str) []json::value = {
 	const f = match (os::open(path)) {
-	case let f: io::file => yield f;
-	case fs::error => return [];
+	case let f: io::file =>
+		yield f;
+	case fs::error =>
+		return [];
 	};
 	defer lsp::safe_close(f);
 	let buf: []u8 = [];
@@ -369,7 +396,12 @@ fn scan_calls_in_file(path: str, name: str) []json::value = {
 	return scan_calls_static(buf, uri, idx, name);
 };
 
-fn scan_calls_static(data: []u8, uri: str, line_index: []size, name: str) []json::value = {
+fn scan_calls_static(
+	data: []u8,
+	uri: str,
+	line_index: []size,
+	name: str,
+) []json::value = {
 	let arr: []json::value = [];
 	const t = strings::toutf8(name);
 	let i = 0z;
@@ -387,7 +419,9 @@ fn scan_calls_static(data: []u8, uri: str, line_index: []size, name: str) []json
 		// Heuristic: only count this as a call site if followed by '('
 		// (possibly after whitespace).
 		let k = i + len(t);
-		for (k < len(data) && (data[k] == ' ': u8 || data[k] == '\t': u8); k += 1) void;
+		for (k < len(data) &&
+		(data[k] == ' ': u8 ||
+		data[k] == '\t': u8); k += 1) void;
 		if (k >= len(data) || data[k] != '(': u8) continue;
 		const start_pos = analysis::byte_to_position(data, line_index,
 			analysis::encoding::UTF16, i);
@@ -458,7 +492,10 @@ fn zero_range() json::value = {
 	return r;
 };
 
-fn encode_range_local(start: analysis::position, end: analysis::position) json::value = {
+fn encode_range_local(
+	start: analysis::position,
+	end: analysis::position,
+) json::value = {
 	let r = json::newobject();
 	let s_obj = json::newobject();
 	json::put(&s_obj, "line", start.line: f64)!;
@@ -473,36 +510,49 @@ fn encode_range_local(start: analysis::position, end: analysis::position) json::
 
 fn parse_pos_local(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const td = match (json::get(&obj, "textDocument")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const uri = match (json::get(&td, "uri")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
-		case => return void;
+		case let s: str =>
+			yield s;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const pos = match (json::get(&obj, "position")) {
 	case let p: *json::value =>
 		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position => yield pos;
-		case lsp::bad_message => return void;
+		case let pos: lsp::position =>
+			yield pos;
+		case lsp::bad_message =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	return (uri, pos);
 };

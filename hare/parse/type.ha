@@ -67,9 +67,7 @@ fn prototype(lexer: *lex::lexer) (ast::func_type | error) = {
 	};
 };
 
-fn integer_type(
-	lexer: *lex::lexer,
-) (builtin_type | error) = {
+fn integer_type(lexer: *lex::lexer) (builtin_type | error) = {
 	switch (want(lexer)?.0) {
 	case ltok::INT =>
 		return builtin_type::INT;
@@ -103,9 +101,18 @@ fn integer_type(
 fn primitive_type(lexer: *lex::lexer) (ast::_type | error) = {
 	let tok = want(lexer)?;
 	let builtin = switch (tok.0) {
-	case ltok::I8, ltok::I16, ltok::I32, ltok::I64,
-			ltok::INT, ltok::UINT, ltok::UINTPTR, ltok::SIZE,
-			ltok::U8, ltok::U16, ltok::U32, ltok::U64 =>
+	case ltok::I8,
+	ltok::I16,
+	ltok::I32,
+	ltok::I64,
+	ltok::INT,
+	ltok::UINT,
+	ltok::UINTPTR,
+	ltok::SIZE,
+	ltok::U8,
+	ltok::U16,
+	ltok::U32,
+	ltok::U64 =>
 		lex::unlex(lexer, tok);
 		yield integer_type(lexer)?;
 	case ltok::RUNE =>
@@ -131,8 +138,7 @@ fn primitive_type(lexer: *lex::lexer) (ast::_type | error) = {
 	case ltok::NOMEM =>
 		yield builtin_type::NOMEM;
 	case =>
-		return syntaxerr(mkloc(lexer),
-			"Unexpected {}, was expecting primitive type",
+		return syntaxerr(mkloc(lexer), "Unexpected {}, was expecting primitive type",
 			lex::tokstr(tok));
 	};
 	return ast::_type {
@@ -184,7 +190,8 @@ fn tagged_type(
 		match (try(lexer, ltok::BOR)?) {
 		case lex::token =>
 			match (try(lexer, ltok::RPAREN)) {
-			case lex::token => break;
+			case lex::token =>
+				break;
 			case => void;
 			};
 		case void =>
@@ -201,7 +208,7 @@ fn tagged_type(
 fn tuple_type(
 	lexer: *lex::lexer,
 	first: ast::_type,
-	start: lex::location
+	start: lex::location,
 ) (ast::_type | error) = {
 	let tuple: ast::tuple_type = [];
 	append(tuple, alloc(first)!)!;
@@ -210,7 +217,8 @@ fn tuple_type(
 		match (try(lexer, ltok::COMMA)?) {
 		case lex::token =>
 			match (try(lexer, ltok::RPAREN)) {
-			case lex::token => break;
+			case lex::token =>
+				break;
 			case => void;
 			};
 		case void =>
@@ -247,15 +255,14 @@ fn struct_union_type(lexer: *lex::lexer) (ast::_type | error) = {
 
 	for (true) {
 		if (try(lexer, ltok::RBRACE)? is lex::token) {
-			synassert(mkloc(lexer), len(membs) != 0,
-				"Expected field list")?;
+			synassert(mkloc(lexer), len(membs) != 0, "Expected field list")?;
 			break;
 		};
 
 		let comment = "";
 
-		let tok = want(lexer, ltok::NAME, ltok::UNDERSCORE,
-			ltok::STRUCT, ltok::UNION)?;
+		let tok =
+			want(lexer, ltok::NAME, ltok::UNDERSCORE, ltok::STRUCT, ltok::UNION)?;
 		if (comment == "") {
 			comment = lex::comment(lexer);
 		};
@@ -286,7 +293,8 @@ fn struct_union_type(lexer: *lex::lexer) (ast::_type | error) = {
 		};
 
 		switch (want(lexer, ltok::RBRACE, ltok::COMMA)?.0) {
-		case ltok::RBRACE => break;
+		case ltok::RBRACE =>
+			break;
 		case ltok::COMMA =>
 			const linecomment = lex::comment(lexer);
 			const docs = &membs[len(membs) - 1].docs;
@@ -301,7 +309,7 @@ fn struct_union_type(lexer: *lex::lexer) (ast::_type | error) = {
 		loc = loc_from(lexer, kind.2),
 		repr = switch (kind.0) {
 		case ltok::STRUCT =>
-			yield ast::struct_type { members = membs, packed = packed, ...};
+			yield ast::struct_type { members = membs, packed = packed, ... };
 		case ltok::UNION =>
 			yield membs: ast::union_type;
 		case => abort();
@@ -355,8 +363,8 @@ fn struct_embed_or_field(
 fn array_slice_type(lexer: *lex::lexer) (ast::_type | error) = {
 	let start = want(lexer, ltok::LBRACKET)?;
 
-	let length = match (try(lexer, ltok::UNDERSCORE,
-		ltok::TIMES, ltok::RBRACKET)?) {
+	let length = match (try(lexer, ltok::UNDERSCORE, ltok::TIMES,
+		ltok::RBRACKET)?) {
 	case void =>
 		yield alloc(expr(lexer)?)!;
 	case let tok: lex::token =>
@@ -400,25 +408,24 @@ fn enum_type(lexer: *lex::lexer) (ast::_type | error) = {
 		case ltok::RUNE =>
 			want(lexer, ltok::LBRACE)?;
 			yield builtin_type::RUNE;
-		case => abort(); // unreachable
+		case => abort();
+		// unreachable
+
 		};
 	};
 
 	let membs: []ast::enum_field = [];
 	for (true) {
 		if (try(lexer, ltok::RBRACE)? is lex::token) {
-			synassert(mkloc(lexer), len(membs) != 0,
-				"Expected member list")?;
+			synassert(mkloc(lexer), len(membs) != 0, "Expected member list")?;
 			break;
 		};
 
 		const loc = mkloc(lexer);
 		let name = want(lexer, ltok::NAME)?;
 		let comment = lex::comment(lexer);
-		let value: nullable *ast::expr =
-			if (try(lexer, ltok::EQUAL)? is lex::token)
-				alloc(expr(lexer)?)!
-			else null;
+		let value: nullable *ast::expr = if (try(lexer,
+					ltok::EQUAL)? is lex::token) alloc(expr(lexer)?)! else null;
 
 		defer append(membs, ast::enum_field {
 			name = name.1 as str,
@@ -434,7 +441,8 @@ fn enum_type(lexer: *lex::lexer) (ast::_type | error) = {
 				free(comment);
 				comment = linecomment;
 			} else free(linecomment);
-		case ltok::RBRACE => break;
+		case ltok::RBRACE =>
+			break;
 		case => abort();
 		};
 	};
@@ -454,11 +462,29 @@ export fn _type(lexer: *lex::lexer) (ast::_type | error) = {
 
 	let tok = peek(lexer)? as lex::token;
 	let typ: ast::_type = switch (tok.0) {
-	case ltok::RUNE, ltok::STR, ltok::BOOL, ltok::DONE, ltok::I8, ltok::I16,
-			ltok::I32, ltok::I64, ltok::U8, ltok::U16, ltok::U32,
-			ltok::U64, ltok::INT, ltok::UINT, ltok::UINTPTR,
-			ltok::SIZE, ltok::F32, ltok::F64, ltok::VALIST,
-			ltok::VOID, ltok::OPAQUE, ltok::NEVER, ltok::NOMEM =>
+	case ltok::RUNE,
+	ltok::STR,
+	ltok::BOOL,
+	ltok::DONE,
+	ltok::I8,
+	ltok::I16,
+	ltok::I32,
+	ltok::I64,
+	ltok::U8,
+	ltok::U16,
+	ltok::U32,
+	ltok::U64,
+	ltok::INT,
+	ltok::UINT,
+	ltok::UINTPTR,
+	ltok::SIZE,
+	ltok::F32,
+	ltok::F64,
+	ltok::VALIST,
+	ltok::VOID,
+	ltok::OPAQUE,
+	ltok::NEVER,
+	ltok::NOMEM =>
 		yield primitive_type(lexer)?;
 	case ltok::ENUM =>
 		yield enum_type(lexer)?;
@@ -482,8 +508,7 @@ export fn _type(lexer: *lex::lexer) (ast::_type | error) = {
 		case ltok::BOR =>
 			yield tagged_type(lexer, t, tok.2, unwrap)?;
 		case ltok::COMMA =>
-			synassert(mkloc(lexer), !unwrap,
-				"Expected tagged union")?;
+			synassert(mkloc(lexer), !unwrap, "Expected tagged union")?;
 			yield tuple_type(lexer, t, tok.2)?;
 		case => abort("unreachable");
 		};
@@ -492,8 +517,7 @@ export fn _type(lexer: *lex::lexer) (ast::_type | error) = {
 	case ltok::NAME =>
 		yield alias_type(lexer)?;
 	case =>
-		return syntaxerr(mkloc(lexer),
-			"Unexpected {}, was expecting type",
+		return syntaxerr(mkloc(lexer), "Unexpected {}, was expecting type",
 			lex::tokstr(tok));
 	};
 	return typ;

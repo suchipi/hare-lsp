@@ -18,7 +18,9 @@ fn name_list(lexer: *lex::lexer) (ast::import_members | error) = {
 			};
 		case ltok::RBRACE =>
 			return names;
-		case => abort(); // Unreachable
+		case => abort();
+		// Unreachable
+
 		};
 	};
 };
@@ -28,7 +30,8 @@ export fn imports(lexer: *lex::lexer) ([]ast::import | error) = {
 	let imports: []ast::import = [];
 	for (true) {
 		match (try(lexer, ltok::USE)?) {
-		case void => break;
+		case void =>
+			break;
 		case => void;
 		};
 
@@ -53,32 +56,30 @@ export fn imports(lexer: *lex::lexer) ([]ast::import | error) = {
 		// cmd+clickable in VS Code. Capture the closing `;`
 		// token's own location instead.
 		let semi_loc: lex::location = lex::location { ... };
-		const next_tok = want(lexer, ltok::SEMICOLON, ltok::LBRACE,
-			ltok::EQUAL, ltok::TIMES)?;
+		const next_tok =
+			want(lexer, ltok::SEMICOLON, ltok::LBRACE, ltok::EQUAL, ltok::TIMES)?;
 		switch (next_tok.0) {
 		case ltok::SEMICOLON =>
-			synassert(mkloc(lexer), !trailing,
-				"Unexpected trailing :: in ident")?;
+			synassert(mkloc(lexer), !trailing, "Unexpected trailing :: in ident")?;
 			semi_loc = next_tok.2;
 		case ltok::LBRACE =>
-			synassert(mkloc(lexer), trailing,
-				"Expected trailing :: in ident")?;
+			synassert(mkloc(lexer), trailing, "Expected trailing :: in ident")?;
 			import.bindings = name_list(lexer)?;
 			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
 		case ltok::EQUAL =>
-			synassert(mkloc(lexer),
-				len(name) == 1 && !trailing,
+			synassert(mkloc(lexer), len(name) == 1 && !trailing,
 				"Expected name, not ident")?;
 			import.bindings = name[0];
 			free(name);
 			import.ident = ident(lexer)?;
 			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
 		case ltok::TIMES =>
-			synassert(mkloc(lexer), trailing,
-				"Expected trailing :: in ident")?;
+			synassert(mkloc(lexer), trailing, "Expected trailing :: in ident")?;
 			import.bindings = ast::import_wildcard;
 			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
-		case => abort(); // Unreachable
+		case => abort();
+		// Unreachable
+
 		};
 		import.loc.end = semi_loc;
 	};

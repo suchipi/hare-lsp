@@ -25,7 +25,12 @@ use unix;
 
 def VERSION: str = "0.0.1";
 
-type mode = enum { NONE, WRITE, CHECK, STDOUT };
+type mode = enum {
+	NONE,
+	WRITE,
+	CHECK,
+	STDOUT,
+};
 
 type cli = struct {
 	mode: mode,
@@ -39,11 +44,16 @@ type state = struct {
 	any_error: bool,
 };
 
-type cli_error = enum { HELP, VERSION, USAGE };
+type cli_error = enum {
+	HELP,
+	VERSION,
+	USAGE,
+};
 
 export fn main() void = {
 	const c = match (parse_args(os::args[1..])) {
-	case let c: cli => yield c;
+	case let c: cli =>
+		yield c;
 	case let e: cli_error =>
 		switch (e) {
 		case cli_error::HELP =>
@@ -125,9 +135,8 @@ fn parse_args(args: []str) (cli | cli_error) = {
 			c.opts.follow_file_symlinks = false;
 		case =>
 			if (strings::hasprefix(a, "--") ||
-					(len(a) >= 2 && strings::hasprefix(a, "-") && a != "-")) {
-				fmt::fprintfln(os::stderr,
-					"harefmt: unknown option: {}", a)!;
+					len(a) >= 2 && strings::hasprefix(a, "-") && a != "-") {
+				fmt::fprintfln(os::stderr, "harefmt: unknown option: {}", a)!;
 				free(c.paths);
 				return cli_error::USAGE;
 			};
@@ -161,27 +170,23 @@ fn parse_args(args: []str) (cli | cli_error) = {
 fn print_usage(out: io::handle) void = {
 	fmt::fprintln(out,
 		"Usage: harefmt --write|--check|--stdout [OPTIONS] <path>...")!;
-	fmt::fprintln(out,
-		"       harefmt --stdout -")!;
+	fmt::fprintln(out, "       harefmt --stdout -")!;
 	fmt::fprintln(out)!;
 	fmt::fprintln(out,
 		"Format Hare source files using the same engine as hare-lsp.")!;
 	fmt::fprintln(out)!;
 	fmt::fprintln(out, "Modes (exactly one required):")!;
-	fmt::fprintln(out,
-		"  -w, --write           Format files in place.")!;
+	fmt::fprintln(out, "  -w, --write           Format files in place.")!;
 	fmt::fprintln(out,
 		"  -c, --check           Don't write. Print each unformatted file's")!;
 	fmt::fprintln(out,
 		"                        path on its own line. Exit 1 if any file")!;
-	fmt::fprintln(out,
-		"                        would change.")!;
+	fmt::fprintln(out, "                        would change.")!;
 	fmt::fprintln(out,
 		"      --stdout          Read one file (or `-` for stdin), write the")!;
 	fmt::fprintln(out,
 		"                        formatted output to stdout. Exit 1 on parse")!;
-	fmt::fprintln(out,
-		"                        error.")!;
+	fmt::fprintln(out, "                        error.")!;
 	fmt::fprintln(out)!;
 	fmt::fprintln(out, "Options:")!;
 	fmt::fprintln(out,
@@ -194,8 +199,7 @@ fn print_usage(out: io::handle) void = {
 		"      --no-follow-file-symlinks Skip symlinked regular files.")!;
 	fmt::fprintln(out,
 		"  -h, --help                    Show this help and exit.")!;
-	fmt::fprintln(out,
-		"  -V, --version                 Print version and exit.")!;
+	fmt::fprintln(out, "  -V, --version                 Print version and exit.")!;
 };
 
 // Handles --stdout mode for a single path. Returns the process exit
@@ -204,25 +208,26 @@ fn run_stdout(path: str) int = {
 	const label = if (path == "-") "<stdin>" else path;
 	const data = if (path == "-") {
 		yield match (io::drain(os::stdin)) {
-		case let d: []u8 => yield d;
+		case let d: []u8 =>
+			yield d;
 		case io::error =>
-			fmt::fprintln(os::stderr,
-				"harefmt: failed to read stdin")!;
+			fmt::fprintln(os::stderr, "harefmt: failed to read stdin")!;
 			return 2;
 		};
 	} else {
 		yield match (read_file(path)) {
-		case let d: []u8 => yield d;
+		case let d: []u8 =>
+			yield d;
 		case =>
-			fmt::fprintfln(os::stderr,
-				"harefmt: {}: cannot read", path)!;
+			fmt::fprintfln(os::stderr, "harefmt: {}: cannot read", path)!;
 			return 2;
 		};
 	};
 	defer free(data);
 
 	const result = match (server::format_source(data, label)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case let e: server::format_error =>
 		report_format_error(label, &e);
 		server::format_error_finish(&e);
@@ -250,20 +255,25 @@ fn process_path(path: str, opts: ignore_opts, st: *state) void = {
 		defer finish_layers(layers);
 		descend(abs, layers, opts, &process_file_cb, st);
 	case arg_class::MISSING =>
-		fmt::fprintfln(os::stderr,
-			"harefmt: {}: no such file or directory", path)!;
+		fmt::fprintfln(os::stderr, "harefmt: {}: no such file or directory", path)!;
 		st.any_error = true;
 	};
 };
 
-type arg_class = enum { FILE, DIRECTORY, MISSING };
+type arg_class = enum {
+	FILE,
+	DIRECTORY,
+	MISSING,
+};
 
 // Classifies an explicit CLI path argument. Symlinks are followed (the
 // user asked for this path by name; don't second-guess them).
 fn classify_arg(abs: str) arg_class = {
 	const real = match (os::realpath(abs)) {
-	case let s: str => yield strings::dup(s)!;
-	case fs::error => return arg_class::MISSING;
+	case let s: str =>
+		yield strings::dup(s)!;
+	case fs::error =>
+		return arg_class::MISSING;
 	};
 	defer free(real);
 	match (os::stat(real)) {
@@ -283,17 +293,18 @@ fn process_file_cb(abs: str, ud: nullable *opaque) void = {
 
 fn process_file(abs: str, st: *state) void = {
 	const data = match (read_file(abs)) {
-	case let d: []u8 => yield d;
+	case let d: []u8 =>
+		yield d;
 	case =>
-		fmt::fprintfln(os::stderr,
-			"harefmt: {}: cannot read", abs)!;
+		fmt::fprintfln(os::stderr, "harefmt: {}: cannot read", abs)!;
 		st.any_error = true;
 		return;
 	};
 	defer free(data);
 
 	const result = match (server::format_source(data, abs)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case let e: server::format_error =>
 		report_format_error(abs, &e);
 		server::format_error_finish(&e);
@@ -313,20 +324,19 @@ fn process_file(abs: str, st: *state) void = {
 		match (write_file(abs, result_bytes)) {
 		case void => void;
 		case =>
-			fmt::fprintfln(os::stderr,
-				"harefmt: {}: cannot write", abs)!;
+			fmt::fprintfln(os::stderr, "harefmt: {}: cannot write", abs)!;
 			st.any_error = true;
 		};
-	case mode::STDOUT, mode::NONE =>
-		abort("unreachable: stdout/none in process_file");
+	case mode::STDOUT,
+	mode::NONE => abort("unreachable: stdout/none in process_file");
 	};
 };
 
 fn report_format_error(label: str, e: *server::format_error) void = {
 	match (e.location) {
 	case let loc: lex::location =>
-		fmt::fprintfln(os::stderr, "{}:{}:{}: {}",
-			label, loc.line, loc.col, e.message)!;
+		fmt::fprintfln(os::stderr, "{}:{}:{}: {}", label, loc.line, loc.col,
+			e.message)!;
 	case void =>
 		fmt::fprintfln(os::stderr, "{}: {}", label, e.message)!;
 	};
@@ -346,16 +356,18 @@ fn read_file(path: str) ([]u8 | fs::error | io::error) = {
 // Original file's permissions are preserved when known.
 fn write_file(path: str, data: []u8) (void | fs::error | io::error) = {
 	const mode = match (os::stat(path)) {
-	case let st: fs::filestat => yield fs::mode_perm(st.mode);
-	case fs::error => yield 0o644: fs::mode;
+	case let st: fs::filestat =>
+		yield fs::mode_perm(st.mode);
+	case fs::error =>
+		yield 0o644: fs::mode;
 	};
 	const dir = path::dirname(path);
 	const base = path::basename(path);
 	// Hidden filename so a stray crash leaves something the user's
 	// globs won't pick up; pid disambiguates concurrent harefmt
 	// invocations targeting the same file.
-	const tmp_name = fmt::asprintf(".{}.harefmt.{}.tmp",
-		base, unix::getpid(): u64)!;
+	const tmp_name =
+		fmt::asprintf(".{}.harefmt.{}.tmp", base, unix::getpid(): u64)!;
 	defer free(tmp_name);
 	const tmp_path = strings::concat(dir, "/", tmp_name)!;
 	defer free(tmp_path);
@@ -382,8 +394,7 @@ fn write_tmp(
 	mode: fs::mode,
 	data: []u8,
 ) (void | fs::error | io::error) = {
-	const f = os::create(tmp_path, mode,
-		fs::flag::WRONLY | fs::flag::TRUNC)?;
+	const f = os::create(tmp_path, mode, fs::flag::WRONLY | fs::flag::TRUNC)?;
 	defer io::close(f)!;
 	io::writeall(f, data)?;
 };
@@ -394,4 +405,3 @@ fn safe_remove(path: str) void = {
 	case fs::error => void;
 	};
 };
-

@@ -13,7 +13,9 @@ use os;
 use strconv;
 use strings;
 
-fn nav_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn nav_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -21,7 +23,12 @@ fn nav_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) =
 	return (s, scan, in_buf, out);
 };
 
-fn nav_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn nav_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -31,15 +38,19 @@ fn nav_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, o
 };
 
 fn nav_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -85,7 +96,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	nav_open(&s, "file:///x.ha", "export fn target() void = void;\\n");
 
 	// Position is on "target" — line 0, char ~12.
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":12}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":12}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -100,7 +112,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer json::finish(v);
 	const o = v as json::object;
 	const result = *(json::get(&o, "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "target"));
 	assert(strings::contains(value, "fn"));
@@ -113,7 +126,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		`export fn f() void = { let x: size = len(\"hi\"); };`);
 
 	// Position is on "len" — character 38.
-	const params = `{"textDocument":{"uri":"file:///b.ha"},"position":{"line":0,"character":38}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///b.ha"},"position":{"line":0,"character":38}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -128,7 +142,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer json::finish(v);
 	const o = v as json::object;
 	const result = *(json::get(&o, "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "len(value) size"));
 	assert(strings::contains(value, "Built-in"));
@@ -138,11 +153,11 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn hover_on_keyword_returns_docs() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
-	nav_open(&s, "file:///k.ha",
-		`export fn f() void = { defer free(null); };`);
+	nav_open(&s, "file:///k.ha", `export fn f() void = { defer free(null); };`);
 
 	// Position is on "defer" — character 24.
-	const params = `{"textDocument":{"uri":"file:///k.ha"},"position":{"line":0,"character":24}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///k.ha"},"position":{"line":0,"character":24}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -157,7 +172,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer json::finish(v);
 	const o = v as json::object;
 	const result = *(json::get(&o, "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "Keyword"));
 	assert(strings::contains(value, "defer"));
@@ -167,11 +183,11 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn hover_on_attribute_returns_docs() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
-	nav_open(&s, "file:///a.ha",
-		`@test fn checks() void = void;`);
+	nav_open(&s, "file:///a.ha", `@test fn checks() void = void;`);
 
 	// Position is on "test" — character 3.
-	const params = `{"textDocument":{"uri":"file:///a.ha"},"position":{"line":0,"character":3}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///a.ha"},"position":{"line":0,"character":3}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -186,7 +202,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer json::finish(v);
 	const o = v as json::object;
 	const result = *(json::get(&o, "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "Attribute"));
 	assert(strings::contains(value, "@test"));
@@ -196,11 +213,11 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn hover_on_attribute_at_sign_returns_docs() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
-	nav_open(&s, "file:///a2.ha",
-		`@init fn boot() void = void;`);
+	nav_open(&s, "file:///a2.ha", `@init fn boot() void = void;`);
 
 	// Position is on the "@" — character 0.
-	const params = `{"textDocument":{"uri":"file:///a2.ha"},"position":{"line":0,"character":0}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///a2.ha"},"position":{"line":0,"character":0}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -215,7 +232,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer json::finish(v);
 	const o = v as json::object;
 	const result = *(json::get(&o, "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "@init"));
 	assert(strings::contains(value, "before `main`"));
@@ -226,7 +244,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 	nav_open(&s, "file:///x.ha", "export fn target() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":6}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":6}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -249,7 +268,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 	nav_open(&s, "file:///x.ha", "export fn target() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":12}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":12}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -262,7 +282,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 200.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(uri == "file:///x.ha");
 	const range = *(json::get(&result, "range") as *json::value) as json::object;
@@ -273,10 +294,12 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn type_definition_returns_location_for_type_only() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
-	nav_open(&s, "file:///x.ha", "type point = struct { x: int };\\nexport fn f() void = void;\\n");
+	nav_open(&s, "file:///x.ha",
+		"type point = struct { x: int };\\nexport fn f() void = void;\\n");
 
 	// Hover on "point" — line 0, char 5.
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":6}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":6}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -299,7 +322,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 	nav_open(&s, "file:///x.ha", "export fn f() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":11}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":11}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -324,20 +348,20 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const def_path = ".tmp/hare-lsp-nav-crossfile.ha";
 	const def_text = "export fn target() void = void;\n";
 	let _ = match (nav_write(def_path, def_text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer nav_rm(def_path);
-	analysis::index_file(&s.workspace_index, def_path,
-		strings::toutf8(def_text));
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
 
 	// Open a separate buffer that calls `target()` — its file-local
 	// index doesn't know about `target`.
-	nav_open(&s, "file:///caller.ha",
-		"fn caller() void = target();\\n");
+	nav_open(&s, "file:///caller.ha", "fn caller() void = target();\\n");
 
 	// Cursor on `target` in caller.ha.
-	const params = `{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":0,"character":22}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":0,"character":22}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -350,7 +374,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 400.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	// Should point at the on-disk file, not caller.ha.
 	assert(strings::hassuffix(uri, "hare-lsp-nav-crossfile.ha"));
@@ -363,18 +388,19 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const def_path = ".tmp/hare-lsp-nav-hover-crossfile.ha";
 	const def_text = "// the answer\nexport fn answer() int = 42;\n";
 	let _ = match (nav_write(def_path, def_text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer nav_rm(def_path);
-	analysis::index_file(&s.workspace_index, def_path,
-		strings::toutf8(def_text));
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
 
 	nav_open(&s, "file:///caller.ha",
 		"fn caller() void = { let n = answer(); };\\n");
 
 	// Position on `answer` — char index roughly 29.
-	const params = `{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":0,"character":31}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":0,"character":31}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -387,8 +413,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 401.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	// Hover markdown should contain the cross-file decl signature.
 	assert(strings::contains(value, "answer"));
@@ -399,20 +427,22 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
 	const def_path = ".tmp/hare-lsp-nav-hover-propagate.ha";
-	const def_text = "export type myerr = !void;\nexport fn want() (int | myerr) = 0;\n";
+	const def_text =
+		"export type myerr = !void;\nexport fn want() (int | myerr) = 0;\n";
 	let _ = match (nav_write(def_path, def_text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer nav_rm(def_path);
-	analysis::index_file(&s.workspace_index, def_path,
-		strings::toutf8(def_text));
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
 
 	// `let t = want()?;` — hover on `t` (line 0, char 25).
 	nav_open(&s, "file:///caller_prop.ha",
 		"fn caller() void = { let t = want()?; };\\n");
 
-	const params = `{"textDocument":{"uri":"file:///caller_prop.ha"},"position":{"line":0,"character":25}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///caller_prop.ha"},"position":{"line":0,"character":25}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -425,8 +455,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 460.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	// After `?`, the result should be just `int` — the alias `myerr`
 	// resolves to `!void`, so its variant is stripped from the union.
@@ -441,20 +473,22 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
 	const def_path = ".tmp/hare-lsp-nav-hover-bang.ha";
-	const def_text = "export type myerr = !void;\nexport fn want() (int | myerr) = 0;\n";
+	const def_text =
+		"export type myerr = !void;\nexport fn want() (int | myerr) = 0;\n";
 	let _ = match (nav_write(def_path, def_text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer nav_rm(def_path);
-	analysis::index_file(&s.workspace_index, def_path,
-		strings::toutf8(def_text));
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
 
 	// `let t = want()!;` — hover on `t` (line 0, char 25).
 	nav_open(&s, "file:///caller_bang.ha",
 		"fn caller() void = { let t = want()!; };\\n");
 
-	const params = `{"textDocument":{"uri":"file:///caller_bang.ha"},"position":{"line":0,"character":25}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///caller_bang.ha"},"position":{"line":0,"character":25}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -467,8 +501,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 461.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "let t"));
 	assert(strings::contains(value, "int"));
@@ -487,11 +523,13 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	nav_write_dir(".tmp/lspmoda");
 	nav_write_dir(".tmp/lspmodb");
 	let _ = match (nav_write(path_a, text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write");
 	};
 	let _ = match (nav_write(path_b, text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write");
 	};
 	defer nav_rm(path_a);
@@ -504,7 +542,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		"use lspmoda;\\n\\nfn caller() void = init();\\n");
 
 	// Position on `init` in caller.ha.
-	const params = `{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":2,"character":21}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":2,"character":21}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -517,7 +556,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 450.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	// Should resolve to mod-a, not mod-b.
 	assert(strings::contains(uri, "lspmoda"));
@@ -534,11 +574,13 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	nav_write_dir(".tmp/lspmodc");
 	nav_write_dir(".tmp/lspmodd");
 	let _ = match (nav_write(path_a, text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write");
 	};
 	let _ = match (nav_write(path_b, text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write");
 	};
 	defer nav_rm(path_a);
@@ -548,12 +590,12 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	// caller writes `lspmodd::init()` — a qualified reference.
 	// Despite lspmodc also having `init`, the qualifier must win.
-	nav_open(&s, "file:///caller2.ha",
-		"fn caller() void = lspmodd::init();\\n");
+	nav_open(&s, "file:///caller2.ha", "fn caller() void = lspmodd::init();\\n");
 
 	// Position on `init` in caller2.ha — right after `::`.
 	// "fn caller() void = lspmodd::init();" — `init` is cols 28-31.
-	const params = `{"textDocument":{"uri":"file:///caller2.ha"},"position":{"line":0,"character":30}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///caller2.ha"},"position":{"line":0,"character":30}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -566,7 +608,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 451.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(strings::contains(uri, "lspmodd"));
 };
@@ -578,12 +621,14 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// `build_diagnostic` is declared with a doc comment, then referenced
 	// in another decl as `d: build_diagnostic`. Hovering on the reference
 	// should show the type's doc comment, not just the signature.
-	const src = "// One diagnostic emitted by the compiler.\\nexport type build_diagnostic = struct { x: int };\\nfn f(d: build_diagnostic) void = void;\\n";
+	const src =
+		"// One diagnostic emitted by the compiler.\\nexport type build_diagnostic = struct { x: int };\\nfn f(d: build_diagnostic) void = void;\\n";
 	nav_open(&s, "file:///bd.ha", src);
 
 	// Line 2 is `fn f(d: build_diagnostic) void = void;`. The token
 	// `build_diagnostic` starts at column 8.
-	const params = `{"textDocument":{"uri":"file:///bd.ha"},"position":{"line":2,"character":12}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///bd.ha"},"position":{"line":2,"character":12}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -596,8 +641,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 470.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "build_diagnostic"));
 	assert(strings::contains(value, "One diagnostic emitted by the compiler."));
@@ -610,10 +657,12 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// `target` references `[[helper]]` in its doc comment. Both decls
 	// live in the same file, so resolution should hit the local index
 	// and emit a markdown link with a `command:hare-lsp.openLocation` URI.
-	const src = "// See [[helper]] for the implementation.\\nexport fn target() void = void;\\nexport fn helper() void = void;\\n";
+	const src =
+		"// See [[helper]] for the implementation.\\nexport fn target() void = void;\\nexport fn helper() void = void;\\n";
 	nav_open(&s, "file:///r.ha", src);
 
-	const params = `{"textDocument":{"uri":"file:///r.ha"},"position":{"line":1,"character":12}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///r.ha"},"position":{"line":1,"character":12}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -626,8 +675,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 480.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "[helper](command:hare-lsp.openLocation?"));
 	// The link's URI argument should encode the open document's URI.
@@ -640,10 +691,12 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	// `nowhere` is not declared anywhere; the ref should fall back to
 	// inline code rather than a broken link.
-	const src = "// See [[nowhere]] for details.\\nexport fn target() void = void;\\n";
+	const src =
+		"// See [[nowhere]] for details.\\nexport fn target() void = void;\\n";
 	nav_open(&s, "file:///u.ha", src);
 
-	const params = `{"textDocument":{"uri":"file:///u.ha"},"position":{"line":1,"character":12}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///u.ha"},"position":{"line":1,"character":12}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -656,8 +709,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 481.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "`nowhere`"));
 	assert(!strings::contains(value, "command:"));
@@ -670,11 +725,13 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// Mirrors `const c1 = match (...) { case let i: size => yield i;
 	// case => return void; };`. Only the size case yields a value; the
 	// default diverges, so the inferred type is just `size`.
-	const src = "fn caller() void = { const c1 = match (2z: (size | void)) { case let i: size => yield i; case => return; }; };\\n";
+	const src =
+		"fn caller() void = { const c1 = match (2z: (size | void)) { case let i: size => yield i; case => return; }; };\\n";
 	nav_open(&s, "file:///mb.ha", src);
 
 	// Position on `c1` (line 0, column 27 -> just after "const ").
-	const params = `{"textDocument":{"uri":"file:///mb.ha"},"position":{"line":0,"character":28}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///mb.ha"},"position":{"line":0,"character":28}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -687,8 +744,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 490.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "const c1"));
 	assert(strings::contains(value, ": size"));
@@ -704,10 +763,12 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
 	// Two cases each yield a different type. Result should be the union.
-	const src = "fn caller() void = { const c2 = match (2z: (size | void)) { case let i: size => yield i; case => yield 0; }; };\\n";
+	const src =
+		"fn caller() void = { const c2 = match (2z: (size | void)) { case let i: size => yield i; case => yield 0; }; };\\n";
 	nav_open(&s, "file:///mu.ha", src);
 
-	const params = `{"textDocument":{"uri":"file:///mu.ha"},"position":{"line":0,"character":28}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///mu.ha"},"position":{"line":0,"character":28}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -720,8 +781,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 491.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "const c2"));
 	assert(strings::contains(value, "size"));
@@ -739,7 +802,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// name in a `use` statement should show its contents.
 	nav_open(&s, "file:///mb1.ha", "use bufio;\\nfn f() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///mb1.ha"},"position":{"line":0,"character":6}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///mb1.ha"},"position":{"line":0,"character":6}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -752,8 +816,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 500.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "module bufio"));
 	// The README starts with "bufio: buffered I/O primitives" — assert
@@ -767,11 +833,11 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	// `use unix::poll;` — hovering on the `::` should resolve to
 	// `unix` (the first segment), not `unix::poll`.
-	nav_open(&s, "file:///mb2.ha",
-		"use unix::poll;\\nfn f() void = void;\\n");
+	nav_open(&s, "file:///mb2.ha", "use unix::poll;\\nfn f() void = void;\\n");
 
 	// "use unix::poll;" — `::` is at columns 8-9.
-	const params = `{"textDocument":{"uri":"file:///mb2.ha"},"position":{"line":0,"character":8}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///mb2.ha"},"position":{"line":0,"character":8}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -784,8 +850,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 501.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	// Header should be `module unix`, NOT `module unix::poll`.
 	assert(strings::contains(value, "module unix\n"));
@@ -798,11 +866,11 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	// `use unix::poll;` — hovering on `poll` should resolve to
 	// `unix::poll`, not just `unix`.
-	nav_open(&s, "file:///mb4.ha",
-		"use unix::poll;\\nfn f() void = void;\\n");
+	nav_open(&s, "file:///mb4.ha", "use unix::poll;\\nfn f() void = void;\\n");
 
 	// "use unix::poll;" — `poll` starts at column 10.
-	const params = `{"textDocument":{"uri":"file:///mb4.ha"},"position":{"line":0,"character":11}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///mb4.ha"},"position":{"line":0,"character":11}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -815,8 +883,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 503.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "module unix::poll"));
 };
@@ -833,7 +903,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// Position on the second `bufio` (in the body, line 1).
 	// Source: "fn f() void = { bufio::newscanner(0); };"
 	//                          ^ char ~16
-	const params = `{"textDocument":{"uri":"file:///mb3.ha"},"position":{"line":1,"character":18}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///mb3.ha"},"position":{"line":1,"character":18}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -846,15 +917,16 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = skip_to_response(out, 502.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
-	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "module bufio"));
 	assert(strings::contains(value, "buffered I/O"));
 };
 
 // --- fixture helpers ---
-
 fn nav_write(path: str, text: str) (bool | fs::error) = {
 	const f = os::create(path, 0o644)?;
 	defer io::close(f)!;

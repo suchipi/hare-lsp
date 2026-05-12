@@ -44,7 +44,8 @@ use strings;
 };
 
 @test fn read_extra_headers_ignored() void = {
-	const input = "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\nContent-Length: 7\r\nX-Trace: deadbeef\r\n\r\n{\"a\":1}";
+	const input =
+		"Content-Type: application/vscode-jsonrpc; charset=utf-8\r\nContent-Length: 7\r\nX-Trace: deadbeef\r\n\r\n{\"a\":1}";
 	let src = memio::fixed(strings::toutf8(input));
 	let scan = bufio::newscanner(&src);
 	defer bufio::finish(&scan);
@@ -100,8 +101,7 @@ use strings;
 	match (read(&r)) {
 	case let n: content_too_large =>
 		assert(n: size == 99999999);
-	case =>
-		abort("expected content_too_large");
+	case => abort("expected content_too_large");
 	};
 };
 
@@ -144,12 +144,16 @@ use strings;
 	const body = read(&r) as []u8;
 	assert(bytes::equal(body, strings::toutf8("{}")));
 	// On success the captured block is the headers we just consumed.
-	assert(bytes::equal(last_header_bytes(&r),
-		strings::toutf8("Content-Length: 2\r\n\r\n")));
+	assert(
+		bytes::equal(last_header_bytes(&r),
+			strings::toutf8("Content-Length: 2\r\n\r\n"))
+	);
 
 	assert(read(&r) is bad_header);
-	assert(bytes::equal(last_header_bytes(&r),
-		strings::toutf8("Content-Type: foo\r\n\r\n")));
+	assert(
+		bytes::equal(last_header_bytes(&r),
+			strings::toutf8("Content-Type: foo\r\n\r\n"))
+	);
 };
 
 @test fn write_emits_framing() void = {

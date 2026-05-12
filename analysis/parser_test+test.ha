@@ -23,7 +23,8 @@ export fn main() void = void;
 };
 
 @test fn recovers_after_bad_decl_then_continues() void = {
-	const src = `export fn good1() void = void;
+	const src =
+		`export fn good1() void = void;
 
 export fn bad( = void;
 
@@ -38,7 +39,8 @@ export fn good2() void = void;
 };
 
 @test fn multiple_errors_reported() void = {
-	const src = `export fn a( = void;
+	const src =
+		`export fn a( = void;
 export fn b( = void;
 export fn c() void = void;
 `;
@@ -100,7 +102,8 @@ export fn ok() void = void;
 };
 
 @test fn many_decls_with_one_error_in_middle() void = {
-	const src = `export fn a() void = void;
+	const src =
+		`export fn a() void = void;
 export fn b() void = void;
 export fn ?bad?() void = void;
 export fn d() void = void;

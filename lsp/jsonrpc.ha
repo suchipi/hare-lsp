@@ -13,21 +13,30 @@ use strings;
 // Standard JSON-RPC 2.0 / LSP error codes. Negative values are reserved by the
 // JSON-RPC and LSP specs.
 export type error_code = int;
+
 export def PARSE_ERROR: error_code = -32700;
+
 export def INVALID_REQUEST: error_code = -32600;
+
 export def METHOD_NOT_FOUND: error_code = -32601;
+
 export def INVALID_PARAMS: error_code = -32602;
+
 export def INTERNAL_ERROR: error_code = -32603;
 
 // LSP-specific error codes (JSON-RPC reserves the -32000..-32099 range for
 // implementation-defined server errors; LSP uses several of them).
 export def SERVER_NOT_INITIALIZED: error_code = -32002;
+
 export def UNKNOWN_ERROR_CODE: error_code = -32001;
 
 // Reasons reported via responseError.code per LSP 3.17.
 export def REQUEST_FAILED: error_code = -32803;
+
 export def SERVER_CANCELLED: error_code = -32802;
+
 export def CONTENT_MODIFIED: error_code = -32801;
+
 export def REQUEST_CANCELLED: error_code = -32800;
 
 // A request id is either a number or a string per JSON-RPC. We retain the
@@ -265,7 +274,11 @@ fn free_id(i: id) void = {
 
 // Encodes and frames a successful response. Returns total bytes written
 // (headers + blank line + body).
-export fn encode_response_result(out: io::handle, id: id, result: json::value) (size | io::error) = {
+export fn encode_response_result(
+	out: io::handle,
+	id: id,
+	result: json::value,
+) (size | io::error) = {
 	let buf = memio::dynamic();
 	defer safe_close(&buf);
 	fmt::fprint(&buf, `{"jsonrpc":"2.0","id":`)?;
@@ -277,7 +290,11 @@ export fn encode_response_result(out: io::handle, id: id, result: json::value) (
 };
 
 // Encodes and frames an error response.
-export fn encode_response_error(out: io::handle, msg_id: (id | void), err: response_error) (size | io::error) = {
+export fn encode_response_error(
+	out: io::handle,
+	msg_id: (id | void),
+	err: response_error,
+) (size | io::error) = {
 	let buf = memio::dynamic();
 	defer safe_close(&buf);
 	fmt::fprint(&buf, `{"jsonrpc":"2.0","id":`)?;
@@ -300,7 +317,11 @@ export fn encode_response_error(out: io::handle, msg_id: (id | void), err: respo
 };
 
 // Encodes and frames a notification.
-export fn encode_notification(out: io::handle, method: str, params: (json::value | void)) (size | io::error) = {
+export fn encode_notification(
+	out: io::handle,
+	method: str,
+	params: (json::value | void),
+) (size | io::error) = {
 	let buf = memio::dynamic();
 	defer safe_close(&buf);
 	fmt::fprint(&buf, `{"jsonrpc":"2.0","method":`)?;
@@ -316,7 +337,12 @@ export fn encode_notification(out: io::handle, method: str, params: (json::value
 };
 
 // Encodes and frames a server-initiated request to the client.
-export fn encode_request(out: io::handle, id: id, method: str, params: (json::value | void)) (size | io::error) = {
+export fn encode_request(
+	out: io::handle,
+	id: id,
+	method: str,
+	params: (json::value | void),
+) (size | io::error) = {
 	let buf = memio::dynamic();
 	defer safe_close(&buf);
 	fmt::fprint(&buf, `{"jsonrpc":"2.0","id":`)?;
@@ -343,7 +369,6 @@ fn encode_id(out: io::handle, i: id) (size | io::error) = {
 };
 
 // --- helpers ---------------------------------------------------------
-
 fn obj_has(o: *json::object, key: str) bool = {
 	return json::get(o, key) is *json::value;
 };

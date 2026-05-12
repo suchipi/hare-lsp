@@ -91,8 +91,10 @@ export fn unregister(s: *server, ids: []str) (i64 | void) = {
 	for (let i = 0z; i < len(ids); i += 1) {
 		// Look up the matching registration so we know its method.
 		const method = match (find_registration(s, ids[i])) {
-		case let r: *registration => yield r.method;
-		case void => continue;
+		case let r: *registration =>
+			yield r.method;
+		case void =>
+			continue;
 		};
 		let entry = json::newobject();
 		json::set(&entry, "id", ids[i]: json::value)!;
@@ -152,7 +154,7 @@ fn fmt_u64(n: u64) str = {
 	};
 	for (n > 0; n /= 10) {
 		i -= 1;
-		buf[i] = ('0': u8) + (n % 10): u8;
+		buf[i] = '0': u8 + (n % 10): u8;
 	};
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };

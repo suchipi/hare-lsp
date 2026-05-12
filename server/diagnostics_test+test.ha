@@ -10,7 +10,9 @@ use memio;
 use strconv;
 use strings;
 
-fn diag_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn diag_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -18,7 +20,12 @@ fn diag_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) 
 	return (s, scan, in_buf, out);
 };
 
-fn diag_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn diag_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -53,22 +60,30 @@ fn next_msg(data: []u8) (json::value, size) = {
 	let (s, scan, in_buf, out) = diag_test_server();
 	defer diag_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;"}}`;
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(&s, n);
 
 	const data = memio::buffer(out);
 	const (v, _) = next_msg(data);
 	defer json::finish(v);
 	const o = v as json::object;
-	assert(*(json::get(&o, "method") as *json::value) as str == "textDocument/publishDiagnostics");
+	assert(
+		*(json::get(&o,
+			"method") as *json::value) as str == "textDocument/publishDiagnostics"
+	);
 	const params = *(json::get(&o, "params") as *json::value) as json::object;
-	const diags = *(json::get(&params, "diagnostics") as *json::value) as []json::value;
+	const diags =
+		*(json::get(&params, "diagnostics") as *json::value) as []json::value;
 	assert(len(diags) == 0);
 };
 
@@ -76,20 +91,26 @@ fn next_msg(data: []u8) (json::value, size) = {
 	let (s, scan, in_buf, out) = diag_test_server();
 	defer diag_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn bad( = void;\n"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn bad( = void;\n"}}`;
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(&s, n);
 
 	const data = memio::buffer(out);
 	const (v, _) = next_msg(data);
 	defer json::finish(v);
-	const params = *(json::get(&(v as json::object), "params") as *json::value) as json::object;
-	const diags = *(json::get(&params, "diagnostics") as *json::value) as []json::value;
+	const params =
+		*(json::get(&(v as json::object), "params") as *json::value) as json::object;
+	const diags =
+		*(json::get(&params, "diagnostics") as *json::value) as []json::value;
 	assert(len(diags) >= 1);
 	const d0 = diags[0] as json::object;
 	assert(*(json::get(&d0, "severity") as *json::value) as f64 == 1.0);
@@ -105,22 +126,30 @@ fn next_msg(data: []u8) (json::value, size) = {
 
 	// Open + change. The didOpen always publishes; the didChange is
 	// inside the debounce window so it should NOT.
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"fn a() void = void;\n"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"fn a() void = void;\n"}}`;
 	let pv1 = json::loadstr(open)!;
 	const n1 = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv1,
 	};
-	defer { free(n1.method); json::finish(pv1); };
+	defer {
+		free(n1.method);
+		json::finish(pv1);
+	};
 	handle_did_open(&s, n1);
 
-	const change = `{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"fn bad( = void;\n"}]}`;
+	const change =
+		`{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"fn bad( = void;\n"}]}`;
 	let pv2 = json::loadstr(change)!;
 	const n2 = lsp::notification {
 		method = strings::dup("textDocument/didChange")!,
 		params = pv2,
 	};
-	defer { free(n2.method); json::finish(pv2); };
+	defer {
+		free(n2.method);
+		json::finish(pv2);
+	};
 	handle_did_change(&s, n2);
 
 	// Count publishDiagnostics notifications: should be exactly 1
@@ -148,7 +177,8 @@ fn next_msg(data: []u8) (json::value, size) = {
 	assert(publishes == 1);
 	// And the document is marked as having pending diagnostics.
 	const doc = match (find_document(&s, "file:///x.ha")) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null => abort("doc missing");
 	};
 	assert(doc.diagnostics_pending);
@@ -161,23 +191,31 @@ fn next_msg(data: []u8) (json::value, size) = {
 	s.config.diagnostics_debounce_ms = 0;
 
 	// Open a clean file.
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;\n"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;\n"}}`;
 	let pv1 = json::loadstr(open)!;
 	const n1 = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv1,
 	};
-	defer { free(n1.method); json::finish(pv1); };
+	defer {
+		free(n1.method);
+		json::finish(pv1);
+	};
 	handle_did_open(&s, n1);
 
 	// Replace it with broken code.
-	const change = `{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"export fn bad( = void;\n"}]}`;
+	const change =
+		`{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"export fn bad( = void;\n"}]}`;
 	let pv2 = json::loadstr(change)!;
 	const n2 = lsp::notification {
 		method = strings::dup("textDocument/didChange")!,
 		params = pv2,
 	};
-	defer { free(n2.method); json::finish(pv2); };
+	defer {
+		free(n2.method);
+		json::finish(pv2);
+	};
 	handle_did_change(&s, n2);
 
 	// Walk through the messages: first didOpen's diagnostics (empty), then
@@ -185,13 +223,15 @@ fn next_msg(data: []u8) (json::value, size) = {
 	const data = memio::buffer(out);
 	const (v1, off1) = next_msg(data);
 	defer json::finish(v1);
-	const p1 = *(json::get(&(v1 as json::object), "params") as *json::value) as json::object;
+	const p1 =
+		*(json::get(&(v1 as json::object), "params") as *json::value) as json::object;
 	const d1 = *(json::get(&p1, "diagnostics") as *json::value) as []json::value;
 	assert(len(d1) == 0);
 
 	const (v2, _) = next_msg(data[off1..]);
 	defer json::finish(v2);
-	const p2 = *(json::get(&(v2 as json::object), "params") as *json::value) as json::object;
+	const p2 =
+		*(json::get(&(v2 as json::object), "params") as *json::value) as json::object;
 	const d2 = *(json::get(&p2, "diagnostics") as *json::value) as []json::value;
 	assert(len(d2) >= 1);
 };
@@ -202,20 +242,26 @@ fn next_msg(data: []u8) (json::value, size) = {
 
 	// One unused import, no parse errors. Should emit exactly one
 	// diagnostic: the unused-import hint.
-	const open = `{"textDocument":{"uri":"file:///ui.ha","languageId":"hare","version":1,"text":"use foo;\nfn x() void = void;\n"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///ui.ha","languageId":"hare","version":1,"text":"use foo;\nfn x() void = void;\n"}}`;
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(&s, n);
 
 	const data = memio::buffer(out);
 	const (v, _) = next_msg(data);
 	defer json::finish(v);
-	const params = *(json::get(&(v as json::object), "params") as *json::value) as json::object;
-	const diags = *(json::get(&params, "diagnostics") as *json::value) as []json::value;
+	const params =
+		*(json::get(&(v as json::object), "params") as *json::value) as json::object;
+	const diags =
+		*(json::get(&params, "diagnostics") as *json::value) as []json::value;
 	assert(len(diags) == 1);
 	const d0 = diags[0] as json::object;
 	const code = *(json::get(&d0, "code") as *json::value) as str;
@@ -228,7 +274,8 @@ fn next_msg(data: []u8) (json::value, size) = {
 	const data_obj = *(json::get(&d0, "data") as *json::value) as json::object;
 	const kind = *(json::get(&data_obj, "kind") as *json::value) as str;
 	assert(kind == "unused-import");
-	const import_idx = *(json::get(&data_obj, "import_idx") as *json::value) as f64;
+	const import_idx =
+		*(json::get(&data_obj, "import_idx") as *json::value) as f64;
 	assert(import_idx == 0.0);
 };
 
@@ -236,13 +283,17 @@ fn next_msg(data: []u8) (json::value, size) = {
 	let (s, scan, in_buf, out) = diag_test_server();
 	defer diag_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn bad( = void;\n"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn bad( = void;\n"}}`;
 	let pv1 = json::loadstr(open)!;
 	const n1 = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv1,
 	};
-	defer { free(n1.method); json::finish(pv1); };
+	defer {
+		free(n1.method);
+		json::finish(pv1);
+	};
 	handle_did_open(&s, n1);
 
 	const close = `{"textDocument":{"uri":"file:///x.ha"}}`;
@@ -251,7 +302,10 @@ fn next_msg(data: []u8) (json::value, size) = {
 		method = strings::dup("textDocument/didClose")!,
 		params = pv2,
 	};
-	defer { free(n2.method); json::finish(pv2); };
+	defer {
+		free(n2.method);
+		json::finish(pv2);
+	};
 	handle_did_close(&s, n2);
 
 	// Two messages emitted: open diagnostics, then close (empty diagnostics).
@@ -261,7 +315,8 @@ fn next_msg(data: []u8) (json::value, size) = {
 	// Skip past it.
 	const (v2, _) = next_msg(data[off1..]);
 	defer json::finish(v2);
-	const p2 = *(json::get(&(v2 as json::object), "params") as *json::value) as json::object;
+	const p2 =
+		*(json::get(&(v2 as json::object), "params") as *json::value) as json::object;
 	const d2 = *(json::get(&p2, "diagnostics") as *json::value) as []json::value;
 	assert(len(d2) == 0);
 };

@@ -16,7 +16,8 @@ use strings;
 // vscode-languageclient 9.x to our server, captured from a real session.
 // Process id and workspace path have been generalized but the capability
 // shape is verbatim.
-const VSCODE_INITIALIZE_PARAMS: str = `{
+const VSCODE_INITIALIZE_PARAMS: str =
+	`{
     "processId": 12345,
     "clientInfo": {
         "name": "Visual Studio Code",
@@ -223,7 +224,10 @@ const VSCODE_INITIALIZE_PARAMS: str = `{
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
@@ -233,21 +237,32 @@ const VSCODE_INITIALIZE_PARAMS: str = `{
 		method = strings::dup("initialize")!,
 		params = pv,
 	};
-	defer { free(r.method); json::finish(pv); };
+	defer {
+		free(r.method);
+		json::finish(pv);
+	};
 
 	handle_initialize(&s, r);
 
 	// The handler must have written a framed response to `out`.
 	const data = memio::buffer(&out);
 	const text = strings::fromutf8(data)!;
-	assert(strings::hasprefix(text, "Content-Length: "),
-		"expected framed response from handle_initialize");
-	assert(strings::contains(text, `"id":0`),
-		"response should echo the request id");
-	assert(strings::contains(text, `"capabilities"`),
-		"response should include capabilities");
-	assert(strings::contains(text, `"positionEncoding":"utf-16"`),
-		"VSCode requests utf-16 only, server must echo it back");
+	assert(
+		strings::hasprefix(text, "Content-Length: "),
+		"expected framed response from handle_initialize"
+	);
+	assert(
+		strings::contains(text, `"id":0`),
+		"response should echo the request id"
+	);
+	assert(
+		strings::contains(text, `"capabilities"`),
+		"response should include capabilities"
+	);
+	assert(
+		strings::contains(text, `"positionEncoding":"utf-16"`),
+		"VSCode requests utf-16 only, server must echo it back"
+	);
 	// State should advance to INITIALIZING after a successful initialize.
 	assert(s.state == server_state::INITIALIZING);
 	// Workspace folders should have been recorded from the params.
@@ -260,10 +275,9 @@ const VSCODE_INITIALIZE_PARAMS: str = `{
 // and verifies a response was emitted before the loop returned.
 @test fn vscode_initialize_via_transport() void = {
 	// Construct the full JSON-RPC message wrapping the captured params.
-	const msg = strings::concat(
-		`{"jsonrpc":"2.0","id":0,"method":"initialize","params":`,
-		VSCODE_INITIALIZE_PARAMS,
-		`}`)!;
+	const msg =
+		strings::concat(`{"jsonrpc":"2.0","id":0,"method":"initialize","params":`,
+			VSCODE_INITIALIZE_PARAMS, `}`)!;
 	defer free(msg);
 	const body = strings::toutf8(msg);
 
@@ -278,7 +292,10 @@ const VSCODE_INITIALIZE_PARAMS: str = `{
 	let in_buf = alloc(memio::fixed(wire))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 
 	let out = memio::dynamic();
 	defer io::close(&out)!;
@@ -294,11 +311,17 @@ const VSCODE_INITIALIZE_PARAMS: str = `{
 
 	const data = memio::buffer(&out);
 	const text = strings::fromutf8(data)!;
-	assert(strings::hasprefix(text, "Content-Length: "),
-		"transport path must emit a framed response");
-	assert(strings::contains(text, `"id":0`),
-		"transport response should echo the request id");
-	assert(strings::contains(text, `"capabilities"`),
-		"transport response should include capabilities");
+	assert(
+		strings::hasprefix(text, "Content-Length: "),
+		"transport path must emit a framed response"
+	);
+	assert(
+		strings::contains(text, `"id":0`),
+		"transport response should echo the request id"
+	);
+	assert(
+		strings::contains(text, `"capabilities"`),
+		"transport response should include capabilities"
+	);
 	assert(s.state == server_state::INITIALIZING);
 };

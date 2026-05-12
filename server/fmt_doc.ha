@@ -21,7 +21,6 @@ use strings;
 // Strings on `doc_text`, `doc_line.flat`, and `doc_comment.text` are
 // OWNED by the doc and freed via `finish`. Use `text()`, `line()`, and
 // `comment()` constructors to allocate-and-dup.
-
 // Literal text that always renders the same.
 export type doc_text = struct { content: str };
 
@@ -48,7 +47,16 @@ export type doc_concat = struct { items: []doc };
 // A line comment, e.g. "foo bar" rendered as "// foo bar". Always
 // forces enclosing groups into broken mode (because trailing tokens
 // after a comment must move to the next line).
-export type doc_comment = struct { text: str };
+//
+// `trailing = true` marks comments that share their source line with
+// the preceding code (e.g. `assert(...);  // note`). Trailing
+// comments emit ` // text` inline (one space + slashes) and do NOT
+// break to a fresh line first; non-trailing comments break to a fresh
+// line at the current indent before emitting.
+export type doc_comment = struct {
+	text: str,
+	trailing: bool,
+};
 
 // Renders to "" in flat mode, `text` in broken mode. Used for the
 // trailing-comma-when-wrapped pattern in arg / field / member lists.
@@ -56,12 +64,33 @@ export type doc_comment = struct { text: str };
 // contribute to fit decisions.
 export type doc_if_broken = struct { text: str };
 
-export type doc = (doc_text | doc_line | doc_hardline | doc_group |
-	doc_nest | doc_concat | doc_comment | doc_if_broken);
+// Fill: a flat sequence of items separated by softlines, where each
+// softline decides flat-or-broken INDEPENDENTLY based on whether the
+// next content fits on the current line. Used for argument lists and
+// other long horizontal sequences where greedy line-filling is
+// preferable to all-or-nothing wrapping.
+//
+// `items` must alternate `content, separator, content, separator,
+// ..., content` - separators are `doc_line`s whose `flat` text is the
+// in-line spacer (typically " "). The renderer treats every
+// even-indexed item as content and every odd-indexed item as a
+// separator.
+export type doc_fill = struct { items: []doc };
+
+export type doc = (
+	doc_text |
+	doc_line |
+	doc_hardline |
+	doc_group |
+	doc_nest |
+	doc_concat |
+	doc_comment |
+	doc_if_broken |
+	doc_fill
+);
 
 // Constructors. Each dup's any input strings so the caller doesn't
 // have to worry about ownership.
-
 export fn text(s: str) doc = doc_text { content = strings::dup(s)! };
 
 export fn line(flat: str) doc = doc_line { flat = strings::dup(flat)! };
@@ -70,16 +99,24 @@ export fn hardline() doc = doc_hardline { tag = 0 };
 
 export fn group(items: []doc) doc = doc_group { items = items };
 
-export fn nest(delta: i32, inner: doc) doc = doc_nest {
-	delta = delta,
-	inner = alloc(inner)!,
-};
+export fn nest(
+	delta: i32,
+	inner: doc,
+) doc = doc_nest { delta = delta, inner = alloc(inner)! };
 
 export fn concat(items: []doc) doc = doc_concat { items = items };
 
-export fn comment(text: str) doc = doc_comment { text = strings::dup(text)! };
+export fn comment(
+	text: str,
+) doc = doc_comment { text = strings::dup(text)!, trailing = false };
+
+export fn trailing_comment(
+	text: str,
+) doc = doc_comment { text = strings::dup(text)!, trailing = true };
 
 export fn if_broken(s: str) doc = doc_if_broken { text = strings::dup(s)! };
+
+export fn fill(items: []doc) doc = doc_fill { items = items };
 
 // Frees all memory owned by `d` (recursively).
 export fn doc_finish(d: *doc) void = {
@@ -106,21 +143,34 @@ export fn doc_finish(d: *doc) void = {
 		free(cm.text);
 	case let ib: doc_if_broken =>
 		free(ib.text);
+	case let f: doc_fill =>
+		for (let i = 0z; i < len(f.items); i += 1) {
+			doc_finish(&f.items[i]);
+		};
+		free(f.items);
 	};
 };
 
 // Render mode selected by an enclosing group.
-type render_mode = enum { FLAT, BROKEN };
+type render_mode = enum {
+	FLAT,
+	BROKEN,
+};
 
 // Returns true if `d` can be rendered flat at all — i.e. it contains
 // no doc_hardline or doc_comment, both of which always force a break.
 fn fits_flat(d: *doc) bool = {
 	match (*d) {
-	case doc_text => return true;
-	case doc_line => return true;
-	case doc_hardline => return false;
-	case doc_comment => return false;
-	case doc_if_broken => return true;
+	case doc_text =>
+		return true;
+	case doc_line =>
+		return true;
+	case doc_hardline =>
+		return false;
+	case doc_comment =>
+		return false;
+	case doc_if_broken =>
+		return true;
 	case let g: doc_group =>
 		for (let i = 0z; i < len(g.items); i += 1) {
 			if (!fits_flat(&g.items[i])) return false;
@@ -133,14 +183,20 @@ fn fits_flat(d: *doc) bool = {
 			if (!fits_flat(&c.items[i])) return false;
 		};
 		return true;
+	case let f: doc_fill =>
+		for (let i = 0z; i < len(f.items); i += 1) {
+			if (!fits_flat(&f.items[i])) return false;
+		};
+		return true;
 	};
 };
 
 // Flat width of `d` (assuming flat mode throughout). Used by groups
 // to decide whether to break. Returns SIZE_MAX if any subdoc forces a
 // break (hardline / comment).
-const WIDTH_INFINITY: size = ~0z; // size's max value
+const WIDTH_INFINITY: size = ~0z;
 
+// size's max value
 fn flat_width(d: *doc) size = {
 	match (*d) {
 	case let t: doc_text =>
@@ -159,6 +215,8 @@ fn flat_width(d: *doc) size = {
 		return flat_width(n.inner);
 	case let c: doc_concat =>
 		return sum_flat_width(c.items);
+	case let f: doc_fill =>
+		return sum_flat_width(f.items);
 	};
 };
 
@@ -187,8 +245,8 @@ export fn pretty(
 	let cur_col = 0z;
 	let written = 0z;
 	let pending_tabs: i32 = 0;
-	render(out, d, render_mode::BROKEN, max_col, indent, 0z,
-		&cur_col, &written, &pending_tabs)?;
+	render(out, d, render_mode::BROKEN, max_col, indent, 0z, &cur_col, &written,
+		&pending_tabs)?;
 	return written;
 };
 
@@ -221,44 +279,131 @@ fn render(
 	case doc_hardline =>
 		emit_break(out, indent, cur_col, written, pending_tabs)?;
 	case let g: doc_group =>
-		// Decide flat-or-broken based on remaining columns,
-		// counting both the group's own flat width AND the
-		// `tail_width` of text that will follow on the same line
-		// in flat mode.
-		const remaining = if (*cur_col >= max_col) 0z
-			else max_col - *cur_col;
+		const remaining = if (*cur_col >= max_col) 0z else max_col - *cur_col;
 		const w = sum_flat_width(g.items);
 		const total = if (w == WIDTH_INFINITY) WIDTH_INFINITY
 			else if (tail_width == WIDTH_INFINITY) WIDTH_INFINITY
 			else if (w > WIDTH_INFINITY - tail_width) WIDTH_INFINITY
 			else w + tail_width;
-		const child_mode = if (total <= remaining && fits_all(g.items))
-			render_mode::FLAT
-		else
-			render_mode::BROKEN;
-		render_items(out, g.items, child_mode, max_col, indent,
-			tail_width, cur_col, written, pending_tabs)?;
+		const child_mode = if (total <= remaining &&
+				fits_all(g.items)) render_mode::FLAT else render_mode::BROKEN;
+		render_items(out, g.items, child_mode, max_col, indent, tail_width, cur_col,
+			written, pending_tabs)?;
+	// Decide flat-or-broken based on remaining columns,
+	// counting both the group's own flat width AND the
+	// `tail_width` of text that will follow on the same line
+	// in flat mode.
+
 	case let n: doc_nest =>
-		render(out, n.inner, mode, max_col, indent + n.delta,
-			tail_width, cur_col, written, pending_tabs)?;
+		render(out, n.inner, mode, max_col, indent + n.delta, tail_width, cur_col,
+			written, pending_tabs)?;
 	case let c: doc_concat =>
-		render_items(out, c.items, mode, max_col, indent,
-			tail_width, cur_col, written, pending_tabs)?;
+		render_items(out, c.items, mode, max_col, indent, tail_width, cur_col,
+			written, pending_tabs)?;
 	case let cm: doc_comment =>
+		// Trailing comments stay glued to the preceding code with
+		// a single space separator (e.g. `assert(...);  // note`).
+		// Non-trailing (full-line) comments must always start on a
+		// fresh line - if we're mid-line, break first.
+		if (cm.trailing) {
+			emit_str(out, " ", cur_col, written, pending_tabs)?;
+		} else if (*cur_col > 0 && *pending_tabs == 0) {
+			emit_break(out, indent, cur_col, written, pending_tabs)?;
+		};
 		// `cm.text` is the raw text after `//` from the source and
 		// includes any leading whitespace the user wrote (typically
 		// one space). Emit `//` with no extra space so we don't
 		// double up.
 		emit_str(out, "//", cur_col, written, pending_tabs)?;
 		emit_str(out, cm.text, cur_col, written, pending_tabs)?;
-		emit_break(out, indent, cur_col, written, pending_tabs)?;
+		// Full-line comments emit their own trailing break so the
+		// next item starts at a clean indent. Trailing comments
+		// rely on the caller's next `hardline()` (or sibling
+		// statement break) to move off the line - emitting a break
+		// here would double up and produce a blank line.
+		if (!cm.trailing) {
+			emit_break(out, indent, cur_col, written, pending_tabs)?;
+		};
 	case let ib: doc_if_broken =>
 		switch (mode) {
 		case render_mode::FLAT => void;
 		case render_mode::BROKEN =>
 			emit_str(out, ib.text, cur_col, written, pending_tabs)?;
 		};
+	case let f: doc_fill =>
+		render_fill(out, f.items, max_col, indent, tail_width, cur_col, written,
+			pending_tabs)?;
 	};
+};
+
+// Renders a fill: walk content/separator pairs, deciding per-separator
+// whether the NEXT content fits on the current line in flat mode. If
+// it does, emit the separator flat and the content flat. If it doesn't,
+// emit a break (at indent) and the content broken. Each decision is
+// independent, which is what gives fill its greedy line-packing
+// behavior - in contrast to `doc_group` which makes one all-or-nothing
+// decision for the entire sequence.
+fn render_fill(
+	out: io::handle,
+	items: []doc,
+	max_col: size,
+	indent: i32,
+	outer_tail: size,
+	cur_col: *size,
+	written: *size,
+	pending_tabs: *i32,
+) (void | io::error) = {
+	if (len(items) == 0) return;
+	// If the very first content item won't fit on the current line
+	// even after committing the full tail of the call (e.g. a long
+	// string literal pushed past 80 cols by `prefix(...`), break to
+	// `indent` BEFORE emitting it so at least nothing past it shares
+	// the overflowing line. This matches prettier's behavior of
+	// pulling the first arg down to a fresh line when the call site
+	// is already wide.
+	const first_w = flat_width(&items[0]);
+	const remaining0 = if (*cur_col >= max_col) 0z else max_col - *cur_col;
+	const first_tail = if (len(items) == 1) outer_tail else 0z;
+	const first_need = saturating_add(first_w, first_tail);
+	if (first_need != WIDTH_INFINITY && first_need > remaining0 && *cur_col > 0) {
+		emit_break(out, indent, cur_col, written, pending_tabs)?;
+	};
+	render(out, &items[0], render_mode::FLAT, max_col, indent, 0z, cur_col,
+		written, pending_tabs)?;
+	let i = 1z;
+	for (i + 1 < len(items); i += 2) {
+		// items[i] is the separator (a doc_line); items[i+1] is
+		// the next content. Try to fit `flat(sep) + flat(content)`
+		// (plus the outer tail when this is the last content item)
+		// on the current line.
+		const sep_flat_w = flat_width(&items[i]);
+		const content_flat_w = flat_width(&items[i + 1]);
+		const tail = if (i + 2 >= len(items)) outer_tail else 0z;
+		const need = saturating_add(saturating_add(sep_flat_w, content_flat_w), tail);
+		const remaining = if (*cur_col >= max_col) 0z else max_col - *cur_col;
+		const can_fit =
+			need != WIDTH_INFINITY && need <= remaining && fits_flat(&items[i]) &&
+			fits_flat(&items[i + 1]);
+		if (can_fit) {
+			render(out, &items[i], render_mode::FLAT, max_col, indent, 0z, cur_col,
+				written, pending_tabs)?;
+			render(out, &items[i + 1], render_mode::FLAT, max_col, indent, 0z, cur_col,
+				written, pending_tabs)?;
+		} else {
+			// Break at the separator, then emit the next content
+			// (which itself may be a group that decides its own
+			// flat-or-broken layout).
+			emit_break(out, indent, cur_col, written, pending_tabs)?;
+			render(out, &items[i + 1], render_mode::BROKEN, max_col, indent, 0z, cur_col,
+				written, pending_tabs)?;
+		};
+	};
+};
+
+fn saturating_add(a: size, b: size) size = {
+	if (a == WIDTH_INFINITY || b == WIDTH_INFINITY) return WIDTH_INFINITY;
+	if (a > WIDTH_INFINITY - b) return WIDTH_INFINITY;
+	return a + b;
 };
 
 // Renders a sequence of doc items, threading the right `tail_width`
@@ -278,8 +423,8 @@ fn render_items(
 ) (void | io::error) = {
 	for (let i = 0z; i < len(items); i += 1) {
 		const my_tail = tail_after(items, i + 1, mode, outer_tail);
-		render(out, &items[i], mode, max_col, indent, my_tail,
-			cur_col, written, pending_tabs)?;
+		render(out, &items[i], mode, max_col, indent, my_tail, cur_col, written,
+			pending_tabs)?;
 	};
 };
 
@@ -351,6 +496,19 @@ fn line_lead_width(d: *doc, mode: render_mode) (size, bool) = {
 		return line_lead_width(n.inner, mode);
 	case let c: doc_concat =>
 		return line_lead_items(c.items, mode);
+	case let f: doc_fill =>
+		if (len(f.items) == 0) return (0z, false);
+		const (w, broke) = line_lead_width(&f.items[0], mode);
+		if (broke) return (w, true);
+		if (len(f.items) > 1) return (w, true);
+		return (w, false);
+	// Approximation: fills do not commit to a single mode -
+	// the renderer decides per-separator. For tail-width
+	// purposes treat the whole fill as if it MIGHT break, so
+	// the conservative answer is the prefix up to the first
+	// separator. Anything past the first separator might wrap
+	// onto a new line and contribute 0 to the current line.
+
 	};
 };
 

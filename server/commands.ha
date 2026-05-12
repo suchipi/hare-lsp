@@ -17,7 +17,8 @@ use unix::signal;
 
 export fn handle_execute_command(s: *server, r: lsp::request) void = {
 	const obj = match (params_obj_xc(r.params)) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case void =>
 		send_null_xc(s, r.id);
 		return;
@@ -25,7 +26,8 @@ export fn handle_execute_command(s: *server, r: lsp::request) void = {
 	const command = match (json::get(&obj, "command")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
+		case let s: str =>
+			yield s;
 		case =>
 			send_null_xc(s, r.id);
 			return;
@@ -37,10 +39,13 @@ export fn handle_execute_command(s: *server, r: lsp::request) void = {
 	const args = match (json::get(&obj, "arguments")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let a: []json::value => yield a;
-		case => yield ([]: []json::value);
+		case let a: []json::value =>
+			yield a;
+		case =>
+			yield []: []json::value;
 		};
-	case => yield ([]: []json::value);
+	case =>
+		yield []: []json::value;
 	};
 
 	switch (command) {
@@ -53,14 +58,14 @@ export fn handle_execute_command(s: *server, r: lsp::request) void = {
 	case "hare-lsp.applyAutoImport" =>
 		send_null_xc(s, r.id);
 	case =>
-		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
-			"unknown command");
+		send_error(s, r.id, lsp::METHOD_NOT_FOUND, "unknown command");
 	};
 };
 
 fn execute_run_test(s: *server, r: lsp::request, args: []json::value) void = {
 	const uri = match (first_arg_str(args)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_null_xc(s, r.id);
 		return;
@@ -90,7 +95,8 @@ fn execute_run_test(s: *server, r: lsp::request, args: []json::value) void = {
 
 fn execute_run_module(s: *server, r: lsp::request, args: []json::value) void = {
 	const uri = match (first_arg_str(args)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_null_xc(s, r.id);
 		return;
@@ -113,7 +119,8 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	};
 	// Grow a pipe for the child's stderr.
 	const pipe_pair = match (unix::pipe()) {
-	case let p: (io::file, io::file) => yield p;
+	case let p: (io::file, io::file) =>
+		yield p;
 	case =>
 		log_error(s, "failed to create pipe for hare command");
 		return;
@@ -121,7 +128,8 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	const (read_fd, write_fd) = pipe_pair;
 
 	let cmd = match (exec::cmd(s.config.hare_path, argv...)) {
-	case let c: exec::command => yield c;
+	case let c: exec::command =>
+		yield c;
 	case =>
 		lsp::safe_close(read_fd);
 		lsp::safe_close(write_fd);
@@ -136,7 +144,8 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	exec::addfile(&cmd, os::stdin_file, exec::nullfd)!;
 
 	const proc = match (exec::start(&cmd)) {
-	case let p: exec::process => yield p;
+	case let p: exec::process =>
+		yield p;
 	case =>
 		lsp::safe_close(read_fd);
 		lsp::safe_close(write_fd);
@@ -154,7 +163,7 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	const timeout_ms = s.config.build_timeout_ms;
 	const deadline_abs = if (timeout_ms > 0) {
 		yield time::add(time::now(time::clock::MONOTONIC),
-			(timeout_ms: i64) * time::MILLISECOND);
+			timeout_ms: i64 * time::MILLISECOND);
 	} else {
 		yield time::instant { sec = 0, nsec = 0 };
 	};
@@ -170,14 +179,18 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 			timed_out = true;
 			break;
 		};
-		let pfds: [1]poll::pollfd = [poll::pollfd {
-			fd = read_fd,
-			events = poll::event::POLLIN: i16,
-			revents = 0,
-		}];
+		let pfds: [1]poll::pollfd = [
+			poll::pollfd {
+				fd = read_fd,
+				events = poll::event::POLLIN: i16,
+				revents = 0,
+			},
+		];
 		const n = match (poll::poll(pfds[..], remaining)) {
-		case let n: uint => yield n;
-		case poll::error => break;
+		case let n: uint =>
+			yield n;
+		case poll::error =>
+			break;
 		};
 		if (n == 0) {
 			timed_out = true;
@@ -216,8 +229,10 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 fn first_arg_str(args: []json::value) (str | void) = {
 	if (len(args) == 0) return void;
 	match (args[0]) {
-	case let s: str => return s;
-	case => return void;
+	case let s: str =>
+		return s;
+	case =>
+		return void;
 	};
 };
 
@@ -233,8 +248,9 @@ fn dirname_xc(path: str) str = {
 	};
 };
 
-fn params_obj_xc(p: (json::value | void)) (json::object | void) =
-	lsp::params_object(p);
+fn params_obj_xc(
+	p: (json::value | void),
+) (json::object | void) = lsp::params_object(p);
 
 fn send_null_xc(s: *server, id: lsp::id) void = {
 	const v: json::value = json::_null;
