@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://harelang.org/hare-lsp/schemas/hare-settings.schema.json",
+  "title": "hare-lsp settings",
+  "description": "Canonical schema for the `hare.*` configuration namespace consumed by the hare-lsp language server via `workspace/configuration`. Editor integrations should keep their own settings UI in sync with this document.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "default": "hare",
+      "description": "Path to the `hare` binary used by the language server for type-check diagnostics and tooling subprocesses."
+    },
+    "harepath": {
+      "type": "string",
+      "default": "",
+      "description": "Colon-separated module search path (overrides $HAREPATH for the server). Empty falls back to $HAREPATH from the server's environment, then the platform default."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Build tags passed to `hare build` and module resolution, e.g. [\"+linux\", \"+x86_64\"]."
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Diagnostic-publishing behavior.",
+      "properties": {
+        "debounceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 300,
+          "description": "Minimum milliseconds between the last `didChange` and the next parse-diagnostics refresh."
+        },
+        "enableBuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run `hare build` on save to surface type-check diagnostics in addition to the in-process parse pass."
+        },
+        "buildTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 60000,
+          "description": "Maximum wall-clock milliseconds to wait for `hare build`/`hare test`/`hare run` before SIGTERM. Set to 0 to disable the timeout."
+        }
+      }
+    },
+    "format": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Formatter output options. Applied by textDocument/formatting and friends.",
+      "properties": {
+        "indentStyle": {
+          "type": "string",
+          "enum": ["tab", "space"],
+          "default": "tab",
+          "description": "Tab vs space indent."
+        },
+        "indentWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 8,
+          "description": "Spaces per indent level when `indentStyle` is `space`. Ignored when `indentStyle` is `tab`."
+        },
+        "trimFinalNewlines": {
+          "type": "boolean",
+          "default": true,
+          "description": "Trim trailing whitespace at end of file."
+        },
+        "insertFinalNewline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ensure the file ends with a single newline."
+        }
+      }
+    },
+    "inlayHints": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Inlay-hint visibility toggles. The server still computes hints when these are false; the client typically hides them. Both default on.",
+      "properties": {
+        "parameterNames": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show parameter-name hints at call sites."
+        },
+        "inferredTypes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inferred-type hints on `let` / `const` bindings."
+        }
+      }
+    }
+  }
+}

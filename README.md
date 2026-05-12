@@ -107,6 +107,7 @@ Settings are read from the `hare` namespace. Defaults are in parentheses.
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `path` | string | `"hare"` | Path to the `hare` binary. |
+| `harepath` | string | `""` | Colon-separated module search path (overrides `$HAREPATH`). Empty falls back to environment. |
 | `tags` | string[] | `[]` | Build tags (`-T <tag>`). |
 | `diagnostics.debounceMs` | number | `300` | Minimum ms between the last `didChange` and the next parse-diagnostics refresh. |
 | `diagnostics.enableBuild` | boolean | `true` | Whether to run `hare build` on save. |
@@ -117,6 +118,15 @@ Settings are read from the `hare` namespace. Defaults are in parentheses.
 | `format.insertFinalNewline` | boolean | `true` | Ensure a trailing newline. |
 | `inlayHints.parameterNames` | boolean | `true` | Show parameter-name hints at call sites. |
 | `inlayHints.inferredTypes` | boolean | `true` | Show inferred-type hints on `let`/`const`. |
+
+The canonical JSON Schema for these settings is checked in at [editors/vscode/schemas/hare-settings.schema.json](editors/vscode/schemas/hare-settings.schema.json). Editor integrations and external tooling should treat that document as the source of truth.
+
+### Server environment
+
+| Variable | Description |
+| --- | --- |
+| `HARE_LSP_LOG_DIR` | Absolute directory to tee the wire-protocol stream into `hare-lsp-{in,out,err}.log`. Useful for diagnosing handshake or framing issues. |
+| `HARE_LSP_LOG_LEVEL` | Minimum stderr-log severity. One of `debug`, `info`, `warn`, `error`. Defaults to `info`. |
 
 ## License
 
