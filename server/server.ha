@@ -137,24 +137,28 @@ export type server_state = enum {
 export def EXIT_OK: int = 0;
 export def EXIT_ERROR: int = 1;
 
+// Constructs a new server bound to the given input scanner and output handle.
+// The scanner must outlive the server. Caller is responsible for finishing it.
+export fn new(reader_src: *bufio::scanner, out: io::handle) server = {
+	return new_with_reader(lsp::new_reader(reader_src), out);
+};
+
 // Like [[new]] but lets the caller override the LSP transport's max
 // body size. Used by `cmd/hare-lsp/main.ha` when `HARE_LSP_MAX_BODY_BYTES`
-// is set so very large workspace edits can be accepted.
+// is set so very large workspace edits can be accepted. Constructs the
+// reader directly with the custom limit rather than allocating a
+// default reader and immediately replacing it.
 export fn new_with_max_body(
 	reader_src: *bufio::scanner, out: io::handle, max_body: size,
 ) server = {
-	let s = new(reader_src, out);
-	lsp::finish_reader(&s.reader);
-	s.reader = lsp::new_reader_with_limit(reader_src, max_body);
-	return s;
+	return new_with_reader(
+		lsp::new_reader_with_limit(reader_src, max_body), out);
 };
 
-// Constructs a new server bound to the given input scanner and output handle.
-// The scanner must outlive the server. Caller is responsible for finishing it.
-export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
+fn new_with_reader(reader: lsp::reader, out: io::handle) server = server {
 	state = server_state::PRE_INIT,
 	trace = lsp::trace_value::OFF,
-	reader = lsp::new_reader(reader_src),
+	reader = reader,
 	out = out,
 	client_pid = void,
 	next_request_id = 0,

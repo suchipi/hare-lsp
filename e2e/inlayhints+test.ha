@@ -57,6 +57,7 @@ use strings;
 	const cwd = os::getcwd();
 	const root = strings::concat(cwd,
 		"/.tmp/e2e-inlay-alias-chain")!;
+	defer free(root);
 	cleanup_crossmod_workspace(root);
 	defer cleanup_crossmod_workspace(root);
 	const mod_dir = strings::concat(root, "/m")!;
@@ -71,14 +72,10 @@ use strings;
 	defer free(file_path);
 	write_test_file(file_path,
 		"type my_alias = int;\nexport fn foo() my_alias = 0;\n");
-	free(root);
-	const root2 = strings::concat(cwd,
-		"/.tmp/e2e-inlay-alias-chain")!;
-	defer free(root2);
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root2);
+	init_with_workspace_folder(&s, root);
 	drain_until_indexed_ref(&s);
 
 	// Open a caller file inside the same workspace. We use a

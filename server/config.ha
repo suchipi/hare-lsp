@@ -461,15 +461,18 @@ export fn apply_settings(s: *server, v: json::value) void = {
 	};
 };
 
-// Reads a non-negative integer from `lobj[key]` into `*out`. Ignores
-// missing keys, negative values, and non-numeric values so partial
-// settings don't clobber existing values.
+// Reads a positive integer from `lobj[key]` into `*out`. Ignores
+// missing keys, non-numeric values, and any value < 1: zero would
+// disable core functionality (e.g. no documents can be opened), which
+// a misbehaving client shouldn't be able to do via a raw
+// didChangeConfiguration payload. Partial settings don't clobber the
+// existing value.
 fn apply_limit_u64(lobj: *json::object, key: str, out: *size) void = {
 	match (json::get(lobj, key)) {
 	case let p: *json::value =>
 		match (*p) {
 		case let f: f64 =>
-			if (f >= 0.0) *out = f: size;
+			if (f >= 1.0) *out = f: size;
 		case => void;
 		};
 	case => void;

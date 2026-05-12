@@ -12,9 +12,6 @@ use io;
 use os;
 use os::exec;
 use strings;
-use time;
-use unix::poll;
-use unix::signal;
 
 // A `HARE_LSP_MAX_BODY_BYTES` of 1024 must reject a request body
 // larger than that. The transport responds with a JSON-RPC error
@@ -164,13 +161,4 @@ fn extract_request_id(text: str) str = {
 		if (b < '0': u8 || b > '9': u8) break;
 	};
 	return strings::dup(strings::sub(tail, 0, end))!;
-};
-
-// Avoid unused-import warnings for symbols only used by the harness
-// helpers above; we re-list them here so this file's `use` block is
-// honest about what it depends on.
-fn _unused_keep_imports() void = {
-	const _ = poll::event::POLLIN;
-	const _ = signal::sig::TERM;
-	const _ = time::SECOND;
 };
