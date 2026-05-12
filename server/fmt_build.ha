@@ -465,8 +465,8 @@ fn build_compound_body(
 		const next_stmt_off = if (i + 1 < len(cmp.exprs))
 			cmp.exprs[i + 1].loc.start.off: size
 			else body_end;
-		flush_trailing_comments_to_eol(&inner,
-			bc.c, next_stmt_off, stmt_end, bc.data);
+		flush_trailing_comments_to_eol(&inner, bc.c, next_stmt_off, stmt_end,
+			bc.data);
 		if (i + 1 < len(cmp.exprs)) {
 			const next_off = cmp.exprs[i + 1].loc.start.off: size;
 			if (blank_between(bc.bl, stmt_end, next_off)) {
@@ -494,6 +494,15 @@ fn push_comments_before(
 	if (len(cs) == 0) return;
 	for (let i = 0z; i < len(cs); i += 1) {
 		let cur = *items;
+		// Preserve user-authored blank lines between consecutive
+		// comment groups. If two adjacent popped comments are
+		// more than one source line apart, emit an extra
+		// `hardline()` between them so the rendered output
+		// keeps the blank line. Without this, two paragraph-
+		// style comment blocks would silently merge into one.
+		if (i > 0 && cs[i].line > cs[i - 1].line + 1) {
+			append(cur, hardline())!;
+		};
 		// Always emit as full-line here. Trailing comments (the
 		// is_trailing flag) only stay inline when picked up by
 		// `flush_trailing_comments_to_eol` immediately after the
@@ -871,7 +880,7 @@ export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	case let br: ast::break_expr =>
 		return build_break_yield("break", &br, bc);
 	case let c: ast::call_expr =>
-		return build_call_expr(&c, e.loc, bc);
+		return build_call_expr(&c, bc);
 	case let c: ast::cast_expr =>
 		return build_cast_expr(&c, bc);
 	case let l: ast::literal_expr =>
@@ -1359,11 +1368,7 @@ fn build_break_yield(
 	return concat(items);
 };
 
-fn build_call_expr(
-	c: *ast::call_expr,
-	loc: ast::location,
-	bc: *build_ctx,
-) doc = {
+fn build_call_expr(c: *ast::call_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	const np = !is_postfix(c.lvalue);
 	if (np) append(items, text("("))!;
@@ -1375,19 +1380,11 @@ fn build_call_expr(
 		return concat(items);
 	};
 
-	// Source-multiline preservation: if the user's source had a
-	// `\n` anywhere inside the call's `( ... )`, treat that as an
-	// explicit signal to keep the call wrapped, even when the args
-	// would fit on a single line. Mirrors prettier's "magic
-	// newline" heuristic from struct/array literals; without this
-	// the formatter would silently collapse intentionally-wrapped
-	// calls (e.g. `add_symbol(idx, t.ident, ...,\n\t\td.exported,
-	// []);`) onto one line just because the total width fits.
-	const force_break = source_call_is_multiline(bc, loc);
-
 	// Pack arguments into fill mode so when the call doesn't fit
-	// on a single line, args wrap greedily (as many per line as fit
-	// at indent + 1) instead of being forced one-per-line.
+	// on a single line, args wrap greedily - as many per line as
+	// fit at indent + 1 - rather than being forced one-per-line or
+	// breaking at a fixed point. Matches the style guide's first
+	// code block (`fn(arg1, arg2, arg3,\n\targ4, arg5)`).
 	//
 	// Variadic spreads (`fn(a, b, args...)`) glue the trailing
 	// `...` directly onto the last argument with no space and no
@@ -1405,18 +1402,7 @@ fn build_call_expr(
 		};
 		append(fill_items, concat(arg_pieces))!;
 		if (!is_last) {
-			// Source-multiline calls get a single hardline as
-			// their FIRST separator so the call wraps at least
-			// once, even when the args would otherwise fit
-			// flat. Subsequent separators stay as soft lines so
-			// fill mode greedily packs the remaining args at
-			// indent + 1 - matching the style guide's example
-			// (`fn(arg1,\n\targ2, arg3, arg4);`).
-			if (force_break && i == 0) {
-				append(fill_items, hardline())!;
-			} else {
-				append(fill_items, line(" "))!;
-			};
+			append(fill_items, line(" "))!;
 		};
 	};
 
@@ -1435,49 +1421,6 @@ fn build_call_expr(
 	append(items, nest(1, fill(fill_items)))!;
 	append(items, group(close_group))!;
 	return concat(items);
-};
-
-// Returns true iff the source bytes covered by `loc` contain a `\n`
-// strictly inside the matching pair of parens. Skips string / rune /
-// raw-string content so a `\n` inside `"foo\nbar"` doesn't count.
-fn source_call_is_multiline(bc: *build_ctx, loc: ast::location) bool = {
-	const data = bc.data;
-	const start = loc.start.off: size;
-	const end = loc.end.off: size + 1;
-	if (start >= len(data) || end > len(data)) return false;
-	// Find the first `(` after the lvalue.
-	let i = start;
-	for (i < end && data[i] != '(': u8; i += 1) void;
-	if (i >= end) return false;
-	i += 1;
-	let depth = 1;
-	for (i < end && depth > 0; i += 1) {
-		const b = data[i];
-		switch (b) {
-		case '(': u8 =>
-			depth += 1;
-		case ')': u8 =>
-			depth -= 1;
-			if (depth == 0) return false;
-		case '\n': u8 =>
-			if (depth >= 1) return true;
-		case '"': u8 =>
-			i += 1;
-			for (i < end && data[i] != '"': u8; i += 1) {
-				if (data[i] == '\\': u8 && i + 1 < end) i += 1;
-			};
-		case '\'': u8 =>
-			i += 1;
-			for (i < end && data[i] != '\'': u8; i += 1) {
-				if (data[i] == '\\': u8 && i + 1 < end) i += 1;
-			};
-		case '`': u8 =>
-			i += 1;
-			for (i < end && data[i] != '`': u8; i += 1) void;
-		case => void;
-		};
-	};
-	return false;
 };
 
 fn build_cast_expr(c: *ast::cast_expr, bc: *build_ctx) doc = {
@@ -1572,7 +1515,15 @@ fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
 	append_if_chain_branches(&body_inner, i, bc, false);
 	let items: []doc = [];
 	append(items, text("if ("))!;
-	append(items, build_expr_doc(i.cond, bc))!;
+	// Per the Hare style guide: "If the following line would be
+	// indented due to the introduction of a new block, the
+	// continuation line MUST be indented twice to visually
+	// distinguish it from the block." The if's body is at indent +
+	// 1, so any wrapped continuation of the cond goes at indent +
+	// 2. `nest(2, ...)` only affects line breaks inside the cond
+	// (e.g. a long `&&` chain that wraps); a single-line cond
+	// emits flat at the surrounding indent and the nest is a no-op.
+	append(items, nest(2, build_expr_doc(i.cond, bc)))!;
 	append(items, text(")"))!;
 	append(items, group(body_inner))!;
 	return concat(items);
@@ -1640,8 +1591,7 @@ fn append_if_chain_branches(
 			append(cur, build_expr_doc(nested.cond, bc))!;
 			append(cur, text(")"))!;
 			*out = cur;
-			append_if_chain_branches(out,
-				&nested, bc, tbranch_compound);
+			append_if_chain_branches(out, &nested, bc, tbranch_compound);
 		case =>
 			const else_compound = e.expr is ast::compound_expr;
 			let cur = *out;
@@ -1831,8 +1781,8 @@ fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
 		append(inner, text(";"))!;
 		const next_off = if (i + 1 < len(exprs)) exprs[i + 1].loc.start.off: size
 			else ~0z;
-		flush_trailing_comments_to_eol(&inner,
-			bc.c, next_off, exprs[i].loc.end.off: size, bc.data);
+		flush_trailing_comments_to_eol(&inner, bc.c, next_off,
+			exprs[i].loc.end.off: size, bc.data);
 	};
 	return nest(1, concat(inner));
 };
