@@ -4,7 +4,6 @@
 // e2e: textDocument/inlayHint and inlayHint/resolve.
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_inlay_hint_returns_inferred_type_hints() void = {

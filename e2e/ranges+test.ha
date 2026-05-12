@@ -4,7 +4,6 @@
 // e2e: foldingRange and selectionRange.
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_folding_range_returns_function_body_region() void = {

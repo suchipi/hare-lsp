@@ -4,7 +4,6 @@
 // e2e: textDocument/completion and completionItem/resolve.
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_completion_includes_local_decls() void = {
