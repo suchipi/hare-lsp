@@ -3,7 +3,8 @@
 //
 // Thin VSCode language-client wrapper around the hare-lsp binary.
 
-import { execFile, spawn } from "node:child_process";
+import { ChildProcess, execFile, spawn } from "node:child_process";
+import * as path from "node:path";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 import {
@@ -204,6 +205,45 @@ export function activate(context: vscode.ExtensionContext): void {
           return c;
         };
         return new vscode.Hover(hover.contents.map(trust), hover.range);
+      },
+      // Intercept the two CodeLens-invoked commands and run them in a
+      // dedicated terminal client-side. vscode-languageclient's
+      // ExecuteCommandFeature auto-registers a VSCode command for every
+      // entry in the server's executeCommandProvider.commands list and
+      // wires it to workspace/executeCommand; registering them manually
+      // collides with that auto-registration and crashes initialize. The
+      // middleware path runs for both the auto-registered command (the
+      // lens click) and any other code that calls
+      // `client.sendRequest("workspace/executeCommand", ...)`, so we get
+      // a single interception point. Other commands fall through to the
+      // server's executeCommand handler.
+      executeCommand: async (command, args, next) => {
+        if (command === "hare-lsp.runTest") {
+          const uri = typeof args[0] === "string" ? args[0] : undefined;
+          if (!uri) return null;
+          const testName = typeof args[1] === "string" ? args[1] : undefined;
+          const modulePath = resolveModulePath(uri);
+          const hareArgs = ["test", modulePath.relative];
+          if (testName && testName.length > 0) hareArgs.push(testName);
+          const label = testName && testName.length > 0
+            ? `hare test: ${testName}`
+            : `hare test: ${modulePath.relative}`;
+          runHareInTerminal(hareArgs, modulePath.cwd, label, traceOutputChannel);
+          return null;
+        }
+        if (command === "hare-lsp.runModule") {
+          const uri = typeof args[0] === "string" ? args[0] : undefined;
+          if (!uri) return null;
+          const modulePath = resolveModulePath(uri);
+          runHareInTerminal(
+            ["run", modulePath.relative],
+            modulePath.cwd,
+            `hare run: ${modulePath.relative}`,
+            traceOutputChannel,
+          );
+          return null;
+        }
+        return next(command, args);
       },
     },
     outputChannel: traceOutputChannel,
@@ -449,4 +489,161 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): Thenable<void> | undefined {
   return client?.stop();
+}
+
+// Resolves a file URI (from a CodeLens command argument) to a working
+// directory and module path suitable for `hare test` / `hare run`. The
+// CWD is the enclosing workspace folder when one is known so that
+// `hare`'s build cache lands at the workspace root rather than next to
+// the file being tested; the module path is the file's directory
+// expressed relative to that CWD.
+function resolveModulePath(uri: string): { cwd: string; relative: string } {
+  const fileUri = vscode.Uri.parse(uri);
+  const fileDir = path.dirname(fileUri.fsPath);
+  const folder = vscode.workspace.getWorkspaceFolder(fileUri);
+  const cwd = folder?.uri.fsPath ?? fileDir;
+  const rel = path.relative(cwd, fileDir);
+  return { cwd, relative: rel.length > 0 ? rel : "." };
+}
+
+// Backing session for the singleton "Hare" terminal. Created lazily on
+// the first run; replaced when the user closes the terminal. Subsequent
+// runs reuse the same session so output accumulates in one place rather
+// than spawning a fresh terminal per click.
+class HareTerminalSession {
+  private writeEmitter = new vscode.EventEmitter<string>();
+  private closeEmitter = new vscode.EventEmitter<number | void>();
+  private terminal: vscode.Terminal;
+  private currentChild: ChildProcess | undefined;
+  private opened = false;
+  // Run requests that arrive before `open` fires (e.g. the very first
+  // click) are buffered and replayed once the pty is ready.
+  private pending: Array<() => void> = [];
+  private closed = false;
+
+  constructor() {
+    const pty: vscode.Pseudoterminal = {
+      onDidWrite: this.writeEmitter.event,
+      onDidClose: this.closeEmitter.event,
+      open: () => {
+        this.opened = true;
+        const queued = this.pending;
+        this.pending = [];
+        for (const fn of queued) fn();
+      },
+      close: () => {
+        this.closed = true;
+        this.currentChild?.kill("SIGTERM");
+        if (activeHareSession === this) activeHareSession = undefined;
+        this.closeEmitter.fire(0);
+      },
+    };
+    this.terminal = vscode.window.createTerminal({ name: "Hare", pty });
+  }
+
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
+  run(
+    harePath: string,
+    argv: string[],
+    cwd: string,
+    env: Record<string, string>,
+  ): void {
+    this.terminal.show(true);
+    const start = () => this.spawnChild(harePath, argv, cwd, env);
+    if (this.opened) start();
+    else this.pending.push(start);
+  }
+
+  private spawnChild(
+    harePath: string,
+    argv: string[],
+    cwd: string,
+    env: Record<string, string>,
+  ): void {
+    // If a previous run is still in flight, kill it before starting a
+    // new one. Its exit handler will still fire later; the guard in the
+    // handler keeps it from clobbering `currentChild`.
+    if (
+      this.currentChild
+      && this.currentChild.exitCode === null
+      && this.currentChild.signalCode === null
+    ) {
+      this.writeEmitter.fire(`\r\n[interrupting previous run]\r\n`);
+      this.currentChild.kill("SIGTERM");
+    }
+    this.writeEmitter.fire(`\r\n$ ${harePath} ${argv.join(" ")}\r\n`);
+    this.writeEmitter.fire(`  (cwd: ${cwd})\r\n\r\n`);
+
+    let child: ChildProcess;
+    try {
+      child = spawn(harePath, argv, {
+        cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.writeEmitter.fire(`[spawn error: ${message}]\r\n`);
+      return;
+    }
+    this.currentChild = child;
+    const onData = (chunk: Buffer | string) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      // Terminals require CRLF; the child emits bare LF.
+      this.writeEmitter.fire(text.replace(/\r?\n/g, "\r\n"));
+    };
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
+    child.on("error", (err) => {
+      this.writeEmitter.fire(`\r\n[spawn error: ${err.message}]\r\n`);
+    });
+    child.on("exit", (code, signal) => {
+      if (this.currentChild === child) this.currentChild = undefined;
+      const tail = signal
+        ? `\r\n[exited via signal ${signal}]\r\n`
+        : `\r\n[exited with code ${code ?? 0}]\r\n`;
+      this.writeEmitter.fire(tail);
+    });
+  }
+}
+
+let activeHareSession: HareTerminalSession | undefined;
+
+// Spawns `hare <args>` in the shared "Hare" terminal so the user sees
+// live output (the server-side handler used `window/logMessage`, which
+// is invisible unless the Hare LSP output channel is focused). Build
+// tags configured via `hare.tags` are forwarded as `-T <tag>` pairs to
+// match the server's `hare build` invocation. Subsequent calls reuse
+// the same terminal until the user dismisses it.
+function runHareInTerminal(
+  args: string[],
+  cwd: string,
+  label: string,
+  channel: vscode.OutputChannel,
+): void {
+  const config = vscode.workspace.getConfiguration("hare");
+  const harePath = config.get<string>("path") ?? "hare";
+  const tags = config.get<string[]>("tags") ?? [];
+  const harepath = config.get<string>("harepath") ?? "";
+
+  const argv = [args[0]];
+  for (const tag of tags) {
+    argv.push("-T", tag);
+  }
+  for (let i = 1; i < args.length; i += 1) argv.push(args[i]);
+
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (typeof v === "string") env[k] = v;
+  }
+  if (harepath.length > 0) env.HAREPATH = harepath;
+
+  channel.appendLine(`[hare-lsp] ${label} - ${harePath} ${argv.join(" ")} (cwd=${cwd})`);
+  if (!activeHareSession || activeHareSession.isClosed) {
+    activeHareSession = new HareTerminalSession();
+  }
+  activeHareSession.run(harePath, argv, cwd, env);
 }
