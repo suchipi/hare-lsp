@@ -79,7 +79,8 @@
       "WebSearch",
       "Bash(make hare-lsp *)",
       "Bash(HAREPATH=\"/Users/suchipi/Code/hare-lsp:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib\" HARECACHE=\"/Users/suchipi/Code/hare-lsp/.cache\" hare test:*)",
-      "Bash(HAREPATH=__TRACKED_VAR__:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib HARECACHE=__TRACKED_VAR__/.cache hare test:*)"
+      "Bash(HAREPATH=__TRACKED_VAR__:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib HARECACHE=__TRACKED_VAR__/.cache hare test:*)",
+      "Bash(HAREPATH=__TRACKED_VAR__:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib HARECACHE=__TRACKED_VAR__/.cache timeout 30 hare test:*)"
     ]
   }
 }
