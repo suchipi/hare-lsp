@@ -49,23 +49,29 @@ export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
 };
 
 // Emits ":<type>" hints right after `let x` / `const x` bindings whose
-// declared type was omitted.
+// declared type was omitted. Uses [[infer_let_type_deep]] for richer
+// expansion (call return types, alias chains) bounded by
+// `hare.inlayHints.inferredTypesMaxDepth`.
 fn emit_inferred_type_hints(
 	s: *server, doc: *document, su: *ast::subunit, arr: *[]json::value,
 ) void = {
 	const data = analysis::bytes(&doc.buf);
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
-		const has_type_already = match (d.decl) {
+		const init = match (d.decl) {
 		case let g: ast::decl_global =>
-			yield !(g._type is null);
+			if (!(g._type is null)) continue;
+			yield match (g.init) {
+			case let e: *ast::expr => yield e;
+			case null => continue;
+			};
 		case let c: ast::decl_const =>
-			yield !(c._type is null);
-		case => yield true;
+			if (!(c._type is null)) continue;
+			yield c.init;
+		case => continue;
 		};
-		if (has_type_already) continue;
 		const off = d.loc.start.off: size;
-		const label = match (analysis::type_of_expr_at(data, su, off)) {
+		const label = match (infer_let_type_deep(s, doc, init)) {
 		case let s: str => yield s;
 		case void => continue;
 		};

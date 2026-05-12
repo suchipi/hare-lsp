@@ -307,6 +307,137 @@ fn th_index(s: *server, path: str, text: str) void = {
 	assert(count_b == 1);
 };
 
+// Two TYPE decls with the same short name in different modules must not
+// be conflated. When asking for supertypes of mod_a's `T = X;` where
+// each module declares its own `X`, only mod_a's `X` should appear.
+@test fn supertypes_distinguish_same_name_across_modules() void = {
+	let (s, scan, in_buf, out) = th_test_server();
+	defer th_test_cleanup(&s, scan, in_buf, out);
+
+	const a_path = ".tmp/hare-lsp-th-crossmod-supertypes-a.ha";
+	const b_path = ".tmp/hare-lsp-th-crossmod-supertypes-b.ha";
+	// Both files declare `X`. mod_a's file has `type T = X;` so the
+	// supertypes walk should pick mod_a's X — never mod_b's.
+	const a_text = "type T = X;\ntype X = int;\n";
+	const b_text = "type X = str;\n";
+	// The path layout determines module: ".tmp/mod_a/x.ha" -> module
+	// "mod_a". Use directories so module_from_path returns distinct values.
+	const a_dir = ".tmp/hare-lsp-th-crossmod-st-mod_a";
+	const b_dir = ".tmp/hare-lsp-th-crossmod-st-mod_b";
+	match (os::mkdirs(a_dir, 0o755)) { case => void; };
+	match (os::mkdirs(b_dir, 0o755)) { case => void; };
+	const a_real = strings::concat(a_dir, "/x.ha")!;
+	defer free(a_real);
+	const b_real = strings::concat(b_dir, "/x.ha")!;
+	defer free(b_real);
+	let _ = match (writefile(a_real, a_text)) {
+	case bool => yield true;
+	case => abort("cannot write fixture");
+	};
+	defer rmfile(a_real);
+	let _ = match (writefile(b_real, b_text)) {
+	case bool => yield true;
+	case => abort("cannot write fixture");
+	};
+	defer rmfile(b_real);
+	th_index(&s, a_real, a_text);
+	th_index(&s, b_real, b_text);
+
+	const a_uri = strings::concat("file://", a_real)!;
+	defer free(a_uri);
+	const params = strings::concat(`{"item":{"name":"T","kind":23,"uri":"`,
+		a_uri,
+		`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}}}}`)!;
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 20.0,
+		method = strings::dup("typeHierarchy/supertypes")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_supertypes(&s, r);
+	const v = th_skip_to_response(out, 20.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result")
+		as *json::value) as []json::value;
+	// Exactly one supertype: X from mod_a's file. mod_b's X must not appear.
+	assert(len(result) == 1,
+		"supertypes should return exactly the in-module match");
+	const item = result[0] as json::object;
+	const item_uri = *(json::get(&item, "uri") as *json::value) as str;
+	assert(strings::contains(item_uri, "mod_a"),
+		"supertype must be from the cursor's module, not the unrelated same-named one");
+};
+
+// Same fixture for subtypes: asking for subtypes of mod_a's `X` returns
+// only mod_a's `T`, never any unrelated type in mod_b that references a
+// short name `X`.
+@test fn subtypes_distinguish_same_name_across_modules() void = {
+	let (s, scan, in_buf, out) = th_test_server();
+	defer th_test_cleanup(&s, scan, in_buf, out);
+
+	const a_dir = ".tmp/hare-lsp-th-crossmod-sb-mod_a";
+	const b_dir = ".tmp/hare-lsp-th-crossmod-sb-mod_b";
+	match (os::mkdirs(a_dir, 0o755)) { case => void; };
+	match (os::mkdirs(b_dir, 0o755)) { case => void; };
+	const a_real = strings::concat(a_dir, "/x.ha")!;
+	defer free(a_real);
+	const b_real = strings::concat(b_dir, "/x.ha")!;
+	defer free(b_real);
+	// mod_a has `T` which references its own `X`. mod_b has `U` which
+	// references a *different* `X` (its own). Only mod_a's `T` should be
+	// reported as a subtype of mod_a's `X`.
+	const a_text = "type T = X;\ntype X = int;\n";
+	const b_text = "type U = X;\ntype X = str;\n";
+	let _ = match (writefile(a_real, a_text)) {
+	case bool => yield true;
+	case => abort("cannot write fixture");
+	};
+	defer rmfile(a_real);
+	let _ = match (writefile(b_real, b_text)) {
+	case bool => yield true;
+	case => abort("cannot write fixture");
+	};
+	defer rmfile(b_real);
+	th_index(&s, a_real, a_text);
+	th_index(&s, b_real, b_text);
+
+	const a_uri = strings::concat("file://", a_real)!;
+	defer free(a_uri);
+	// Cursor on mod_a's X (line 1).
+	const params = strings::concat(`{"item":{"name":"X","kind":23,"uri":"`,
+		a_uri,
+		`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}},"selectionRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}}}}`)!;
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 21.0,
+		method = strings::dup("typeHierarchy/subtypes")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_subtypes(&s, r);
+	const v = th_skip_to_response(out, 21.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result")
+		as *json::value) as []json::value;
+	// Only mod_a's `T` should appear.
+	for (let i = 0z; i < len(result); i += 1) {
+		const item = result[i] as json::object;
+		const item_uri = *(json::get(&item, "uri") as *json::value) as str;
+		const item_name = *(json::get(&item, "name") as *json::value) as str;
+		assert(strings::contains(item_uri, "mod_a"),
+			"subtypes must not include candidates from the unrelated same-named module");
+		assert(item_name == "T",
+			"subtype must be `T`, not `U` from mod_b");
+	};
+	assert(len(result) == 1,
+		"subtypes should return exactly the in-module match");
+};
+
 // --- file fixture helpers ---
 
 fn writefile(path: str, text: str) (bool | fs::error) = {

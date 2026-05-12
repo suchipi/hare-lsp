@@ -118,15 +118,15 @@ fn resolve_ref(s: *server, doc: *document, ref: str) (ref_target | void) = {
 			return target_for_local(s, doc, p);
 		case void => void;
 		};
-		const imports = collect_imported_module_names(&cache.pr.subunit);
-		defer free_str_slice_nav(imports);
+		const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
+		defer analysis::free_str_slice(imports);
 		match (analysis::find_in_imports(&s.workspace_index, imports, name)) {
 		case let e: *analysis::workspace_entry =>
 			return target_for_entry(s, e);
 		case void => void;
 		};
-		const full_imports = collect_imported_module_paths(&cache.pr.subunit);
-		defer free_str_slice_nav(full_imports);
+		const full_imports = analysis::collect_imported_module_paths(&cache.pr.subunit);
+		defer analysis::free_str_slice(full_imports);
 		for (let i = 0z; i < len(full_imports); i += 1) {
 			const _ = ensure_stdlib_module_indexed(s, full_imports[i]);
 		};

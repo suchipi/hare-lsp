@@ -90,7 +90,7 @@ export fn record_cancellation(s: *server, id: lsp::id) void = {
 			return;
 		};
 	};
-	if (len(s.cancelled_ids) >= MAX_CANCELLED_IDS) {
+	if (len(s.cancelled_ids) >= s.config.limits.max_cancelled_ids) {
 		match (s.cancelled_ids[0]) {
 		case let str_id: str =>
 			free(str_id);

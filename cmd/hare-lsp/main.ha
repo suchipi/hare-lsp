@@ -7,6 +7,7 @@ use fs;
 use io;
 use os;
 use server;
+use strconv;
 use strings;
 
 // Version string. Kept in sync with the `serverInfo.version` value
@@ -103,7 +104,17 @@ export fn main() void = {
 	// to flush a buffered stdout — the response would sit in the 4 KiB
 	// buffer indefinitely and the client would time out the handshake.
 	// The e2e suite under e2e/ guards against re-introducing this bug.
-	let s = server::new(&scan, out_handle);
+	//
+	// Body cap: defaults to 32 MiB; overridable via env var for clients
+	// that send very large workspace edits. Must be set here because the
+	// reader is constructed before `initialize` arrives.
+	const max_body = read_max_body_env();
+	let s = match (max_body) {
+	case let n: size =>
+		yield server::new_with_max_body(&scan, out_handle, n);
+	case void =>
+		yield server::new(&scan, out_handle);
+	};
 	defer server::finish(&s);
 
 	const code = server::run(&s);
@@ -128,6 +139,21 @@ fn print_usage() void = {
 		"wire-protocol logs into.")!;
 	fmt::println("  HARE_LSP_LOG_LEVEL   debug|info|warn|error "
 		"(default: info)")!;
+};
+
+// Reads HARE_LSP_MAX_BODY_BYTES if set. Returns void when unset or
+// invalid; the server then falls back to the default body cap.
+fn read_max_body_env() (size | void) = {
+	const raw = match (os::getenv("HARE_LSP_MAX_BODY_BYTES")) {
+	case let s: str =>
+		if (len(s) == 0) return void;
+		yield s;
+	case void => return void;
+	};
+	match (strconv::stoz(raw)) {
+	case let n: size => return n;
+	case => return void;
+	};
 };
 
 // Opens (or truncates and creates) a per-session log file at
