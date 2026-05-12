@@ -13,6 +13,7 @@
 // and (b) compute WorkspaceEdit responses to fix `use` import paths when
 // modules are moved.
 
+use analysis;
 use encoding::json;
 use lsp;
 use strings;
@@ -200,7 +201,13 @@ export fn handle_will_delete_files(s: *server, r: lsp::request) void = {
 };
 
 // workspace/didDeleteFiles notification. Close any open documents matching
-// the deleted URIs.
+// the deleted URIs and drop workspace index entries + parse-cache entries
+// for the deleted paths. The corresponding didChangeWatchedFiles event
+// would normally clean up the index, but we cannot depend on that signal:
+// it can race with this notification, and clients that don't have the
+// file watcher registered won't deliver it at all - which would otherwise
+// leave references, workspace symbols, and the call/type hierarchies
+// reporting locations in files that no longer exist.
 export fn handle_did_delete_files(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
 	case let v: json::value => yield v;
@@ -240,6 +247,54 @@ export fn handle_did_delete_files(s: *server, n: lsp::notification) void = {
 				break;
 			};
 		};
+		// Drop workspace index + parse cache. The URI may name a
+		// single .ha file or a directory (some clients fold a
+		// directory delete into a single event with the dir URI),
+		// so handle both.
+		drop_index_for_deleted_uri(s, uri);
+	};
+};
+
+// Drops workspace index entries and parse-cache entries that originated
+// from `uri`. If `uri` names a single .ha file the matching entry is
+// dropped directly; otherwise the URI is treated as a directory and every
+// entry whose path is under it is dropped.
+fn drop_index_for_deleted_uri(s: *server, uri: str) void = {
+	const path = lsp::uri_decode_path(uri);
+	defer free(path);
+	if (is_indexable_path(path)) {
+		file_parse_cache_drop_path(&s.file_parse_cache, path);
+		analysis::drop_file(&s.workspace_index, path);
+		return;
+	};
+	// Treat as a directory: drop everything underneath it. Build a
+	// trailing-slash prefix so "/foo" doesn't match "/foobar.ha", and
+	// normalize first so a URI like file:///repo/pkg/ doesn't yield
+	// "/repo/pkg//" (which would fail to prefix-match any real path).
+	const trimmed = strings::rtrim(path, '/');
+	// Refuse to act on an all-slash path (e.g. "/" or ""): the prefix
+	// would be "/" and we'd drop every entry in the index.
+	if (len(trimmed) == 0) return;
+	const prefix = strings::concat(trimmed, "/")!;
+	defer free(prefix);
+	// Snapshot the matching paths first - drop_file mutates the
+	// entries slice while we'd otherwise be iterating it.
+	let paths: []str = [];
+	defer {
+		for (let i = 0z; i < len(paths); i += 1) {
+			free(paths[i]);
+		};
+		free(paths);
+	};
+	for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
+		const p = s.workspace_index.indexed_files[i];
+		if (strings::hasprefix(p, prefix)) {
+			append(paths, strings::dup(p)!)!;
+		};
+	};
+	for (let i = 0z; i < len(paths); i += 1) {
+		file_parse_cache_drop_path(&s.file_parse_cache, paths[i]);
+		analysis::drop_file(&s.workspace_index, paths[i]);
 	};
 };
 
