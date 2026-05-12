@@ -297,22 +297,16 @@ fn build_decl_type(t: ast::decl_type, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
-// Wraps an init value in a group that breaks BEFORE the value if the
-// `key = value` form doesn't fit on one line. In flat mode renders as
-// ` value`; in broken mode renders as `\n\tvalue` at the current
-// indent + 1.
-//
-// EXCEPTION: when the RHS opens its own block (`match { ... }`,
-// `switch { ... }`, `for { ... }`, `if { ... } else { ... }`, a
-// compound `{ ... }`, or a multi-line struct/array/tuple literal),
-// keep the keyword/opening bracket on the same line as `=` and let
-// the block contents wrap inside. Per the Hare style guide examples,
-// `const x = match (foo) {` stays on one line; only the cases break.
-// Forcing a break BEFORE the RHS in those cases produces a stray
-// `=` at end of line followed by `\n\tmatch (...)` which is uglier
-// and consumes a full line for nothing.
+// Emits the ` = <value>` half of a binding. For RHS expressions that
+// can wrap INTERNALLY (calls, struct/array/tuple literals, match,
+// switch, if-else, for, compound bodies) the value stays adjacent to
+// `=` and any wrapping happens inside the value. For atomic RHSs
+// (a single string literal, a plain identifier, a number) there's no
+// inside to wrap, so the value is wrapped in a `group` that breaks at
+// `=` if the line would overflow - that's the only handle the
+// formatter has to keep the line under 80 cols.
 fn build_init_value_doc(e: *ast::expr, bc: *build_ctx) doc = {
-	if (rhs_introduces_own_block(e)) {
+	if (rhs_can_wrap_internally(e)) {
 		let items: []doc = [];
 		append(items, text(" "))!;
 		append(items, build_expr_doc(e, bc))!;
@@ -326,11 +320,43 @@ fn build_init_value_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	return group(g_items);
 };
 
-// Returns true if `e` renders as a construct whose first token is
-// followed by an opening `(`, `{`, or `[` and whose body wraps
-// internally - keeping such constructs on the `=` line preserves the
-// visual cue that the RHS continues into a block, instead of pushing
-// the keyword down to a new indented line.
+// Returns true iff the RHS expression `e` has internal break points
+// (separators / softlines inside its rendering). For these, we'd
+// rather wrap inside the expression than break at `=`.
+fn rhs_can_wrap_internally(e: *ast::expr) bool = {
+	match (e.expr) {
+	case ast::call_expr =>
+		return true;
+	case ast::match_expr =>
+		return true;
+	case ast::switch_expr =>
+		return true;
+	case ast::for_expr =>
+		return true;
+	case ast::compound_expr =>
+		return true;
+	case let i: ast::if_expr =>
+		return i.fbranch != null;
+	case let l: ast::literal_expr =>
+		match (l) {
+		case ast::struct_literal =>
+			return true;
+		case ast::array_literal =>
+			return true;
+		case ast::tuple_literal =>
+			return true;
+		case ast::plain_literal =>
+			return false;
+		};
+	case =>
+		return false;
+	};
+};
+
+// Kept for callers that still consult the predicate directly. With
+// `build_init_value_doc` no longer breaking at `=`, the practical
+// distinction these constructs once carried (block-introducing vs
+// other) only matters for unrelated layout decisions.
 fn rhs_introduces_own_block(e: *ast::expr) bool = {
 	match (e.expr) {
 	case ast::match_expr =>
@@ -847,7 +873,7 @@ export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	case let br: ast::break_expr =>
 		return build_break_yield("break", &br, bc);
 	case let c: ast::call_expr =>
-		return build_call_expr(&c, bc);
+		return build_call_expr(&c, e.loc, bc);
 	case let c: ast::cast_expr =>
 		return build_cast_expr(&c, bc);
 	case let l: ast::literal_expr =>
@@ -1335,7 +1361,11 @@ fn build_break_yield(
 	return concat(items);
 };
 
-fn build_call_expr(c: *ast::call_expr, bc: *build_ctx) doc = {
+fn build_call_expr(
+	c: *ast::call_expr,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
 	let items: []doc = [];
 	const np = !is_postfix(c.lvalue);
 	if (np) append(items, text("("))!;
@@ -1347,19 +1377,24 @@ fn build_call_expr(c: *ast::call_expr, bc: *build_ctx) doc = {
 		return concat(items);
 	};
 
+	// Source-multiline preservation: if the user's source had a
+	// `\n` anywhere inside the call's `( ... )`, treat that as an
+	// explicit signal to keep the call wrapped, even when the args
+	// would fit on a single line. Mirrors prettier's "magic
+	// newline" heuristic from struct/array literals; without this
+	// the formatter would silently collapse intentionally-wrapped
+	// calls (e.g. `add_symbol(idx, t.ident, ...,\n\t\td.exported,
+	// []);`) onto one line just because the total width fits.
+	const force_break = source_call_is_multiline(bc, loc);
+
 	// Pack arguments into fill mode so when the call doesn't fit
 	// on a single line, args wrap greedily (as many per line as fit
-	// at indent + 1) instead of being forced one-per-line. When the
-	// outer group decides to break, a softline before `)` puts the
-	// closing paren on its own line at the call's outer indent -
-	// this gives the trailing arg a clean line and avoids cases
-	// where `arg)?;` would push past 80 cols.
+	// at indent + 1) instead of being forced one-per-line.
 	//
 	// Variadic spreads (`fn(a, b, args...)`) glue the trailing
 	// `...` directly onto the last argument with no space and no
 	// leading comma, so the last arg + `...` are folded into a
-	// single fill content item. Variadic spread also suppresses the
-	// trailing comma in broken mode (it would be a syntax error).
+	// single fill content item.
 	let fill_items: []doc = [];
 	for (let i = 0z; i < len(c.args); i += 1) {
 		let arg_pieces: []doc = [];
@@ -1372,24 +1407,79 @@ fn build_call_expr(c: *ast::call_expr, bc: *build_ctx) doc = {
 		};
 		append(fill_items, concat(arg_pieces))!;
 		if (!is_last) {
-			append(fill_items, line(" "))!;
+			// Source-multiline calls get a single hardline as
+			// their FIRST separator so the call wraps at least
+			// once, even when the args would otherwise fit
+			// flat. Subsequent separators stay as soft lines so
+			// fill mode greedily packs the remaining args at
+			// indent + 1 - matching the style guide's example
+			// (`fn(arg1,\n\targ2, arg3, arg4);`).
+			if (force_break && i == 0) {
+				append(fill_items, hardline())!;
+			} else {
+				append(fill_items, line(" "))!;
+			};
 		};
 	};
 
-	let nested_items: []doc = [];
-	append(nested_items, line(""))!;
-	append(nested_items, fill(fill_items))!;
-	if (!c.variadic) {
-		append(nested_items, if_broken(","))!;
-	};
-
-	let g_items: []doc = [];
-	append(g_items, text("("))!;
-	append(g_items, nest(1, concat(nested_items)))!;
-	append(g_items, line(""))!;
-	append(g_items, text(")"))!;
-	append(items, group(g_items))!;
+	// Fill the args directly inside `( ... )` with `(` adjacent to
+	// the first arg. The trailing `)` is wrapped in a `group` with
+	// a leading softline so it stays glued to the last arg when
+	// that line still has room (for the trailing tail like `?;`),
+	// but moves to its own line when the last arg + `)` + tail
+	// would overflow. This gives the compact wrap from the style
+	// guide's first code block by default, with the longer
+	// `(\n\t...\n)` form as a fallback only when needed.
+	let close_group: []doc = [];
+	append(close_group, line(""))!;
+	append(close_group, text(")"))!;
+	append(items, text("("))!;
+	append(items, nest(1, fill(fill_items)))!;
+	append(items, group(close_group))!;
 	return concat(items);
+};
+
+// Returns true iff the source bytes covered by `loc` contain a `\n`
+// strictly inside the matching pair of parens. Skips string / rune /
+// raw-string content so a `\n` inside `"foo\nbar"` doesn't count.
+fn source_call_is_multiline(bc: *build_ctx, loc: ast::location) bool = {
+	const data = bc.data;
+	const start = loc.start.off: size;
+	const end = loc.end.off: size + 1;
+	if (start >= len(data) || end > len(data)) return false;
+	// Find the first `(` after the lvalue.
+	let i = start;
+	for (i < end && data[i] != '(': u8; i += 1) void;
+	if (i >= end) return false;
+	i += 1;
+	let depth = 1;
+	for (i < end && depth > 0; i += 1) {
+		const b = data[i];
+		switch (b) {
+		case '(': u8 =>
+			depth += 1;
+		case ')': u8 =>
+			depth -= 1;
+			if (depth == 0) return false;
+		case '\n': u8 =>
+			if (depth >= 1) return true;
+		case '"': u8 =>
+			i += 1;
+			for (i < end && data[i] != '"': u8; i += 1) {
+				if (data[i] == '\\': u8 && i + 1 < end) i += 1;
+			};
+		case '\'': u8 =>
+			i += 1;
+			for (i < end && data[i] != '\'': u8; i += 1) {
+				if (data[i] == '\\': u8 && i + 1 < end) i += 1;
+			};
+		case '`': u8 =>
+			i += 1;
+			for (i < end && data[i] != '`': u8; i += 1) void;
+		case => void;
+		};
+	};
+	return false;
 };
 
 fn build_cast_expr(c: *ast::cast_expr, bc: *build_ctx) doc = {
@@ -1465,7 +1555,7 @@ fn build_for_expr(f: *ast::for_expr, bc: *build_ctx) doc = {
 };
 
 fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
-	// `if (cond) tbranch else fbranch` — fits flat as one line, or
+	// `if (cond) tbranch else fbranch` - fits flat as one line, or
 	// breaks to:
 	//
 	//     if (cond)
@@ -1473,54 +1563,107 @@ fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
 	//     else
 	//             fbranch
 	//
-	// Compound `{ ... }` branches always inline with the keyword,
-	// since the compound itself wraps its contents.
+	// else-if chains are FLATTENED into one group so the outer
+	// fit-or-break decision applies to every branch in the chain;
+	// without that, a long chain like `if (a) X else if (b) Y else
+	// if (c) Z else W` could break only the outer `if`'s body and
+	// leave the rest mashed onto one line. Compound `{ ... }`
+	// branches always inline with the keyword, since the compound
+	// itself wraps its contents.
+	let body_inner: []doc = [];
+	append_if_chain_branches(&body_inner, i, bc, false);
 	let items: []doc = [];
 	append(items, text("if ("))!;
 	append(items, build_expr_doc(i.cond, bc))!;
 	append(items, text(")"))!;
+	append(items, group(body_inner))!;
+	return concat(items);
+};
 
+// Recursively appends an if-else-if chain's branches to `out`.
+// Walks each `else if` link, appending `tbranch`, then `else if (cond)`
+// (or `else`), then the next branch, all into the SAME `out` slice
+// so they share one group. Each branch's body is wrapped in its own
+// `group` so it stays inline with `(cond)` if there's room
+// (`if (a) X`), but moves to its own line indented once if not
+// (`if (a)\n\tX`). The chain itself goes multiline when ANY branch
+// has to wrap. `prev_compound` is unused now but kept for future
+// spacing decisions.
+fn append_if_chain_branches(
+	out: *[]doc,
+	i: *ast::if_expr,
+	bc: *build_ctx,
+	prev_compound: bool,
+) void = {
 	const tbranch_compound = i.tbranch.expr is ast::compound_expr;
 
-	let body_inner: []doc = [];
+	let cur = *out;
 	if (tbranch_compound) {
-		append(body_inner, text(" "))!;
-		append(body_inner, build_expr_doc(i.tbranch, bc))!;
+		append(cur, text(" "))!;
+		append(cur, build_expr_doc(i.tbranch, bc))!;
 	} else {
-		// Wrap the leading line+body as a single nested unit so
-		// that, in broken mode, the line-break indents the body
-		// one level past `if`. Nesting only the body would leave
-		// the break itself at the outer indent.
-		let tb: []doc = [];
-		append(tb, line(" "))!;
-		append(tb, build_expr_doc(i.tbranch, bc))!;
-		append(body_inner, nest(1, concat(tb)))!;
+		// Per-branch group: tries `(cond) body` flat, else
+		// `(cond)\n\tbody` with the body on its own line at
+		// indent + 1.
+		let body_g: []doc = [];
+		append(body_g, line(" "))!;
+		append(body_g, build_expr_doc(i.tbranch, bc))!;
+		let g_items: []doc = [];
+		append(g_items, nest(1, concat(body_g)))!;
+		append(cur, group(g_items))!;
 	};
+	*out = cur;
 
 	match (i.fbranch) {
 	case null => void;
 	case let e: *ast::expr =>
-		const else_compound = e.expr is ast::compound_expr;
-		const else_if = e.expr is ast::if_expr;
+		let cur = *out;
 		if (tbranch_compound) {
-			append(body_inner, text(" else"))!;
+			append(cur, text(" else"))!;
 		} else {
-			append(body_inner, line(" "))!;
-			append(body_inner, text("else"))!;
+			// Wrap `line(" ") + "else"` in a `nest(1, ...)`
+			// so the line break itself emits at indent + 1,
+			// not the outer indent. Without the nest, the
+			// continuation `else if`s would land at column 0.
+			let pre: []doc = [];
+			append(pre, line(" "))!;
+			append(pre, text("else"))!;
+			append(cur, nest(1, concat(pre)))!;
 		};
-		if (else_compound || else_if) {
-			append(body_inner, text(" "))!;
-			append(body_inner, build_expr_doc(e, bc))!;
-		} else {
-			let fb: []doc = [];
-			append(fb, line(" "))!;
-			append(fb, build_expr_doc(e, bc))!;
-			append(body_inner, nest(1, concat(fb)))!;
+		*out = cur;
+		match (e.expr) {
+		case let nested: ast::if_expr =>
+			// `else if (cond)`: glue the nested cond to this
+			// branch's `else` so the chain reads as one
+			// statement. Then recurse with the nested if's
+			// own branches.
+			let cur = *out;
+			append(cur, text(" if ("))!;
+			append(cur, build_expr_doc(nested.cond, bc))!;
+			append(cur, text(")"))!;
+			*out = cur;
+			append_if_chain_branches(out, &nested, bc,
+				tbranch_compound);
+		case =>
+			const else_compound = e.expr is ast::compound_expr;
+			let cur = *out;
+			if (else_compound) {
+				append(cur, text(" "))!;
+				append(cur, build_expr_doc(e, bc))!;
+			} else {
+				// Same per-branch grouping as the tbranch
+				// path above so `else big_body;` can wrap
+				// to its own indented line when too long.
+				let body_g: []doc = [];
+				append(body_g, line(" "))!;
+				append(body_g, build_expr_doc(e, bc))!;
+				let g_items: []doc = [];
+		append(g_items, nest(1, concat(body_g)))!;
+		append(cur, group(g_items))!;
+			};
+			*out = cur;
 		};
 	};
-
-	append(items, group(body_inner))!;
-	return concat(items);
 };
 
 fn build_match_expr(

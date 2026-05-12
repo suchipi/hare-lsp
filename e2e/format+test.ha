@@ -274,12 +274,12 @@ use io;
 	const new_text = *(json::get(&edit, "newText") as *json::value) as str;
 
 	assert(
-		strings::contains(new_text, "some_function(\n\t\targument_one,"),
-		"first arg on its own indented line (depth 2 inside fn body)"
+		strings::contains(new_text, "some_function(argument_one,"),
+		"first arg stays inline with `(` (style guide first code block)"
 	);
 	assert(
-		strings::contains(new_text, "argument_five,\n\t)"),
-		"trailing comma + closing paren on own line"
+		strings::contains(new_text, ",\n\t\targument_five);"),
+		"continuation indented once past the call site, `)` adjacent"
 	);
 
 	const lines = strings::split(new_text, "\n")!;
