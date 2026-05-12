@@ -51,8 +51,17 @@ export type session = struct {
 };
 
 // Spawns the server binary with anonymous pipes on stdin and stdout. The
-// child's stderr is inherited from the parent so server-side diagnostics
-// show up in `hare test` output.
+// child's stderr is redirected to /dev/null rather than inherited. Why:
+// if a test panics before [[finish_session]]'s defer fires, the child
+// outlives the test process and the kernel reparents it to init. Any
+// stderr pipe it inherited from the test runner (typically connected
+// downstream of `hare test` → `make test` → the user's shell pipeline)
+// stays open as long as the orphan does, and downstream stages like
+// `tee` or `tail` block on EOF that never comes. With stderr → nullfd
+// the orphan can't hold a pipe back. If you need to see server
+// diagnostics from an e2e run, set HARE_LSP_LOG_DIR in the test's
+// environment - the server tees its stderr to a file there (see
+// cmd/hare_lsp/main.ha).
 fn spawn_session() session = {
 	const (in_r, in_w) = exec::pipe();
 	const (out_r, out_w) = exec::pipe();
@@ -69,6 +78,7 @@ fn spawn_session() session = {
 
 	exec::addfile(&cmd, os::stdin_file, in_r)!;
 	exec::addfile(&cmd, os::stdout_file, out_w)!;
+	exec::addfile(&cmd, os::stderr_file, exec::nullfd)!;
 
 	const proc = match (exec::start(&cmd)) {
 	case let p: exec::process =>
