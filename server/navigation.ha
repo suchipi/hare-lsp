@@ -54,11 +54,24 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	case void => void;
 	};
 
-	const ident_range = match (analysis::ident_at(data, off)) {
+	let ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) => yield r;
 	case void =>
-		send_null(s, r.id);
-		return;
+		// Cursor may be sitting on the leading '@' of an attribute
+		// like `@test`; in that case ident_at fails (since '@' isn't
+		// an ident byte). Peek one byte forward.
+		yield match (attr_at(data, off)) {
+		case let r: (size, size) => yield r;
+		case void =>
+			send_null(s, r.id);
+			return;
+		};
+	};
+
+	// If a '@' directly precedes the ident, fold it in so attribute
+	// names like `@test` and `@init` resolve as a single token.
+	if (ident_range.0 > 0 && data[ident_range.0 - 1] == '@': u8) {
+		ident_range = (ident_range.0 - 1, ident_range.1);
 	};
 
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
@@ -95,13 +108,25 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		};
 	};
 	if (!found_local) {
-		match (workspace_hover(s, doc, data, ident_range.0, ident_str)) {
-		case let r: (str, str) =>
-			sig = r.0;
-			docs = r.1;
-		case void =>
-			send_null(s, r.id);
-			return;
+		let found_builtin = false;
+		if (len(qualifier_peek) == 0) {
+			match (lookup_builtin(ident_str)) {
+			case let b: (str, str) =>
+				sig = b.0;
+				docs = b.1;
+				found_builtin = true;
+			case void => void;
+			};
+		};
+		if (!found_builtin) {
+			match (workspace_hover(s, doc, data, ident_range.0, ident_str)) {
+			case let r: (str, str) =>
+				sig = r.0;
+				docs = r.1;
+			case void =>
+				send_null(s, r.id);
+				return;
+			};
 		};
 	};
 	defer free(sig);
@@ -575,6 +600,24 @@ fn parse_text_document_position(p: (json::value | void)) ((str, lsp::position) |
 // Looks at the bytes immediately before the ident at off and returns the
 // qualifier prefix (everything before "::") as a freshly-allocated string,
 // or "" if the ident is bare.
+// If `off` sits on a '@' that precedes an identifier (e.g. cursor on
+// the '@' of `@test`), returns the byte range covering '@' through the
+// end of the identifier. Returns void otherwise. The leading '@' is
+// folded back in by handle_hover for any cursor position; this helper
+// only exists so cursor-on-'@' doesn't immediately fail at ident_at.
+fn attr_at(data: []u8, off: size) ((size, size) | void) = {
+	if (off >= len(data)) return void;
+	if (data[off] != '@': u8) return void;
+	if (off + 1 >= len(data)) return void;
+	return match (analysis::ident_at(data, off + 1)) {
+	case let r: (size, size) =>
+		if (r.0 != off + 1) yield void;
+		yield (off, r.1);
+	case void =>
+		yield void;
+	};
+};
+
 fn qualifier_prefix_at(data: []u8, ident_start: size) str = {
 	// We're looking for "...::ident" — the "::" must be directly before
 	// ident_start (no whitespace between qualifier and "::").

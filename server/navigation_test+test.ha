@@ -106,6 +106,121 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(value, "fn"));
 };
 
+@test fn hover_on_builtin_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///b.ha",
+		`export fn f() void = { let x: size = len(\"hi\"); };`);
+
+	// Position is on "len" — character 38.
+	const params = `{"textDocument":{"uri":"file:///b.ha"},"position":{"line":0,"character":38}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 150.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 150.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "len(value) size"));
+	assert(strings::contains(value, "Built-in"));
+	assert(strings::contains(value, "slice"));
+};
+
+@test fn hover_on_keyword_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///k.ha",
+		`export fn f() void = { defer free(null); };`);
+
+	// Position is on "defer" — character 24.
+	const params = `{"textDocument":{"uri":"file:///k.ha"},"position":{"line":0,"character":24}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 151.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 151.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Keyword"));
+	assert(strings::contains(value, "defer"));
+	assert(strings::contains(value, "reverse order"));
+};
+
+@test fn hover_on_attribute_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///a.ha",
+		`@test fn checks() void = void;`);
+
+	// Position is on "test" — character 3.
+	const params = `{"textDocument":{"uri":"file:///a.ha"},"position":{"line":0,"character":3}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 152.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 152.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Attribute"));
+	assert(strings::contains(value, "@test"));
+	assert(strings::contains(value, "test harness"));
+};
+
+@test fn hover_on_attribute_at_sign_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///a2.ha",
+		`@init fn boot() void = void;`);
+
+	// Position is on the "@" — character 0.
+	const params = `{"textDocument":{"uri":"file:///a2.ha"},"position":{"line":0,"character":0}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 153.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 153.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents = *(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "@init"));
+	assert(strings::contains(value, "before `main`"));
+};
+
 @test fn hover_on_whitespace_returns_null() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
