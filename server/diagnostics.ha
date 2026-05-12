@@ -32,8 +32,10 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 
 	const file_path = uri_to_path(doc.uri);
 	defer free(file_path);
-	let build_diags = run_build(s.config.hare_path, file_path, s.config.tags,
-		s.config.build_timeout_ms);
+	const cwd = spawn_cwd_for_path(s, file_path);
+	defer free(cwd);
+	let build_diags = run_build(s.config.hare_path, file_path, cwd,
+		s.config.tags, s.config.build_timeout_ms);
 	defer finish_build_diagnostics(build_diags);
 
 	// Group build diagnostics by URI.

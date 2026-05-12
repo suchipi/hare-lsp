@@ -73,23 +73,24 @@ fn execute_run_test(s: *server, r: lsp::request, args: []json::value) void = {
 	const path = uri_to_path_xc(uri);
 	defer free(path);
 	const dir = dirname_xc(path);
-	// Optional 2nd argument: the test function name. When present
-	// pass it as a `[path] [test]` filter to `hare test` so only the
-	// matching @test runs.
+	const cwd = spawn_cwd_for_path(s, path);
+	defer free(cwd);
+	// `hare test <path> [test...]`. Path is always passed (absolute so
+	// it works regardless of cwd) so we only test the file's module;
+	// without it `hare test` would recursively test everything under
+	// the workspace root. An optional 2nd argument is a test-name
+	// filter that restricts to a single @test.
 	let extra: []str = [];
 	defer free(extra);
+	append(extra, dir)!;
 	if (len(args) >= 2) {
 		match (args[1]) {
 		case let name: str =>
-			// `hare test <path> <test...>` — the directory is the
-			// path arg; the test name is the glob. We chdir'd to
-			// `dir` already so pass "." as the path.
-			append(extra, ".")!;
 			append(extra, name)!;
 		case => void;
 		};
 	};
-	run_hare_command(s, "test", dir, extra);
+	run_hare_command(s, "test", cwd, extra);
 	send_null_xc(s, r.id);
 };
 
@@ -104,12 +105,20 @@ fn execute_run_module(s: *server, r: lsp::request, args: []json::value) void = {
 	const path = uri_to_path_xc(uri);
 	defer free(path);
 	const dir = dirname_xc(path);
-	run_hare_command(s, "run", dir, []);
+	const cwd = spawn_cwd_for_path(s, path);
+	defer free(cwd);
+	let extra: []str = [];
+	defer free(extra);
+	append(extra, dir)!;
+	run_hare_command(s, "run", cwd, extra);
 	send_null_xc(s, r.id);
 };
 
 // Runs `<config.hare_path> <subcmd> [args...]` in the given directory and
-// streams the output through window/logMessage. Synchronous.
+// streams the output through window/logMessage. The cwd should be a
+// workspace root so a relative `HARECACHE` doesn't pollute random
+// directories. An empty `dir` leaves the child in our own cwd.
+// Synchronous.
 fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	let argv: []str = [];
 	defer free(argv);
