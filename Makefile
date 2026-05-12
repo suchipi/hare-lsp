@@ -41,7 +41,7 @@ hare-lsp: $(shell find cmd lsp server analysis hare -name '*.ha' 2>/dev/null)
 # over OS pipes — they catch regressions unit tests can't (e.g. the
 # buffered-stdout flush bug), but require the binary to exist first.
 test: hare-lsp
-	mkdir -p .cache
+	mkdir -p .cache .tmp
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS)
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS) e2e
 
