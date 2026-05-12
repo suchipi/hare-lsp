@@ -4,7 +4,6 @@
 // e2e: type hierarchy. prepareTypeHierarchy + supertypes + subtypes.
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_prepare_type_hierarchy_returns_item_for_type() void = {

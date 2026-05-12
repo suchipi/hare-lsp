@@ -4,7 +4,6 @@
 // e2e: document and workspace symbol providers.
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_document_symbol_returns_all_decls() void = {

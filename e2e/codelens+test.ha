@@ -8,7 +8,6 @@
 // resolve must instead point at the identifier itself.
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_codelens_references_anchored_at_name() void = {

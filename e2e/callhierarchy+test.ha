@@ -7,7 +7,6 @@
 //   callHierarchy/outgoingCalls -> CallHierarchyOutgoingCall[]
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_prepare_call_hierarchy_returns_item_for_fn() void = {

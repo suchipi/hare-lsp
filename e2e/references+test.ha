@@ -4,7 +4,6 @@
 // e2e: textDocument/references, prepareRename, and rename.
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_references_finds_call_site_and_decl() void = {

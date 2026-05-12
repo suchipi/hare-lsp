@@ -13,7 +13,6 @@
 // Tests require ./hare-lsp to exist at the repo root. The Makefile's
 // `test-e2e` target builds it first.
 
-use encoding::json;
 use fmt;
 use io;
 use os;
