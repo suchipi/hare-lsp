@@ -4,9 +4,11 @@
 use bufio;
 use bytes;
 use encoding::json;
+use fs;
 use io;
 use lsp;
 use memio;
+use os;
 use strconv;
 use strings;
 
@@ -74,6 +76,34 @@ fn sym_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		off = body_start + length;
 	};
 	abort("response not found");
+};
+
+// Returns `file://<root>/<module>/` where <root> is the HAREPATH entry
+// that contains <module> as a subdirectory. Falls back to the
+// /usr/local/src/hare/stdlib layout when $HAREPATH is unset (matches
+// STDLIB_DEFAULTS in stdlib_index.ha). Returned string is owned.
+fn sym_stdlib_module_prefix(module: str) str = {
+	let root = "";
+	match (os::getenv("HAREPATH")) {
+	case let raw: str =>
+		const tok = strings::tokenize(raw, ":");
+		for (let item => strings::next_token(&tok)) {
+			if (len(item) == 0) continue;
+			const candidate = strings::concat(item, "/", module)!;
+			defer free(candidate);
+			const ok = match (os::stat(candidate)) {
+			case let st: fs::filestat => yield fs::isdir(st.mode);
+			case => yield false;
+			};
+			if (ok) {
+				root = item;
+				break;
+			};
+		};
+	case void => void;
+	};
+	if (len(root) == 0) root = "/usr/local/src/hare/stdlib";
+	return strings::concat("file://", root, "/", module, "/")!;
 };
 
 @test fn document_symbol_lists_all_decls() void = {
@@ -180,11 +210,12 @@ fn sym_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer json::finish(rv);
 	const ro = *(json::get(&(rv as json::object), "result") as *json::value) as json::object;
 	// Should now have a `target` field pointing at a .ha file inside
-	// the io stdlib module. The exact stdlib prefix varies by install
-	// (/usr/local/src/hare vs /usr/src/hare on distro packages).
+	// the io stdlib module. Build the expected prefix from $HAREPATH so
+	// the assertion is install-layout agnostic.
 	const target = *(json::get(&ro, "target") as *json::value) as str;
-	assert(strings::hasprefix(target, "file://"));
-	assert(strings::contains(target, "/io/"));
+	const expected_prefix = sym_stdlib_module_prefix("io");
+	defer free(expected_prefix);
+	assert(strings::hasprefix(target, expected_prefix));
 	assert(strings::hassuffix(target, ".ha"));
 };
 
