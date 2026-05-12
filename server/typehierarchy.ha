@@ -35,8 +35,8 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off = analysis::position_to_byte(data,
-		doc.buf.line_index, position_encoding(s),
+	const off = analysis::position_to_byte(data, doc.buf.line_index,
+		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 	const cache = parse_of(doc);
 	const sym = match (analysis::symbol_at(&cache.idx, off)) {
@@ -51,8 +51,8 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 		return;
 	};
 	let arr: []json::value = [];
-	append(arr, build_type_item(s,
-		doc, uri, sym.short_name, sym.span.start.off: size, sym.span.end.off: size))!;
+	append(arr, build_type_item(s, doc, uri, sym.short_name,
+		sym.span.start.off: size, sym.span.end.off: size))!;
 	send_array_th(s, r.id, arr);
 };
 
@@ -124,8 +124,7 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 		// module name workspace_entry.module records).
 		const qualifier = if (len(path) >= 2) path[len(path) - 2] else "";
 		const entry = match (analysis::workspace_lookup_for_subunit(
-			&s.workspace_index,
-			su, item_module, qualifier, name)) {
+			&s.workspace_index, su, item_module, qualifier, name)) {
 		case let e: *analysis::workspace_entry =>
 			yield e;
 		case void =>
@@ -145,9 +144,8 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 				continue;
 			};
 		};
-		append(arr, build_type_item_for_path(s,
-			entry.path, entry.uri, entry.short_name, entry.start_off: size,
-			entry.end_off: size, text))!;
+		append(arr, build_type_item_for_path(s, entry.path, entry.uri,
+			entry.short_name, entry.start_off: size, entry.end_off: size, text))!;
 		append(visited, (entry.uri, entry.short_name))!;
 	};
 	send_array_th(s, r.id, arr);
@@ -262,7 +260,7 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 						&fpe.pr.subunit, file_module, qualifier, item.name)) {
 					case let r: *analysis::workspace_entry =>
 						if (r.path == exp.path && r.short_name == exp.short_name &&
-						r.kind == exp.kind) {
+								r.kind == exp.kind) {
 							matched = true;
 						};
 					case void => void;
@@ -278,8 +276,8 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 			if (visited_pair_has(visited, e.uri, short)) continue;
 			const sp_off = d.loc.start.off: size;
 			const ep_off = d.loc.end.off: size;
-			append(arr, build_type_item_for_path(s,
-				e.path, e.uri, short, sp_off, ep_off, fpe.text))!;
+			append(arr, build_type_item_for_path(s, e.path, e.uri, short, sp_off, ep_off,
+				fpe.text))!;
 			append(visited, (e.uri, short))!;
 		};
 	};
@@ -436,8 +434,8 @@ fn emit_workspace_type_items(
 				continue;
 			};
 		};
-		append(cur, build_type_item_for_path(s,
-			e.path, e.uri, name, e.start_off: size, e.end_off: size, text))!;
+		append(cur, build_type_item_for_path(s, e.path, e.uri, name,
+			e.start_off: size, e.end_off: size, text))!;
 		append(vis, (e.uri, e.short_name))!;
 	};
 };
@@ -463,8 +461,8 @@ fn build_type_item(
 	json::set(&item, "uri", uri: json::value)!;
 	const enc = position_encoding(s);
 	const data = analysis::bytes(&doc.buf);
-	const sp = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, start_off);
+	const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		start_off);
 	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, end_off);
 	json::put(&item, "range", encode_range_th(sp, ep))!;
 	json::put(&item, "selectionRange", encode_range_th(sp, ep))!;

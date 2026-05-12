@@ -33,8 +33,8 @@ export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off = analysis::position_to_byte(data,
-		doc.buf.line_index, position_encoding(s),
+	const off = analysis::position_to_byte(data, doc.buf.line_index,
+		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 	const cache = parse_of(doc);
 	const sym = match (analysis::symbol_at(&cache.idx, off)) {
@@ -244,10 +244,10 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 			};
 			if (!ok) continue;
 			const abs = start + i;
-			const sp = analysis::byte_to_position(data,
-				doc.buf.line_index, position_encoding(s), abs);
-			const ep = analysis::byte_to_position(data,
-				doc.buf.line_index, position_encoding(s), abs + len(t));
+			const sp = analysis::byte_to_position(data, doc.buf.line_index,
+				position_encoding(s), abs);
+			const ep = analysis::byte_to_position(data, doc.buf.line_index,
+				position_encoding(s), abs + len(t));
 			append(from_ranges, encode_range_local(sp, ep))!;
 			i += len(t) - 1;
 		};
@@ -305,10 +305,10 @@ fn build_call_hierarchy_item(
 	json::set(&item, "uri", uri: json::value)!;
 	const enc = position_encoding(s);
 	const data = analysis::bytes(&doc.buf);
-	const sp = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, sym.span.start.off: size);
-	const ep = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, sym.span.end.off: size);
+	const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		sym.span.start.off: size);
+	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		sym.span.end.off: size);
 	json::put(&item, "range", encode_range_local(sp, ep))!;
 	json::put(&item, "selectionRange", encode_range_local(sp, ep))!;
 	return item;
@@ -423,10 +423,10 @@ fn scan_calls_static(
 		(data[k] == ' ': u8 ||
 		data[k] == '\t': u8); k += 1) void;
 		if (k >= len(data) || data[k] != '(': u8) continue;
-		const start_pos = analysis::byte_to_position(data,
-			line_index, analysis::encoding::UTF16, i);
-		const end_pos = analysis::byte_to_position(data,
-			line_index, analysis::encoding::UTF16, i + len(t));
+		const start_pos = analysis::byte_to_position(data, line_index,
+			analysis::encoding::UTF16, i);
+		const end_pos = analysis::byte_to_position(data, line_index,
+			analysis::encoding::UTF16, i + len(t));
 		let loc = json::newobject();
 		json::set(&loc, "uri", uri: json::value)!;
 		json::put(&loc, "range", encode_range_local(start_pos, end_pos))!;

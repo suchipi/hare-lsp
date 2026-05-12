@@ -89,8 +89,8 @@ fn detect_module_hover(
 		return void;
 	};
 	// Find which segment encloses off; on a `::`, anchor to segment 0.
-	const seg_under = segment_index_in_run(data,
-		run_start, run_end, segments, off);
+	const seg_under = segment_index_in_run(data, run_start, run_end, segments,
+		off);
 	const ident_end = match (seg_under) {
 	case let i: size =>
 		yield i + 1;
@@ -150,11 +150,11 @@ fn segment_index_at(
 		// before the path.
 		for (cursor < len(data)) {
 			if (cursor + len(name) <= len(data) &&
-			bytes_equal(data[cursor..cursor + len(name)], name) &&
-			(cursor + len(name) == len(data) ||
-			!is_ident_byte_local(data[cursor + len(name)])) &&
-			(cursor == 0 ||
-			!is_ident_byte_local(data[cursor - 1]))) {
+					bytes_equal(data[cursor..cursor + len(name)], name) &&
+					(cursor + len(name) == len(data) ||
+					!is_ident_byte_local(data[cursor + len(name)])) &&
+					(cursor == 0 ||
+					!is_ident_byte_local(data[cursor - 1]))) {
 				break;
 			};
 			cursor += 1;

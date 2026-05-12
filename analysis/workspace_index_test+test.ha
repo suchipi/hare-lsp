@@ -27,8 +27,7 @@ use strings;
 	index_file(&idx, "/repo/a.ha", strings::toutf8("fn one() void = void;\n"));
 	assert(len(idx.entries) == 1);
 
-	index_file(&idx,
-		"/repo/a.ha",
+	index_file(&idx, "/repo/a.ha",
 		strings::toutf8("fn two() void = void;\nfn three() void = void;\n"));
 	assert(len(idx.entries) == 2);
 	assert(idx.entries[0].short_name == "two");
@@ -107,8 +106,7 @@ fn write_tmp(path: str, body: str) void = {
 @test fn fuzzy_search_substring_match() void = {
 	let idx = new_workspace_index();
 	defer finish_workspace_index(&idx);
-	index_file(&idx,
-		"/a.ha",
+	index_file(&idx, "/a.ha",
 		strings::toutf8("fn parse_thing() void = void;\nfn other() void = void;\n"));
 	const m = fuzzy_search(&idx, "PARSE");
 	defer free(m);

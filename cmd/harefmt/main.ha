@@ -135,7 +135,7 @@ fn parse_args(args: []str) (cli | cli_error) = {
 			c.opts.follow_file_symlinks = false;
 		case =>
 			if (strings::hasprefix(a, "--") ||
-			len(a) >= 2 && strings::hasprefix(a, "-") && a != "-") {
+					len(a) >= 2 && strings::hasprefix(a, "-") && a != "-") {
 				fmt::fprintfln(os::stderr, "harefmt: unknown option: {}", a)!;
 				free(c.paths);
 				return cli_error::USAGE;
@@ -335,8 +335,8 @@ fn process_file(abs: str, st: *state) void = {
 fn report_format_error(label: str, e: *server::format_error) void = {
 	match (e.location) {
 	case let loc: lex::location =>
-		fmt::fprintfln(os::stderr,
-			"{}:{}:{}: {}", label, loc.line, loc.col, e.message)!;
+		fmt::fprintfln(os::stderr, "{}:{}:{}: {}", label, loc.line, loc.col,
+			e.message)!;
 	case void =>
 		fmt::fprintfln(os::stderr, "{}: {}", label, e.message)!;
 	};

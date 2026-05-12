@@ -161,8 +161,8 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	// Build a single full-document text edit.
 	const enc = position_encoding(s);
 	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, 0);
-	const end_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, len(data));
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		len(data));
 	let edit = json::newobject();
 	let r_obj = json::newobject();
 	let s_obj = json::newobject();
@@ -227,14 +227,12 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 	// Convert range to byte offsets.
 	const enc = position_encoding(s);
-	const range_start = analysis::position_to_byte(data,
-		doc.buf.line_index, enc,
+	const range_start = analysis::position_to_byte(data, doc.buf.line_index, enc,
 		analysis::position {
 			line = range.start.line,
 			character = range.start.character,
 		});
-	const range_end = analysis::position_to_byte(data,
-		doc.buf.line_index, enc,
+	const range_end = analysis::position_to_byte(data, doc.buf.line_index, enc,
 		analysis::position {
 			line = range.end.line,
 			character = range.end.character,
@@ -274,8 +272,8 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	// don't belong in the range edit.
 	const _ = pop_before(&cursor, decl_range_start);
 
-	let d = build_decls_range_doc(&pr.subunit,
-		first_idx: size, last_idx: size, &cursor, bl, data);
+	let d = build_decls_range_doc(&pr.subunit, first_idx: size, last_idx: size,
+		&cursor, bl, data);
 	defer doc_finish(&d);
 
 	let buf = memio::dynamic();
@@ -295,10 +293,10 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 	const replace_start = pr.subunit.decls[first_idx: size].loc.start.off: size;
 	const replace_end = pr.subunit.decls[last_idx: size].loc.end.off: size;
-	const start_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, replace_start);
-	const end_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, replace_end);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		replace_start);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		replace_end);
 
 	let edit = json::newobject();
 	let r_obj = json::newobject();
@@ -374,8 +372,7 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	};
 	const data = analysis::bytes(&doc.buf);
 	const enc = position_encoding(s);
-	const cursor_off = analysis::position_to_byte(data,
-		doc.buf.line_index, enc,
+	const cursor_off = analysis::position_to_byte(data, doc.buf.line_index, enc,
 		analysis::position { line = pos.line, character = pos.character });
 	if (cursor_off == 0 || cursor_off > len(data)) {
 		send_array_fmt(s, r.id, []);
@@ -443,10 +440,10 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	};
 
 	// Build a TextEdit replacing the leading whitespace.
-	const start_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, line_start);
-	const end_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, cur_ws_end);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		line_start);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		cur_ws_end);
 	const new_text = strings::fromutf8(new_indent)!;
 
 	let edit = json::newobject();

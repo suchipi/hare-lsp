@@ -104,7 +104,7 @@ use strings;
 		defer free(body);
 		const text = strings::fromutf8(body)!;
 		if (strings::contains(text, "refusing to open") &&
-		strings::contains(text, "file:///c.ha")) {
+				strings::contains(text, "file:///c.ha")) {
 			saw_warning = true;
 			break;
 		};

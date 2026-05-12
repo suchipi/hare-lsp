@@ -85,8 +85,7 @@ use strings;
 	const tmpl =
 		`{"jsonrpc":"2.0","id":1720,"method":"typeHierarchy/supertypes","params":{"item":{"name":"T","kind":23,"uri":"`;
 	const req =
-		strings::concat(tmpl,
-			uri_a,
+		strings::concat(tmpl, uri_a,
 			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":5},"end":{"line":0,"character":6}}}}}`
 		)!;
 	defer free(req);
@@ -115,8 +114,7 @@ use strings;
 	const tmpl2 =
 		`{"jsonrpc":"2.0","id":1721,"method":"typeHierarchy/subtypes","params":{"item":{"name":"X","kind":23,"uri":"`;
 	const req2 =
-		strings::concat(tmpl2,
-			uri_a,
+		strings::concat(tmpl2, uri_a,
 			`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}},"selectionRange":{"start":{"line":1,"character":5},"end":{"line":1,"character":6}}}}}`
 		)!;
 	defer free(req2);

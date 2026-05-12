@@ -47,8 +47,7 @@ fn smoke_notification(notif: str, probe_uri: str, ping_id: f64) void = {
 
 	open_doc(&s, probe_uri, "export fn p() void = void;\n");
 	const ping =
-		strings::concat(`{"jsonrpc":"2.0","id":`,
-			f64_to_int_str(ping_id),
+		strings::concat(`{"jsonrpc":"2.0","id":`, f64_to_int_str(ping_id),
 			`,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"`,
 			probe_uri, `"}}}`)!;
 	defer free(ping);
@@ -59,8 +58,7 @@ fn smoke_notification(notif: str, probe_uri: str, ping_id: f64) void = {
 
 	const ping2_id = ping_id + 1.0;
 	const ping2 =
-		strings::concat(`{"jsonrpc":"2.0","id":`,
-			f64_to_int_str(ping2_id),
+		strings::concat(`{"jsonrpc":"2.0","id":`, f64_to_int_str(ping2_id),
 			`,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"`,
 			probe_uri, `"}}}`)!;
 	defer free(ping2);

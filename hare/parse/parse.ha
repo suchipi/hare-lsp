@@ -58,8 +58,8 @@ export fn want(lexer: *lex::lexer, want: lex::ltok...) (lex::token | error) = {
 		};
 	};
 	lex::unlex(lexer, tok);
-	return syntaxerr(tok.2,
-		"Unexpected '{}', was expecting {}", lex::tokstr(tok), memio::string(&buf)!);
+	return syntaxerr(tok.2, "Unexpected '{}', was expecting {}", lex::tokstr(tok),
+		memio::string(&buf)!);
 };
 
 // Looks for a matching ltok from the lexer, and if not present, unlexes the

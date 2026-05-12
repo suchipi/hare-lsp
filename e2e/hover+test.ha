@@ -535,7 +535,7 @@ fn drain_until_indexed(s: *session) void = {
 		defer free(body);
 		const text = strings::fromutf8(body)!;
 		if (strings::contains(text, "indexed") &&
-		strings::contains(text, "file(s)")) return;
+				strings::contains(text, "file(s)")) return;
 	};
 };
 

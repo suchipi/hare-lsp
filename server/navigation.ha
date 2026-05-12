@@ -106,8 +106,8 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		};
 	};
 	if (!found_local && len(qualifier_peek) == 0) {
-		match (find_local_binding(s,
-			doc, &cache.pr.subunit, data, ident_str, ident_range.0)) {
+		match (find_local_binding(s, doc, &cache.pr.subunit, data, ident_str,
+			ident_range.0)) {
 		case let rendered: str =>
 			sig = rendered;
 			docs = strings::dup("")!;
@@ -150,10 +150,10 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	json::put(&result, "contents", contents)!;
 	// Range: the identifier itself.
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, ident_range.0);
-	const end_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, ident_range.1);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_range.0);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_range.1);
 	let range = json::newobject();
 	let s_obj = json::newobject();
 	json::put(&s_obj, "line", start_pos.line: f64)!;
@@ -195,10 +195,10 @@ fn send_module_hover_response(
 		case void => void;
 		};
 	};
-	const start_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, start_off);
-	const end_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, end_off);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		start_off);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		end_off);
 	let result = json::newobject();
 	let contents = json::newobject();
 	json::set(&contents, "kind", "markdown": json::value)!;
@@ -361,10 +361,10 @@ fn send_location_for_entry(
 	const line_index = analysis::build_line_index(text);
 	defer free(line_index);
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(text,
-		line_index, enc, e.start_off: size);
-	const end_pos = analysis::byte_to_position(text,
-		line_index, enc, e.end_off: size);
+	const start_pos = analysis::byte_to_position(text, line_index, enc,
+		e.start_off: size);
+	const end_pos = analysis::byte_to_position(text, line_index, enc,
+		e.end_off: size);
 
 	let result = json::newobject();
 	json::set(&result, "uri", e.uri: json::value)!;
@@ -399,8 +399,8 @@ fn workspace_hover(
 	ident_start: size,
 	ident_str: str,
 ) ((str, str) | void) = {
-	const entry = match (workspace_lookup_aware(s,
-		doc, data, ident_start, ident_str)) {
+	const entry = match (workspace_lookup_aware(s, doc, data, ident_start,
+		ident_str)) {
 	case let e: *analysis::workspace_entry =>
 		yield e;
 	case void =>
@@ -432,10 +432,10 @@ fn send_location(
 ) void = {
 	const enc = position_encoding(s);
 	const data = analysis::bytes(&doc.buf);
-	const start_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, loc.start.off: size);
-	const end_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, loc.end.off: size);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		loc.start.off: size);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		loc.end.off: size);
 
 	let result = json::newobject();
 	defer json::finish(result);

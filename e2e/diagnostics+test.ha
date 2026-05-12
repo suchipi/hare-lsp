@@ -143,7 +143,7 @@ use strings;
 		defer free(body);
 		const text = strings::fromutf8(body)!;
 		if (strings::contains(text, `"method":"textDocument/publishDiagnostics"`) &&
-		strings::contains(text, "push_diag.ha")) {
+				strings::contains(text, "push_diag.ha")) {
 			saw = true;
 		};
 	};

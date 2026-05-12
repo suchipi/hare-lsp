@@ -38,8 +38,8 @@ fn sym_test_cleanup(
 
 fn sym_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(`{"textDocument":{"uri":"`,
-			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -130,8 +130,7 @@ fn sym_stdlib_module_prefix(module: str) str = {
 @test fn document_symbol_lists_all_decls() void = {
 	let (s, scan, in_buf, out) = sym_test_server();
 	defer sym_test_cleanup(&s, scan, in_buf, out);
-	sym_open(&s,
-		"file:///x.ha",
+	sym_open(&s, "file:///x.ha",
 		"fn a() void = void;\\nfn b() void = void;\\ntype c = int;\\n");
 
 	const params = `{"textDocument":{"uri":"file:///x.ha"}}`;
@@ -177,8 +176,7 @@ fn sym_stdlib_module_prefix(module: str) str = {
 @test fn document_link_returns_imports() void = {
 	let (s, scan, in_buf, out) = sym_test_server();
 	defer sym_test_cleanup(&s, scan, in_buf, out);
-	sym_open(&s,
-		"file:///x.ha",
+	sym_open(&s, "file:///x.ha",
 		"use io;\\nuse strings;\\n\\nexport fn main() void = void;\\n");
 
 	const params = `{"textDocument":{"uri":"file:///x.ha"}}`;

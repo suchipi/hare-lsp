@@ -43,10 +43,10 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 		const sym = &cache.idx.symbols[i];
 		if (!sym.exported) continue;
 		let lens = json::newobject();
-		const sp = analysis::byte_to_position(data,
-			doc.buf.line_index, enc, sym.span.start.off: size);
-		const ep = analysis::byte_to_position(data,
-			doc.buf.line_index, enc, sym.span.end.off: size);
+		const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
+			sym.span.start.off: size);
+		const ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
+			sym.span.end.off: size);
 		json::put(&lens, "range", encode_range_cl(sp, ep))!;
 		// Carry a `data` blob so resolve knows what to fill in.
 		// We also stash the identifier's own position so the resolve
@@ -56,10 +56,10 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 		// occurrence instead of the symbol. The analysis index's
 		// `name_span` is currently a stub (loc.start..loc.start), so we
 		// search the decl's source text for the identifier ourselves.
-		const ident_off = find_ident_within(data,
-			sym.span.start.off: size, sym.span.end.off: size, sym.short_name);
-		const name_pos = analysis::byte_to_position(data,
-			doc.buf.line_index, enc, ident_off);
+		const ident_off = find_ident_within(data, sym.span.start.off: size,
+			sym.span.end.off: size, sym.short_name);
+		const name_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+			ident_off);
 		let lens_data = json::newobject();
 		json::set(&lens_data, "kind", "references": json::value)!;
 		json::set(&lens_data, "uri", uri: json::value)!;

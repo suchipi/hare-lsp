@@ -93,8 +93,7 @@ use strings;
 	const req_tmpl =
 		`{"jsonrpc":"2.0","id":2210,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"`;
 	const req =
-		strings::concat(req_tmpl,
-			caller_uri,
+		strings::concat(req_tmpl, caller_uri,
 			`"},"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":0}}}}`
 		)!;
 	defer free(req);

@@ -194,8 +194,7 @@ export fn shadow() void = {
 	const tmpl =
 		`{"jsonrpc":"2.0","id":1520,"method":"textDocument/references","params":{"textDocument":{"uri":"`;
 	const req =
-		strings::concat(tmpl,
-			uri_a,
+		strings::concat(tmpl, uri_a,
 			`"},"position":{"line":0,"character":12},"context":{"includeDeclaration":true}}}`
 		)!;
 	defer free(req);
@@ -240,8 +239,8 @@ export fn shadow() void = {
 	const tmpl =
 		`{"jsonrpc":"2.0","id":1521,"method":"textDocument/rename","params":{"textDocument":{"uri":"`;
 	const req =
-		strings::concat(tmpl,
-			uri_a, `"},"position":{"line":0,"character":12},"newName":"renamed"}}`)!;
+		strings::concat(tmpl, uri_a,
+			`"},"position":{"line":0,"character":12},"newName":"renamed"}}`)!;
 	defer free(req);
 	send(&s, strings::toutf8(req));
 
@@ -340,7 +339,7 @@ fn drain_until_indexed_ref(s: *session) void = {
 		defer free(body);
 		const text = strings::fromutf8(body)!;
 		if (strings::contains(text, "indexed") &&
-		strings::contains(text, "file(s)")) return;
+				strings::contains(text, "file(s)")) return;
 	};
 };
 

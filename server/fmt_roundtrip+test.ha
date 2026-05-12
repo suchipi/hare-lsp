@@ -250,8 +250,8 @@ fn reparse_error(formatted: str) (void | str) = {
 			const src_max = max_line_length(strings::fromutf8(data)!);
 			const overshoot = fmax - src_max;
 			const msg =
-				fmt::asprintf("{} (max line {}, source max {}, overshoot {})",
-					files[i], fmax, src_max, overshoot)!;
+				fmt::asprintf("{} (max line {}, source max {}, overshoot {})", files[i],
+					fmax, src_max, overshoot)!;
 			append(line_length_failures, msg)!;
 			// Dump the worst-overshoot file's formatted output
 			// to .tmp/overlong-fail.txt so the developer can

@@ -36,8 +36,8 @@ fn ca_test_cleanup(
 
 fn ca_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(`{"textDocument":{"uri":"`,
-			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -89,8 +89,7 @@ fn ca_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 fn organize_imports_new_text(s: *server, uri: str) str = {
 	const params =
-		strings::concat(`{"textDocument":{"uri":"`,
-			uri,
+		strings::concat(`{"textDocument":{"uri":"`, uri,
 			`"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}`
 		)!;
 	defer free(params);
@@ -159,8 +158,7 @@ fn organize_imports_new_text(s: *server, uri: str) str = {
 // the response and must finish it.
 fn ca_get_actions(s: *server, uri: str, request_id: f64) json::value = {
 	const params =
-		strings::concat(`{"textDocument":{"uri":"`,
-			uri,
+		strings::concat(`{"textDocument":{"uri":"`, uri,
 			`"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}`
 		)!;
 	defer free(params);
@@ -193,8 +191,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	let (s, scan, in_buf, out) = ca_test_server();
 	defer ca_test_cleanup(&s, scan, in_buf, out);
 	// `foo` is imported but never referenced. `bar` is used as `bar::x()`.
-	ca_open(&s,
-		"file:///u1.ha", "use foo;\\nuse bar;\\nfn x() void = bar::x();\\n");
+	ca_open(&s, "file:///u1.ha",
+		"use foo;\\nuse bar;\\nfn x() void = bar::x();\\n");
 
 	const v = ca_get_actions(&s, "file:///u1.ha", 100.0);
 	defer json::finish(v);
@@ -223,8 +221,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	let (s, scan, in_buf, out) = ca_test_server();
 	defer ca_test_cleanup(&s, scan, in_buf, out);
 	// The alias `foo` is used as `foo::qux()` so the import is live.
-	ca_open(&s,
-		"file:///u3.ha", "use foo = bar::baz;\\nfn x() void = foo::qux();\\n");
+	ca_open(&s, "file:///u3.ha",
+		"use foo = bar::baz;\\nfn x() void = foo::qux();\\n");
 
 	const v = ca_get_actions(&s, "file:///u3.ha", 102.0);
 	defer json::finish(v);
@@ -291,8 +289,7 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	defer ca_test_cleanup(&s, scan, in_buf, out);
 	// `foo::` appears inside a comment and a string literal; neither
 	// counts as a real use of the import.
-	ca_open(&s,
-		"file:///u8.ha",
+	ca_open(&s, "file:///u8.ha",
 		"use foo;\\n// foo::bar\\nfn x() void = {\\n\\tconst s = \\\"foo::baz\\\";\\n};\\n"
 	);
 
@@ -341,8 +338,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	defer ca_test_cleanup(&s, scan, in_buf, out);
 	// Three imports, none used. The source action should batch all
 	// three into one WorkspaceEdit.
-	ca_open(&s,
-		"file:///u10.ha", "use a;\\nuse b;\\nuse c;\\nfn x() void = void;\\n");
+	ca_open(&s, "file:///u10.ha",
+		"use a;\\nuse b;\\nuse c;\\nfn x() void = void;\\n");
 
 	const v = ca_get_actions(&s, "file:///u10.ha", 109.0);
 	defer json::finish(v);

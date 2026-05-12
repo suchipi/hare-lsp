@@ -67,8 +67,8 @@ export fn imports(lexer: *lex::lexer) ([]ast::import | error) = {
 			import.bindings = name_list(lexer)?;
 			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
 		case ltok::EQUAL =>
-			synassert(mkloc(lexer),
-				len(name) == 1 && !trailing, "Expected name, not ident")?;
+			synassert(mkloc(lexer), len(name) == 1 && !trailing,
+				"Expected name, not ident")?;
 			import.bindings = name[0];
 			free(name);
 			import.ident = ident(lexer)?;

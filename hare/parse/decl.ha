@@ -18,8 +18,8 @@ fn attr_symbol(lexer: *lex::lexer) (str | error) = {
 		synassert(t.2, ascii::isalpha(r) || r == '.' || r == '_', "Invalid symbol")?;
 	};
 	for (let r => strings::next(&d)) {
-		synassert(t.2,
-			ascii::isalnum(r) || r == '$' || r == '.' || r == '_', "Invalid symbol")?;
+		synassert(t.2, ascii::isalnum(r) || r == '$' || r == '.' || r == '_',
+			"Invalid symbol")?;
 	};
 	want(lexer, ltok::RPAREN)?;
 	return s;
@@ -97,8 +97,8 @@ fn decl_func(
 	let body = switch (tok.0) {
 	case ltok::EQUAL =>
 		for (let param &.. prototype.params) {
-			synassert(param.loc.start,
-				len(param.name) > 0, "Expected parameter name in function declaration")?;
+			synassert(param.loc.start, len(param.name) > 0,
+				"Expected parameter name in function declaration")?;
 		};
 		yield alloc(expr(lexer)?)!;
 	case ltok::SEMICOLON =>
@@ -186,14 +186,12 @@ export fn decl(lexer: *lex::lexer) (ast::decl | error) = {
 		comment = lex::comment(lexer);
 	};
 
-	synassert(t.2,
-		!threadlocal || t.0 == ltok::LET || t.0 == ltok::CONST,
+	synassert(t.2, !threadlocal || t.0 == ltok::LET || t.0 == ltok::CONST,
 		"@threadlocal is only valid on globals")?;
 	synassert(t.2,
 		sym == "" || t.0 == ltok::LET || t.0 == ltok::CONST || t.0 == ltok::FN,
 		"@symbol is only valid on globals and functions")?;
-	synassert(t.2,
-		attr == ast::fndecl_attr::NONE || t.0 == ltok::FN,
+	synassert(t.2, attr == ast::fndecl_attr::NONE || t.0 == ltok::FN,
 		"@init, @fini, and @test are only valid on functions")?;
 
 	let decl = switch (t.0) {

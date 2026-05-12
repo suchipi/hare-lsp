@@ -42,7 +42,7 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 		defer free(body);
 		const text = strings::fromutf8(body)!;
 		if (strings::contains(text, "indexed") &&
-		strings::contains(text, "file(s)")) return true;
+				strings::contains(text, "file(s)")) return true;
 	};
 	return false;
 };
@@ -133,7 +133,7 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 		const body = recv(&s);
 		const text = strings::fromutf8(body)!;
 		if (strings::contains(text, `"method":"$/progress"`) &&
-		strings::contains(text, `"kind":"begin"`)) {
+				strings::contains(text, `"kind":"begin"`)) {
 			token = extract_progress_token(text);
 			free(body);
 			break;

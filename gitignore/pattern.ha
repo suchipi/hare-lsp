@@ -81,8 +81,8 @@ export fn parse_pattern(line: str) (pattern | void) = {
 	// Escape: at the start of the pattern body (after the optional `!`)
 	// a backslash before `#` or `!` is a literal-marker only; drop it.
 	if (i + 1 < len(raw) && raw[i] == '\\': u8 &&
-	(raw[i + 1] == '#': u8 ||
-	raw[i + 1] == '!': u8)) {
+			(raw[i + 1] == '#': u8 ||
+			raw[i + 1] == '!': u8)) {
 		i += 1;
 	};
 

@@ -32,8 +32,8 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 
 	const file_path = uri_to_path(doc.uri);
 	defer free(file_path);
-	let build_diags = run_build(s.config.hare_path,
-		file_path, s.config.tags, s.config.build_timeout_ms);
+	let build_diags = run_build(s.config.hare_path, file_path, s.config.tags,
+		s.config.build_timeout_ms);
 	defer finish_build_diagnostics(build_diags);
 
 	// Group build diagnostics by URI.
@@ -136,15 +136,14 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 	};
 	for (let i = 0z; i < limit; i += 1) {
 		const e = r.errors[i];
-		const start = analysis::byte_to_position(data,
-			idx, enc, e.location.off: size);
+		const start = analysis::byte_to_position(data, idx, enc,
+			e.location.off: size);
 		const end = analysis::position {
 			line = start.line,
 			character = start.character + 1,
 		};
 		let d = json::newobject();
-		json::put(&d,
-			"range",
+		json::put(&d, "range",
 			encode_range(lsp::range {
 					start = lsp::position {
 						line = start.line,
@@ -165,8 +164,7 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 	if (total > limit) {
 		const eof_pos = analysis::byte_to_position(data, idx, enc, len(data));
 		let d = json::newobject();
-		json::put(&d,
-			"range",
+		json::put(&d, "range",
 			encode_range(lsp::range {
 					start = lsp::position {
 						line = eof_pos.line,
@@ -203,7 +201,7 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 // error severity.
 fn severity_for(message: str) f64 = {
 	if (strings::contains(message, "unused") ||
-	strings::contains(message, "unreachable")) {
+			strings::contains(message, "unreachable")) {
 		return 2.0;
 	};
 	return 1.0;
@@ -232,8 +230,7 @@ fn unused_import_diagnostics(s: *server, doc: *document) []json::value = {
 		const sp = analysis::byte_to_position(data, line_idx, enc, rm_start);
 		const ep = analysis::byte_to_position(data, line_idx, enc, rm_end);
 		let d = json::newobject();
-		json::put(&d,
-			"range",
+		json::put(&d, "range",
 			encode_range(lsp::range {
 					start = lsp::position {
 						line = sp.line,
@@ -277,7 +274,7 @@ export fn apply_unnecessary_tag_if_match(
 	message: str,
 ) void = {
 	if (strings::contains(message, "unused") ||
-	strings::contains(message, "unreachable")) {
+			strings::contains(message, "unreachable")) {
 		let tags: []json::value = [];
 		append(tags, DIAG_TAG_UNNECESSARY: json::value)!;
 		json::put(d, "tags", tags: json::value)!;
@@ -300,8 +297,8 @@ export fn publish_diagnostics(
 	};
 	json::put(&params, "diagnostics", diagnostics: json::value)!;
 
-	match (lsp::encode_notification(s.out,
-		"textDocument/publishDiagnostics", params)) {
+	match (lsp::encode_notification(s.out, "textDocument/publishDiagnostics",
+		params)) {
 	case size => void;
 	case let e: io::error =>
 		slog_error(s, "publishDiagnostics:", io::strerror(e));

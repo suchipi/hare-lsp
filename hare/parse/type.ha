@@ -138,8 +138,8 @@ fn primitive_type(lexer: *lex::lexer) (ast::_type | error) = {
 	case ltok::NOMEM =>
 		yield builtin_type::NOMEM;
 	case =>
-		return syntaxerr(mkloc(lexer),
-			"Unexpected {}, was expecting primitive type", lex::tokstr(tok));
+		return syntaxerr(mkloc(lexer), "Unexpected {}, was expecting primitive type",
+			lex::tokstr(tok));
 	};
 	return ast::_type {
 		loc = loc_from(lexer, tok.2),
@@ -363,8 +363,8 @@ fn struct_embed_or_field(
 fn array_slice_type(lexer: *lex::lexer) (ast::_type | error) = {
 	let start = want(lexer, ltok::LBRACKET)?;
 
-	let length = match (try(lexer,
-		ltok::UNDERSCORE, ltok::TIMES, ltok::RBRACKET)?) {
+	let length = match (try(lexer, ltok::UNDERSCORE, ltok::TIMES,
+		ltok::RBRACKET)?) {
 	case void =>
 		yield alloc(expr(lexer)?)!;
 	case let tok: lex::token =>
@@ -425,7 +425,7 @@ fn enum_type(lexer: *lex::lexer) (ast::_type | error) = {
 		let name = want(lexer, ltok::NAME)?;
 		let comment = lex::comment(lexer);
 		let value: nullable *ast::expr = if (try(lexer,
-			ltok::EQUAL)? is lex::token) alloc(expr(lexer)?)! else null;
+					ltok::EQUAL)? is lex::token) alloc(expr(lexer)?)! else null;
 
 		defer append(membs, ast::enum_field {
 			name = name.1 as str,
@@ -517,8 +517,8 @@ export fn _type(lexer: *lex::lexer) (ast::_type | error) = {
 	case ltok::NAME =>
 		yield alias_type(lexer)?;
 	case =>
-		return syntaxerr(mkloc(lexer),
-			"Unexpected {}, was expecting type", lex::tokstr(tok));
+		return syntaxerr(mkloc(lexer), "Unexpected {}, was expecting type",
+			lex::tokstr(tok));
 	};
 	return typ;
 };

@@ -136,8 +136,8 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 			columns = 80,
 		});
 
-	let cmd = match (exec::cmd("nvim",
-		"--clean", "-u", NVIM_INIT_PATH, NVIM_BUFFER_PATH)) {
+	let cmd = match (exec::cmd("nvim", "--clean", "-u", NVIM_INIT_PATH,
+		NVIM_BUFFER_PATH)) {
 	case let c: exec::command =>
 		yield c;
 	case let e: exec::error =>

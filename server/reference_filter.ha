@@ -88,8 +88,8 @@ export fn hit_resolves_to(
 
 	const file_module = analysis::module_from_path(path);
 	defer free(file_module);
-	match (analysis::workspace_lookup_for_subunit(&s.workspace_index,
-		su, file_module, qualifier, ident_str)) {
+	match (analysis::workspace_lookup_for_subunit(&s.workspace_index, su,
+		file_module, qualifier, ident_str)) {
 	case let e: *analysis::workspace_entry =>
 		return e.path == expected.path && e.short_name == expected.short_name &&
 		e.kind == expected.kind;

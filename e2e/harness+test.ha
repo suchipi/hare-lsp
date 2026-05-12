@@ -238,8 +238,8 @@ fn parse_header(buf: []u8) ((size, size) | void) = {
 	let found = false;
 	for (let i = 0z; i + len(needle) <= len(buf); i += 1) {
 		if (buf[i] == needle[0] && buf[i + 1] == needle[1] &&
-		buf[i + 2] == needle[2] &&
-		buf[i + 3] == needle[3]) {
+				buf[i + 2] == needle[2] &&
+				buf[i + 3] == needle[3]) {
 			end = i;
 			found = true;
 			break;

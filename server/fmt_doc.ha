@@ -245,8 +245,7 @@ export fn pretty(
 	let cur_col = 0z;
 	let written = 0z;
 	let pending_tabs: i32 = 0;
-	render(out,
-		d, render_mode::BROKEN, max_col, indent, 0z, &cur_col, &written,
+	render(out, d, render_mode::BROKEN, max_col, indent, 0z, &cur_col, &written,
 		&pending_tabs)?;
 	return written;
 };
@@ -287,22 +286,20 @@ fn render(
 			else if (w > WIDTH_INFINITY - tail_width) WIDTH_INFINITY
 			else w + tail_width;
 		const child_mode = if (total <= remaining &&
-		fits_all(g.items)) render_mode::FLAT else render_mode::BROKEN;
-		render_items(out,
-			g.items, child_mode, max_col, indent, tail_width, cur_col, written,
-			pending_tabs)?;
+				fits_all(g.items)) render_mode::FLAT else render_mode::BROKEN;
+		render_items(out, g.items, child_mode, max_col, indent, tail_width, cur_col,
+			written, pending_tabs)?;
 	// Decide flat-or-broken based on remaining columns,
 	// counting both the group's own flat width AND the
 	// `tail_width` of text that will follow on the same line
 	// in flat mode.
 
 	case let n: doc_nest =>
-		render(out,
-			n.inner, mode, max_col, indent + n.delta, tail_width, cur_col, written,
-			pending_tabs)?;
+		render(out, n.inner, mode, max_col, indent + n.delta, tail_width, cur_col,
+			written, pending_tabs)?;
 	case let c: doc_concat =>
-		render_items(out,
-			c.items, mode, max_col, indent, tail_width, cur_col, written, pending_tabs)?;
+		render_items(out, c.items, mode, max_col, indent, tail_width, cur_col,
+			written, pending_tabs)?;
 	case let cm: doc_comment =>
 		// Trailing comments stay glued to the preceding code with
 		// a single space separator (e.g. `assert(...);  // note`).
@@ -334,8 +331,8 @@ fn render(
 			emit_str(out, ib.text, cur_col, written, pending_tabs)?;
 		};
 	case let f: doc_fill =>
-		render_fill(out,
-			f.items, max_col, indent, tail_width, cur_col, written, pending_tabs)?;
+		render_fill(out, f.items, max_col, indent, tail_width, cur_col, written,
+			pending_tabs)?;
 	};
 };
 
@@ -371,9 +368,8 @@ fn render_fill(
 	if (first_need != WIDTH_INFINITY && first_need > remaining0 && *cur_col > 0) {
 		emit_break(out, indent, cur_col, written, pending_tabs)?;
 	};
-	render(out,
-		&items[0], render_mode::FLAT, max_col, indent, 0z, cur_col, written,
-		pending_tabs)?;
+	render(out, &items[0], render_mode::FLAT, max_col, indent, 0z, cur_col,
+		written, pending_tabs)?;
 	let i = 1z;
 	for (i + 1 < len(items); i += 2) {
 		// items[i] is the separator (a doc_line); items[i+1] is
@@ -389,20 +385,17 @@ fn render_fill(
 			need != WIDTH_INFINITY && need <= remaining && fits_flat(&items[i]) &&
 			fits_flat(&items[i + 1]);
 		if (can_fit) {
-			render(out,
-				&items[i], render_mode::FLAT, max_col, indent, 0z, cur_col, written,
-				pending_tabs)?;
-			render(out,
-				&items[i + 1], render_mode::FLAT, max_col, indent, 0z, cur_col, written,
-				pending_tabs)?;
+			render(out, &items[i], render_mode::FLAT, max_col, indent, 0z, cur_col,
+				written, pending_tabs)?;
+			render(out, &items[i + 1], render_mode::FLAT, max_col, indent, 0z, cur_col,
+				written, pending_tabs)?;
 		} else {
 			// Break at the separator, then emit the next content
 			// (which itself may be a group that decides its own
 			// flat-or-broken layout).
 			emit_break(out, indent, cur_col, written, pending_tabs)?;
-			render(out,
-				&items[i + 1], render_mode::BROKEN, max_col, indent, 0z, cur_col, written,
-				pending_tabs)?;
+			render(out, &items[i + 1], render_mode::BROKEN, max_col, indent, 0z, cur_col,
+				written, pending_tabs)?;
 		};
 	};
 };
@@ -430,8 +423,8 @@ fn render_items(
 ) (void | io::error) = {
 	for (let i = 0z; i < len(items); i += 1) {
 		const my_tail = tail_after(items, i + 1, mode, outer_tail);
-		render(out,
-			&items[i], mode, max_col, indent, my_tail, cur_col, written, pending_tabs)?;
+		render(out, &items[i], mode, max_col, indent, my_tail, cur_col, written,
+			pending_tabs)?;
 	};
 };
 

@@ -33,8 +33,8 @@ export fn scan_workspace_folders(s: *server) void = {
 	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
 		append(roots, uri_to_local_path(s.workspace_folders[i].uri))!;
 	};
-	start_index_job(s,
-		roots, &s.workspace_index, "Indexing workspace", "hare-lsp: indexed");
+	start_index_job(s, roots, &s.workspace_index, "Indexing workspace",
+		"hare-lsp: indexed");
 };
 
 fn uri_to_local_path(uri: str) str = lsp::uri_decode_path(uri);
@@ -151,8 +151,8 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 	// matches may appear on a subsequent query).
 	const indexing_in_flight = len(s.pending_index_jobs) > 0;
 	let result_obj = json::newobject();
-	json::put(&result_obj,
-		"isIncomplete", (total > cap || indexing_in_flight): json::value)!;
+	json::put(&result_obj, "isIncomplete",
+		(total > cap || indexing_in_flight): json::value)!;
 	json::put(&result_obj, "items", arr: json::value)!;
 	arr_owned = false;
 	const result_v: json::value = result_obj;

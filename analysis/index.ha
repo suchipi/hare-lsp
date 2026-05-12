@@ -77,8 +77,8 @@ fn index_decl(idx: *file_index, d: *ast::decl) void = {
 	match (d.decl) {
 	case let f: ast::decl_func =>
 		const params = extract_param_names(f);
-		add_symbol(idx,
-			f.ident, symbol_kind::FUNCTION, d.loc, docs, d.exported, params);
+		add_symbol(idx, f.ident, symbol_kind::FUNCTION, d.loc, docs, d.exported,
+			params);
 	case let t: ast::decl_type =>
 		add_symbol(idx, t.ident, symbol_kind::TYPE, d.loc, docs, d.exported, []);
 	case let g: ast::decl_global =>

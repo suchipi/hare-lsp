@@ -154,13 +154,12 @@ export fn run_doctor() int = {
 	// requirement.
 	match (hare_json_root) {
 	case let p: str =>
-		fmt::printfln("[OK] hare-json found in {} (contains {})",
-			p, HARE_JSON_MARKER)!;
+		fmt::printfln("[OK] hare-json found in {} (contains {})", p,
+			HARE_JSON_MARKER)!;
 	case void =>
 		fmt::printfln(
 			"[FAIL] hare-json not reachable from HAREPATH "
-			"(no entry contains {})",
-			HARE_JSON_MARKER)!;
+			"(no entry contains {})", HARE_JSON_MARKER)!;
 		fmt::println("       install with:")!;
 		fmt::println(
 			"         d=$(mktemp -d) && git clone "
@@ -182,23 +181,19 @@ export fn run_doctor() int = {
 			fmt::printfln(
 				"[FAIL] HARE_LSP_LOG_DIR={} is not absolute; "
 				"editors run hare-lsp with cwd=/ and relative "
-				"paths will fail",
-				s)!;
+				"paths will fail", s)!;
 			failed = true;
 		} else if (!is_directory(s)) {
 			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not a "
-				"directory",
-				s)!;
+				"directory", s)!;
 			failed = true;
 		} else if (!is_writable_dir(s)) {
 			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not "
-				"writable",
-				s)!;
+				"writable", s)!;
 			failed = true;
 		} else {
 			fmt::printfln("[OK] HARE_LSP_LOG_DIR={} is absolute "
-				"and writable",
-				s)!;
+				"and writable", s)!;
 		};
 	case void =>
 		fmt::println(

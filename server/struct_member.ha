@@ -85,8 +85,8 @@ fn resolve_struct_member_at(
 	case void =>
 		return void;
 	};
-	const recv_type = match (type_of_expr(s,
-		doc, &cache.pr.subunit, af.object, 0)) {
+	const recv_type = match (type_of_expr(s, doc, &cache.pr.subunit, af.object,
+		0)) {
 	case let lt: located_type =>
 		yield lt;
 	case void =>
@@ -539,8 +539,8 @@ fn walk_for_binding_type(
 				return binding_type(s, doc, su, bd, depth);
 			};
 		};
-		return walk_for_binding_type(s,
-			doc, su, b.bindings[0].init, name, off, depth);
+		return walk_for_binding_type(s, doc, su, b.bindings[0].init, name, off,
+			depth);
 	case let c: ast::compound_expr =>
 		let hit: (located_type | void) = void;
 		for (let i = 0z; i < len(c.exprs); i += 1) {
@@ -1016,10 +1016,10 @@ export fn try_send_struct_member_hover(
 		return false;
 	};
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, ident_range.0);
-	const end_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, ident_range.1);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_range.0);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_range.1);
 
 	let result = json::newobject();
 	let contents = json::newobject();
@@ -1063,10 +1063,10 @@ export fn try_send_struct_member_definition(
 	const line_index = analysis::build_line_index(m.owner_text);
 	defer free(line_index);
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(m.owner_text,
-		line_index, enc, m.name_start);
-	const end_pos = analysis::byte_to_position(m.owner_text,
-		line_index, enc, m.name_end);
+	const start_pos = analysis::byte_to_position(m.owner_text, line_index, enc,
+		m.name_start);
+	const end_pos = analysis::byte_to_position(m.owner_text, line_index, enc,
+		m.name_end);
 
 	let result = json::newobject();
 	json::set(&result, "uri", m.owner_uri: json::value)!;

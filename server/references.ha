@@ -43,8 +43,8 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off = analysis::position_to_byte(data,
-		doc.buf.line_index, position_encoding(s),
+	const off = analysis::position_to_byte(data, doc.buf.line_index,
+		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
@@ -61,9 +61,8 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 	const local = scope_local_binding(doc, target, ident_range.0: u32);
 	if (local is scope_local) {
 		const lb = local as scope_local;
-		let arr: []json::value = scan_text_for_ident_static_in_range(data,
-			doc.uri, doc.buf.line_index, target, lb.scope_start: size,
-			lb.scope_end: size);
+		let arr: []json::value = scan_text_for_ident_static_in_range(data, doc.uri,
+			doc.buf.line_index, target, lb.scope_start: size, lb.scope_end: size);
 		const result_v: json::value = arr;
 		defer json::finish(result_v);
 		match (lsp::encode_response_result(s.out, r.id, result_v)) {
@@ -78,8 +77,8 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 	// (drop hits that re-resolve to a different decl). When it fails
 	// (unindexed file, fresh symbol, stdlib-only target), fall back to
 	// the unfiltered scan to preserve prior behavior.
-	const expected = expected_entry_for_cursor(s,
-		doc, data, ident_range.0, target);
+	const expected = expected_entry_for_cursor(s, doc, data, ident_range.0,
+		target);
 
 	let arr: []json::value = [];
 	let cancelled = false;
@@ -190,15 +189,15 @@ fn find_references_in_doc(
 	expected: (*analysis::workspace_entry | void),
 ) []json::value = {
 	const data = analysis::bytes(&doc.buf);
-	const offsets = scan_text_for_ident_offsets_in_range(data,
-		target, 0z, len(data));
+	const offsets = scan_text_for_ident_offsets_in_range(data, target, 0z,
+		len(data));
 	defer free(offsets);
 	const name_len = len(strings::toutf8(target));
 	let arr: []json::value = [];
 	if (expected is void) {
 		for (let i = 0z; i < len(offsets); i += 1) {
-			append(arr, build_location(data,
-				doc.uri, doc.buf.line_index, offsets[i], name_len))!;
+			append(arr, build_location(data, doc.uri, doc.buf.line_index, offsets[i],
+				name_len))!;
 		};
 		return arr;
 	};
@@ -207,8 +206,8 @@ fn find_references_in_doc(
 	defer free(path);
 	for (let i = 0z; i < len(offsets); i += 1) {
 		if (!hit_resolves_to(s, path, data, offsets[i], exp)) continue;
-		append(arr, build_location(data,
-			doc.uri, doc.buf.line_index, offsets[i], name_len))!;
+		append(arr, build_location(data, doc.uri, doc.buf.line_index, offsets[i],
+			name_len))!;
 	};
 	return arr;
 };
@@ -243,8 +242,8 @@ fn find_references_in_file_on_disk(
 	defer free(idx);
 	const uri = strings::concat("file://", path)!;
 	defer free(uri);
-	const offsets = scan_text_for_ident_offsets_in_range(buf,
-		target, 0z, len(buf));
+	const offsets = scan_text_for_ident_offsets_in_range(buf, target, 0z,
+		len(buf));
 	defer free(offsets);
 	const name_len = len(strings::toutf8(target));
 	let arr: []json::value = [];
@@ -297,8 +296,8 @@ fn scan_text_for_ident_static(
 	line_index: []size,
 	target: str,
 ) []json::value = {
-	return scan_text_for_ident_static_in_range(data,
-		uri, line_index, target, 0z, len(data));
+	return scan_text_for_ident_static_in_range(data, uri, line_index, target, 0z,
+		len(data));
 };
 
 // Scans `data[start..end]` for ident-token occurrences of `target`.
@@ -318,8 +317,8 @@ fn scan_text_for_ident_static_in_range(
 	defer free(offsets);
 	let arr: []json::value = [];
 	for (let i = 0z; i < len(offsets); i += 1) {
-		append(arr, build_location(data,
-			uri, line_index, offsets[i], len(strings::toutf8(target))): json::value)!;
+		append(arr, build_location(data, uri, line_index, offsets[i],
+			len(strings::toutf8(target))): json::value)!;
 	};
 	return arr;
 };
@@ -379,10 +378,10 @@ fn build_location(
 	off: size,
 	name_len: size,
 ) json::value = {
-	const start_pos = analysis::byte_to_position(data,
-		line_index, analysis::encoding::UTF16, off);
-	const end_pos = analysis::byte_to_position(data,
-		line_index, analysis::encoding::UTF16, off + name_len);
+	const start_pos = analysis::byte_to_position(data, line_index,
+		analysis::encoding::UTF16, off);
+	const end_pos = analysis::byte_to_position(data, line_index,
+		analysis::encoding::UTF16, off + name_len);
 	let loc = json::newobject();
 	json::set(&loc, "uri", uri: json::value)!;
 	let r = json::newobject();
@@ -417,8 +416,8 @@ export fn handle_prepare_rename(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off = analysis::position_to_byte(data,
-		doc.buf.line_index, position_encoding(s),
+	const off = analysis::position_to_byte(data, doc.buf.line_index,
+		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
@@ -428,10 +427,10 @@ export fn handle_prepare_rename(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, ident_range.0);
-	const end_pos = analysis::byte_to_position(data,
-		doc.buf.line_index, enc, ident_range.1);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_range.0);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_range.1);
 	let r_obj = json::newobject();
 	let s_obj = json::newobject();
 	json::put(&s_obj, "line", start_pos.line: f64)!;
@@ -460,8 +459,8 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 		return;
 	};
 	if (!is_valid_hare_ident(new_name)) {
-		send_error(s,
-			r.id, lsp::INVALID_PARAMS, "new name is not a valid Hare identifier");
+		send_error(s, r.id, lsp::INVALID_PARAMS,
+			"new name is not a valid Hare identifier");
 		return;
 	};
 
@@ -480,8 +479,8 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off = analysis::position_to_byte(data,
-		doc.buf.line_index, position_encoding(s),
+	const off = analysis::position_to_byte(data, doc.buf.line_index,
+		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
@@ -516,9 +515,8 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 		else expected_entry_for_cursor(s, doc, data, ident_range.0, target);
 	if (local is scope_local) {
 		const lb = local as scope_local;
-		let more = scan_text_for_ident_static_in_range(data,
-			doc.uri, doc.buf.line_index, target, lb.scope_start: size,
-			lb.scope_end: size);
+		let more = scan_text_for_ident_static_in_range(data, doc.uri,
+			doc.buf.line_index, target, lb.scope_start: size, lb.scope_end: size);
 		append(locs, more...)!;
 		free(more);
 	} else {

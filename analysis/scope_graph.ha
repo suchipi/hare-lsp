@@ -235,8 +235,8 @@ fn walk_func(
 		for (let i = 0z; i < len(proto.params); i += 1) {
 			const p = &proto.params[i];
 			if (len(p.name) == 0) continue;
-			add_binding(fn_scope,
-				p.name, binding_kind::FUNC_PARAM, p.loc, body_start, body_end);
+			add_binding(fn_scope, p.name, binding_kind::FUNC_PARAM, p.loc, body_start,
+				body_end);
 		};
 	case => void;
 	};
@@ -278,8 +278,8 @@ fn walk_expr(g: *scope_graph, scope: *scope_node, e: *ast::expr) void = {
 			walk_expr(g, child, c.exprs[i]);
 		};
 	case let f: ast::for_expr =>
-		const for_scope = push_scope(g,
-			scope, e.loc.start.off: u32, e.loc.end.off: u32);
+		const for_scope = push_scope(g, scope, e.loc.start.off: u32,
+			e.loc.end.off: u32);
 		match (f.bindings) {
 		case let p: *ast::expr =>
 			walk_expr(g, for_scope, p);

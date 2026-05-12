@@ -36,8 +36,8 @@ fn fmt_test_cleanup(
 
 fn fmt_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(`{"textDocument":{"uri":"`,
-			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -133,8 +133,7 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	let (s, scan, in_buf, out) = fmt_test_server();
 	defer fmt_test_cleanup(&s, scan, in_buf, out);
 	// Three decls: a, b, c. We'll request range formatting on b only.
-	fmt_open(&s,
-		"file:///x.ha",
+	fmt_open(&s, "file:///x.ha",
 		"fn a() void = void;\\n\\nfn b() void = void;\\n\\nfn c() void = void;\\n");
 
 	// b spans line 2 (0-based) approximately.
@@ -302,8 +301,7 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	s.config.format_indent_width = 2;
 	// Nested block where the inner `}` should land at depth 1 = 2 spaces.
 	// (Hare requires `;` after each compound expression.)
-	fmt_open(&s,
-		"file:///x.ha",
+	fmt_open(&s, "file:///x.ha",
 		"fn x() void = {\\n\\tif (true) {\\n\\t\\treturn;\\n};\\n};\\n");
 
 	// Cursor is right after the inner `}` on line 3, char position 1.

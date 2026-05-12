@@ -33,8 +33,8 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off = analysis::position_to_byte(data,
-		doc.buf.line_index, position_encoding(s),
+	const off = analysis::position_to_byte(data, doc.buf.line_index,
+		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 	const ctx = match (find_call_context(data, off)) {
 	case let c: call_context =>

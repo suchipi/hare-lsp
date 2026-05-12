@@ -377,8 +377,8 @@ fn wsfx_rm(path: str) void = {
 	defer finish(&s);
 
 	// Index one fake entry.
-	analysis::index_file(&s.workspace_index,
-		"/x/foo.ha", strings::toutf8("export fn hello() void = void;\n"));
+	analysis::index_file(&s.workspace_index, "/x/foo.ha",
+		strings::toutf8("export fn hello() void = void;\n"));
 
 	const r = lsp::request {
 		id = 90.0,
@@ -421,8 +421,8 @@ fn wsfx_rm(path: str) void = {
 	// should return null AND remove the index entry.
 	const path = ".tmp/lspstale.ha";
 	wsfx_write(path, "export fn ghost() void = void;\n");
-	analysis::index_file(&s.workspace_index,
-		path, strings::toutf8("export fn ghost() void = void;\n"));
+	analysis::index_file(&s.workspace_index, path,
+		strings::toutf8("export fn ghost() void = void;\n"));
 	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "ghost")) == 1);
 
 	wsfx_rm(path);

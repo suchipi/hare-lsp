@@ -36,8 +36,8 @@ fn ref_test_cleanup(
 
 fn ref_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(`{"textDocument":{"uri":"`,
-			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -90,8 +90,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn references_returns_all_textual_occurrences() void = {
 	let (s, scan, in_buf, out) = ref_test_server();
 	defer ref_test_cleanup(&s, scan, in_buf, out);
-	ref_open(&s,
-		"file:///x.ha", "fn target() void = void;\\nfn caller() void = target();\\n");
+	ref_open(&s, "file:///x.ha",
+		"fn target() void = void;\\nfn caller() void = target();\\n");
 
 	// Position cursor on "target" in the decl.
 	const params =

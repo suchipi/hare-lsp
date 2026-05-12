@@ -114,8 +114,8 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off = analysis::position_to_byte(data,
-		doc.buf.line_index, position_encoding(s),
+	const off = analysis::position_to_byte(data, doc.buf.line_index,
+		position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 
 	// Inspect the bytes preceding `off` to detect "mod::" context.
@@ -232,7 +232,7 @@ fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
 		const sym = &cache.idx.symbols[i];
 		if (len(partial) > 0 &&
-		!strings::hasprefix(sym.short_name, partial)) continue;
+				!strings::hasprefix(sym.short_name, partial)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", sym.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_completion(sym.kind))!;
