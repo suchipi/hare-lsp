@@ -10,6 +10,7 @@
 
 use analysis;
 use encoding::json;
+use fmt;
 use io;
 use lsp;
 use strings;
@@ -142,19 +143,31 @@ export fn finish_document(d: *document) void = {
 export fn handle_did_open(s: *server, n: lsp::notification) void = {
 	const obj = match (params_object(n.params)) {
 	case let o: json::object => yield o;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didOpen",
+			"missing or non-object params");
+		return;
 	};
 	const text_doc = match (object_field_object(&obj, "textDocument")) {
 	case let o: json::object => yield o;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didOpen",
+			"missing or non-object 'textDocument'");
+		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str => yield s;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didOpen",
+			"missing or non-string 'textDocument.uri'");
+		return;
 	};
 	const text = match (object_string(&text_doc, "text")) {
 	case let s: str => yield s;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didOpen",
+			"missing or non-string 'textDocument.text'");
+		return;
 	};
 	const lang = match (object_string(&text_doc, "languageId")) {
 	case let s: str => yield s;
@@ -163,6 +176,10 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 	const version: i64 = match (object_number(&text_doc, "version")) {
 	case let f: f64 => yield f: i64;
 	case void => yield 0i64;
+	};
+
+	if (!check_open_capacity(s, uri, len(text))) {
+		return;
 	};
 
 	const now = time::now(time::clock::MONOTONIC);
@@ -194,15 +211,24 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 export fn handle_did_change(s: *server, n: lsp::notification) void = {
 	const obj = match (params_object(n.params)) {
 	case let o: json::object => yield o;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didChange",
+			"missing or non-object params");
+		return;
 	};
 	const text_doc = match (object_field_object(&obj, "textDocument")) {
 	case let o: json::object => yield o;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didChange",
+			"missing or non-object 'textDocument'");
+		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str => yield s;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didChange",
+			"missing or non-string 'textDocument.uri'");
+		return;
 	};
 	const version: i64 = match (object_number(&text_doc, "version")) {
 	case let f: f64 => yield f: i64;
@@ -211,7 +237,21 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 
 	const doc = match (find_document(s, uri)) {
 	case let p: *document => yield p;
-	case null => return;
+	case null =>
+		warn_unknown_uri(s, "textDocument/didChange", uri);
+		return;
+	};
+	// LSP requires versions to be monotonically increasing. A regression
+	// usually means the client has a bug or got out of sync; warn and
+	// keep the older version so subsequent edits still target the same
+	// buffer state the client thinks it has.
+	if (version != 0 && version < doc.version) {
+		const msg = fmt::asprintf(
+			"textDocument/didChange: version regression for {} ({} < {}); ignoring stale change",
+			uri, version, doc.version)!;
+		defer free(msg);
+		log_warning(s, msg);
+		return;
 	};
 	doc.version = version;
 	// Any text edit invalidates the cached semantic tokens.
@@ -224,13 +264,25 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 	case let p: *json::value =>
 		yield match (*p) {
 		case let a: []json::value => yield a;
-		case => return;
+		case =>
+			warn_invalid_notification(s, "textDocument/didChange",
+				"'contentChanges' must be an array");
+			return;
 		};
-	case => return;
+	case =>
+		warn_invalid_notification(s, "textDocument/didChange",
+			"missing 'contentChanges'");
+		return;
 	};
 
 	for (let i = 0z; i < len(changes); i += 1) {
 		apply_content_change(s, doc, changes[i]);
+	};
+	if (!check_buffer_capacity(s, doc.uri)) {
+		// Drop the document entirely if it has blown past the cap so
+		// the server doesn't keep churning on a runaway buffer.
+		remove_document(s, doc.uri);
+		return;
 	};
 	doc.last_edit_at = time::now(time::clock::MONOTONIC);
 	doc.diagnostics_pending = true;
@@ -310,15 +362,28 @@ export fn position_encoding(s: *server) analysis::encoding = {
 export fn handle_did_close(s: *server, n: lsp::notification) void = {
 	const obj = match (params_object(n.params)) {
 	case let o: json::object => yield o;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didClose",
+			"missing or non-object params");
+		return;
 	};
 	const text_doc = match (object_field_object(&obj, "textDocument")) {
 	case let o: json::object => yield o;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didClose",
+			"missing or non-object 'textDocument'");
+		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str => yield s;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didClose",
+			"missing or non-string 'textDocument.uri'");
+		return;
+	};
+	if (!has_document(s, uri)) {
+		warn_unknown_uri(s, "textDocument/didClose", uri);
+		return;
 	};
 	clear_diagnostics(s, uri);
 	remove_document(s, uri);
@@ -329,19 +394,30 @@ export fn handle_did_close(s: *server, n: lsp::notification) void = {
 export fn handle_did_save(s: *server, n: lsp::notification) void = {
 	const obj = match (params_object(n.params)) {
 	case let o: json::object => yield o;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didSave",
+			"missing or non-object params");
+		return;
 	};
 	const text_doc = match (object_field_object(&obj, "textDocument")) {
 	case let o: json::object => yield o;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didSave",
+			"missing or non-object 'textDocument'");
+		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str => yield s;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "textDocument/didSave",
+			"missing or non-string 'textDocument.uri'");
+		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document => yield p;
-	case null => return;
+	case null =>
+		warn_unknown_uri(s, "textDocument/didSave", uri);
+		return;
 	};
 
 	match (object_string(&obj, "text")) {
@@ -368,24 +444,30 @@ export fn handle_will_save_wait_until(s: *server, r: lsp::request) void = {
 	const obj = match (params_object(r.params)) {
 	case let o: json::object => yield o;
 	case void =>
-		send_null_result(s, r.id);
+		reject_invalid_request(s, r.id, r.method,
+			"missing or non-object params");
 		return;
 	};
 	const text_doc = match (object_field_object(&obj, "textDocument")) {
 	case let o: json::object => yield o;
 	case void =>
-		send_null_result(s, r.id);
+		reject_invalid_request(s, r.id, r.method,
+			"missing or non-object 'textDocument'");
 		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str => yield s;
 	case void =>
-		send_null_result(s, r.id);
+		reject_invalid_request(s, r.id, r.method,
+			"missing or non-string 'textDocument.uri'");
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document => yield p;
 	case null =>
+		// Unknown URI for a request: per spec this is an error, but
+		// returning an empty edit list is friendlier to clients that
+		// race a close + save.
 		send_null_result(s, r.id);
 		return;
 	};
@@ -510,6 +592,67 @@ fn send_result(s: *server, id: lsp::id, result: json::value) void = {
 	case let e: io::error =>
 		slog_error(s, "send_result:", io::strerror(e));
 	};
+};
+
+// --- capacity / validation helpers -----------------------------------
+
+// Emits a window/logMessage(Warning) noting that a notification arrived
+// for a URI the server doesn't have open. Per LSP spec
+// didChange/didClose for an unopened document is a client error.
+fn warn_unknown_uri(s: *server, method: str, uri: str) void = {
+	const msg = fmt::asprintf("{}: no open document for uri {}",
+		method, uri)!;
+	defer free(msg);
+	log_warning(s, msg);
+};
+
+// Returns true when the server can accept a new (or refreshing) document.
+// Enforces [[MAX_OPEN_DOCUMENTS]] and [[MAX_TOTAL_BUFFER_BYTES]]. On
+// rejection, warns via window/logMessage and leaves the document store
+// untouched.
+fn check_open_capacity(s: *server, uri: str, incoming_bytes: size) bool = {
+	const replacing = has_document(s, uri);
+	if (!replacing && len(s.documents) >= MAX_OPEN_DOCUMENTS) {
+		const msg = fmt::asprintf(
+			"textDocument/didOpen: refusing to open {} (already {} documents open; cap {})",
+			uri, len(s.documents), MAX_OPEN_DOCUMENTS)!;
+		defer free(msg);
+		log_warning(s, msg);
+		return false;
+	};
+	let total: size = incoming_bytes;
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		if (replacing && s.documents[i].uri == uri) continue;
+		total += len(analysis::bytes(&s.documents[i].buf));
+	};
+	if (total > MAX_TOTAL_BUFFER_BYTES) {
+		const msg = fmt::asprintf(
+			"textDocument/didOpen: refusing to open {} ({} bytes would exceed total cap of {} bytes)",
+			uri, incoming_bytes, MAX_TOTAL_BUFFER_BYTES)!;
+		defer free(msg);
+		log_warning(s, msg);
+		return false;
+	};
+	return true;
+};
+
+// After applying didChange edits we recheck total buffer size. Returns
+// false when the cap has been exceeded; on false the caller should
+// abandon the document so we don't keep churning on a runaway buffer.
+fn check_buffer_capacity(s: *server, uri: str) bool = {
+	let total: size = 0;
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		total += len(analysis::bytes(&s.documents[i].buf));
+	};
+	if (total > MAX_TOTAL_BUFFER_BYTES) {
+		const msg = fmt::asprintf(
+			"textDocument/didChange: total buffer size {} exceeds cap {}; dropping {}",
+			total, MAX_TOTAL_BUFFER_BYTES, uri)!;
+		defer free(msg);
+		log_warning(s, msg);
+		return false;
+	};
+	return true;
 };
 
 // --- json helpers ----------------------------------------------------

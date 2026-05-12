@@ -6,6 +6,7 @@
 
 use analysis;
 use encoding::json;
+use fmt;
 use io;
 use lsp;
 use strings;
@@ -111,6 +112,10 @@ fn find_or_create_uri_bucket(by_uri: *[](str, []json::value), uri: str) size = {
 
 // Computes parse-only diagnostics for a document and returns a slice of
 // json::value Diagnostic objects. Caller takes ownership.
+//
+// Output is capped at [[MAX_DIAGNOSTICS_PER_FILE]]; when the parser
+// produced more errors than that, a synthetic trailing diagnostic at the
+// end of the buffer notes the truncation count.
 fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 	const cache = parse_of(doc);
 	const r = &cache.pr;
@@ -120,7 +125,13 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 	const data = analysis::bytes(&doc.buf);
 	const idx = doc.buf.line_index;
 
-	for (let i = 0z; i < len(r.errors); i += 1) {
+	const total = len(r.errors);
+	const limit = if (total > MAX_DIAGNOSTICS_PER_FILE) {
+		yield MAX_DIAGNOSTICS_PER_FILE;
+	} else {
+		yield total;
+	};
+	for (let i = 0z; i < limit; i += 1) {
 		const e = r.errors[i];
 		const start = analysis::byte_to_position(data, idx, enc,
 			e.location.off: size);
@@ -144,6 +155,30 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 		json::set(&d, "code", "parse-error": json::value)!;
 		json::set(&d, "message", e.message: json::value)!;
 		apply_unnecessary_tag_if_match(&d, e.message);
+		append(arr, d: json::value)!;
+	};
+	if (total > limit) {
+		const eof_pos = analysis::byte_to_position(data, idx, enc,
+			len(data));
+		let d = json::newobject();
+		json::put(&d, "range", encode_range(lsp::range {
+			start = lsp::position {
+				line = eof_pos.line,
+				character = eof_pos.character,
+			},
+			end = lsp::position {
+				line = eof_pos.line,
+				character = eof_pos.character,
+			},
+		}))!;
+		json::put(&d, "severity", 1: f64)!;
+		json::set(&d, "source", "hare-lsp/parse": json::value)!;
+		json::set(&d, "code", "diagnostics-truncated": json::value)!;
+		const msg = fmt::asprintf(
+			"({} more parse errors not shown; {} of {} reported)",
+			total - limit, limit, total)!;
+		json::set(&d, "message", msg: json::value)!;
+		free(msg);
 		append(arr, d: json::value)!;
 	};
 	return arr;

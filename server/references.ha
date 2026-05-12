@@ -371,26 +371,23 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 		case nomem => continue;
 		};
 		json::set(&edit, "newText", new_name: json::value)!;
-		// Append to changes[u].
-		const existing = json::get(&changes, u);
-		match (existing) {
-		case let p: *json::value =>
-			let arr = match (*p) {
+		// Append to changes[u]. Take the value out of the object
+		// before appending so the object no longer aliases the slice's
+		// backing buffer — `append` may realloc and invalidate the
+		// pointer we'd otherwise leave behind in `changes[u]`.
+		const taken = json::take(&changes, u);
+		let arr = match (taken) {
+		case let v: json::value =>
+			yield match (v) {
 			case let a: []json::value => yield a;
-			case => continue;
-			};
-			append(arr, edit: json::value)!;
-			match (json::take(&changes, u)) {
-			case let v: json::value =>
+			case =>
 				json::finish(v);
-			case void => void;
+				yield ([]: []json::value);
 			};
-			json::put(&changes, u, arr: json::value)!;
-		case void =>
-			let arr: []json::value = [];
-			append(arr, edit: json::value)!;
-			json::put(&changes, u, arr: json::value)!;
+		case void => yield ([]: []json::value);
 		};
+		append(arr, edit: json::value)!;
+		json::put(&changes, u, arr: json::value)!;
 	};
 
 	let result = json::newobject();

@@ -128,6 +128,11 @@ The canonical JSON Schema for these settings is checked in at [editors/vscode/sc
 | `HARE_LSP_LOG_DIR` | Absolute directory to tee the wire-protocol stream into `hare-lsp-{in,out,err}.log`. Useful for diagnosing handshake or framing issues. |
 | `HARE_LSP_LOG_LEVEL` | Minimum stderr-log severity. One of `debug`, `info`, `warn`, `error`. Defaults to `info`. |
 
+## Known limitations
+
+- **Workspace indexing is synchronous.** When a workspace folder is added (via `workspace/didChangeWorkspaceFolders` or the initial `initialize` scan) the server walks every `*.ha` file under the new root on the message-handling thread. For very large workspaces (tens of thousands of files) this blocks the dispatch loop, including `$/cancelRequest`. Smaller workspaces are unaffected. Background indexing with progress reporting is planned but not yet implemented.
+- **Resource caps.** The server refuses to grow past hard caps on open documents (1024), total open-buffer bytes (256 MiB), per-file diagnostics (1000; further parse errors are summarised in a single trailing diagnostic), in-flight server requests (4096), and workspace-index entries (1,000,000). Hitting any cap is logged via `window/logMessage`.
+
 ## License
 
 MPL-2.0 — same as Hare itself.
