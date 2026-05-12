@@ -32,7 +32,7 @@ flow. See the project README for what each one does.
 
 ```sh
 npm install
-npm run watch          # incremental TypeScript compile
+npm run bundle:watch   # rebuild dist/extension.js on save
 ```
 
 Open this folder in VSCode and press F5 to launch a development host.
