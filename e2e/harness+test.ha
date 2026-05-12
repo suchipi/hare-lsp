@@ -61,7 +61,7 @@ export type session = struct {
 // the orphan can't hold a pipe back. If you need to see server
 // diagnostics from an e2e run, set HARE_LSP_LOG_DIR in the test's
 // environment - the server tees its stderr to a file there (see
-// cmd/hare-lsp/main.ha).
+// cmd/hare_lsp/main.ha).
 fn spawn_session() session = {
 	const (in_r, in_w) = exec::pipe();
 	const (out_r, out_w) = exec::pipe();
