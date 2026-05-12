@@ -41,6 +41,12 @@ export type workspace_entry = struct {
 	param_names: []str,
 };
 
+// Cap on the total number of entries the workspace index will hold.
+// Once exceeded, [[index_file]] refuses to add new entries for new files
+// (existing files can still be re-indexed). Matches
+// `server/limits.ha:MAX_WORKSPACE_INDEX_ENTRIES`.
+export def MAX_INDEX_ENTRIES: size = 1_000_000;
+
 // The workspace index.
 export type workspace_index = struct {
 	entries: []workspace_entry,
@@ -101,8 +107,15 @@ export fn drop_file(idx: *workspace_index, path_str: str) void = {
 };
 
 // Adds entries for a single file. text is the file contents.
+//
+// Refuses to add new entries (silently) once the index has grown past
+// [[MAX_INDEX_ENTRIES]]. drop_file always runs first so re-indexing an
+// already-tracked file still works.
 export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 	drop_file(idx, file_path);
+	if (len(idx.entries) >= MAX_INDEX_ENTRIES) {
+		return;
+	};
 	let pr = parse_recover(text, file_path);
 	defer finish_parse_result(&pr);
 	let fi = build_index(&pr.subunit);
