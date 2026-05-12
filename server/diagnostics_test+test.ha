@@ -196,6 +196,42 @@ fn next_msg(data: []u8) (json::value, size) = {
 	assert(len(d2) >= 1);
 };
 
+@test fn unused_import_emits_hint_diagnostic_with_data() void = {
+	let (s, scan, in_buf, out) = diag_test_server();
+	defer diag_test_cleanup(&s, scan, in_buf, out);
+
+	// One unused import, no parse errors. Should emit exactly one
+	// diagnostic: the unused-import hint.
+	const open = `{"textDocument":{"uri":"file:///ui.ha","languageId":"hare","version":1,"text":"use foo;\nfn x() void = void;\n"}}`;
+	let pv = json::loadstr(open)!;
+	const n = lsp::notification {
+		method = strings::dup("textDocument/didOpen")!,
+		params = pv,
+	};
+	defer { free(n.method); json::finish(pv); };
+	handle_did_open(&s, n);
+
+	const data = memio::buffer(out);
+	const (v, _) = next_msg(data);
+	defer json::finish(v);
+	const params = *(json::get(&(v as json::object), "params") as *json::value) as json::object;
+	const diags = *(json::get(&params, "diagnostics") as *json::value) as []json::value;
+	assert(len(diags) == 1);
+	const d0 = diags[0] as json::object;
+	const code = *(json::get(&d0, "code") as *json::value) as str;
+	assert(code == "unused-import");
+	const severity = *(json::get(&d0, "severity") as *json::value) as f64;
+	assert(severity == 4.0);
+	const tags = *(json::get(&d0, "tags") as *json::value) as []json::value;
+	assert(len(tags) == 1);
+	assert(tags[0] as f64 == 1.0);
+	const data_obj = *(json::get(&d0, "data") as *json::value) as json::object;
+	const kind = *(json::get(&data_obj, "kind") as *json::value) as str;
+	assert(kind == "unused-import");
+	const import_idx = *(json::get(&data_obj, "import_idx") as *json::value) as f64;
+	assert(import_idx == 0.0);
+};
+
 @test fn close_clears_diagnostics() void = {
 	let (s, scan, in_buf, out) = diag_test_server();
 	defer diag_test_cleanup(&s, scan, in_buf, out);

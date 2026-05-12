@@ -150,7 +150,7 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 				character = end.character,
 			},
 		}))!;
-		json::put(&d, "severity", 1: f64)!;
+		json::put(&d, "severity", severity_for(e.message))!;
 		json::set(&d, "source", "hare-lsp/parse": json::value)!;
 		json::set(&d, "code", "parse-error": json::value)!;
 		json::set(&d, "message", e.message: json::value)!;
@@ -171,7 +171,7 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 				character = eof_pos.character,
 			},
 		}))!;
-		json::put(&d, "severity", 1: f64)!;
+		json::put(&d, "severity", severity_for("diagnostics truncated"))!;
 		json::set(&d, "source", "hare-lsp/parse": json::value)!;
 		json::set(&d, "code", "diagnostics-truncated": json::value)!;
 		const msg = fmt::asprintf(
@@ -181,7 +181,77 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 		free(msg);
 		append(arr, d: json::value)!;
 	};
+	// Stylistic findings (unused imports) sit alongside parse errors so
+	// editors get them in the same publishDiagnostics batch.
+	let unused = unused_import_diagnostics(s, doc);
+	defer free(unused);
+	for (let i = 0z; i < len(unused); i += 1) {
+		append(arr, unused[i])!;
+	};
 	return arr;
+};
+
+// Maps an error message to an LSP severity level. Parse errors are
+// Error (1) by default; messages mentioning "unused" or "unreachable"
+// downgrade to Warning (2) so they don't clutter the problems pane at
+// error severity.
+fn severity_for(message: str) f64 = {
+	if (strings::contains(message, "unused") ||
+		strings::contains(message, "unreachable")) {
+		return 2.0;
+	};
+	return 1.0;
+};
+
+// Emits one Hint-level diagnostic per unused import. The diagnostic
+// carries the Unnecessary tag (so editors grey it out) and a `data`
+// payload that the code-action handler reads to materialize the
+// removal edit. Detection is delegated to codeactions::find_unused_imports;
+// they are in the same module so no re-export is needed.
+fn unused_import_diagnostics(s: *server, doc: *document) []json::value = {
+	let out: []json::value = [];
+	const cache = parse_of(doc);
+	const pr = &cache.pr;
+	if (len(pr.subunit.imports) == 0) return out;
+	const data = analysis::bytes(&doc.buf);
+	const unused = find_unused_imports(data, &pr.subunit);
+	defer free(unused);
+	if (len(unused) == 0) return out;
+	const enc = position_encoding(s);
+	const line_idx = doc.buf.line_index;
+	for (let i = 0z; i < len(unused); i += 1) {
+		const idx = unused[i];
+		const imp = &pr.subunit.imports[idx];
+		const (rm_start, rm_end) = import_removal_range(data, imp);
+		const sp = analysis::byte_to_position(data, line_idx, enc,
+			rm_start);
+		const ep = analysis::byte_to_position(data, line_idx, enc,
+			rm_end);
+		let d = json::newobject();
+		json::put(&d, "range", encode_range(lsp::range {
+			start = lsp::position {
+				line = sp.line,
+				character = sp.character,
+			},
+			end = lsp::position {
+				line = ep.line,
+				character = ep.character,
+			},
+		}))!;
+		json::put(&d, "severity", 4.0: f64)!;
+		json::set(&d, "source", "hare-lsp": json::value)!;
+		json::set(&d, "code", "unused-import": json::value)!;
+		json::set(&d, "message", "unused import": json::value)!;
+		let tags: []json::value = [];
+		append(tags, DIAG_TAG_UNNECESSARY: json::value)!;
+		json::put(&d, "tags", tags: json::value)!;
+		let data_obj = json::newobject();
+		json::set(&data_obj, "kind", "unused-import": json::value)!;
+		json::put(&data_obj, "import_idx", idx: f64)!;
+		json::put(&d, "data", data_obj)!;
+		append(out, d: json::value)!;
+	};
+	return out;
 };
 
 // LSP DiagnosticTag values.

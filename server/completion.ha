@@ -67,7 +67,7 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 	case prefix_kind::PLAIN =>
 		add_keywords(&arr, prefix_info.partial);
 		add_file_locals(&arr, doc, prefix_info.partial);
-		add_workspace_symbols(s, &arr, prefix_info.partial);
+		add_workspace_symbols(s, doc, &arr, prefix_info.partial);
 	};
 	free(prefix_info.module);
 	free(prefix_info.partial);
@@ -181,13 +181,19 @@ fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 	*arr = a;
 };
 
-fn add_workspace_symbols(s: *server, arr: *[]json::value, partial: str) void = {
+fn add_workspace_symbols(
+	s: *server, doc: *document, arr: *[]json::value, partial: str,
+) void = {
 	let a = *arr;
 	const cap = if (len(s.workspace_index.entries) < 500z) {
 		yield len(s.workspace_index.entries);
 	} else {
 		yield 500z;
 	};
+	// Snapshot the doc's already-imported modules once so we can decide
+	// per-entry whether to attach an auto-import edit.
+	const imported = doc_imported_modules(doc);
+	defer strings_free_all(imported);
 	let added = 0z;
 	for (let i = 0z; i < cap && added < 200z; i += 1) {
 		const e = &s.workspace_index.entries[i];
@@ -205,10 +211,89 @@ fn add_workspace_symbols(s: *server, arr: *[]json::value, partial: str) void = {
 		if (e.kind == analysis::symbol_kind::FUNCTION) {
 			attach_function_snippet(&item, e.short_name, e.param_names);
 		};
+		attach_auto_import(s, doc, &item, e.module, imported);
 		append(a, item: json::value)!;
 		added += 1;
 	};
 	*arr = a;
+};
+
+// Returns the list of module names already imported by `doc`, using the
+// last segment of each import's ident path as the module name. Caller
+// frees with strings_free_all.
+fn doc_imported_modules(doc: *document) []str = {
+	let out: []str = [];
+	const cache = parse_of(doc);
+	const pr = &cache.pr;
+	for (let i = 0z; i < len(pr.subunit.imports); i += 1) {
+		const imp = &pr.subunit.imports[i];
+		if (len(imp.ident) == 0) continue;
+		append(out, strings::dup(imp.ident[len(imp.ident) - 1])!)!;
+	};
+	return out;
+};
+
+fn strings_free_all(list: []str) void = {
+	for (let i = 0z; i < len(list); i += 1) {
+		free(list[i]);
+	};
+	free(list);
+};
+
+// When the entry's module is non-empty and not present in the doc's
+// existing imports, attaches an additionalTextEdits to the completion
+// item that inserts `use <module>;` near the top of the file. The
+// inserted module is the leaf directory name (workspace_entry.module);
+// nested module paths like `encoding::json` are not yet recovered.
+fn attach_auto_import(
+	s: *server,
+	doc: *document,
+	item: *json::object,
+	module: str,
+	imported: []str,
+) void = {
+	if (len(module) == 0) return;
+	for (let i = 0z; i < len(imported); i += 1) {
+		if (imported[i] == module) return;
+	};
+	const data = analysis::bytes(&doc.buf);
+	const cache = parse_of(doc);
+	const pr = &cache.pr;
+	const enc = position_encoding(s);
+	const line_idx = doc.buf.line_index;
+	// Decide where to insert: after the last existing `use` (on its own
+	// line) or at the top of the file.
+	let insert_off: size = 0;
+	let new_text = "";
+	if (len(pr.subunit.imports) > 0) {
+		const last = &pr.subunit.imports[len(pr.subunit.imports) - 1];
+		insert_off = last.loc.end.off: size + 1;
+		if (insert_off < len(data) && data[insert_off] == '\n': u8) {
+			insert_off += 1;
+		};
+	};
+	const pos = analysis::byte_to_position(data, line_idx, enc, insert_off);
+	const tail = if (len(pr.subunit.imports) == 0 && len(data) > 0) "\n" else "";
+	const line_text = strings::concat("use ", module, ";\n", tail)!;
+	new_text = line_text;
+	defer free(new_text);
+
+	let edit = json::newobject();
+	let r_obj = json::newobject();
+	let s_obj = json::newobject();
+	json::put(&s_obj, "line", pos.line: f64)!;
+	json::put(&s_obj, "character", pos.character: f64)!;
+	let e_obj = json::newobject();
+	json::put(&e_obj, "line", pos.line: f64)!;
+	json::put(&e_obj, "character", pos.character: f64)!;
+	json::put(&r_obj, "start", s_obj)!;
+	json::put(&r_obj, "end", e_obj)!;
+	json::put(&edit, "range", r_obj)!;
+	json::set(&edit, "newText", new_text: json::value)!;
+
+	let edits: []json::value = [];
+	append(edits, edit: json::value)!;
+	json::put(item, "additionalTextEdits", edits: json::value)!;
 };
 
 fn add_module_members(s: *server, arr: *[]json::value, module: str, partial: str) void = {

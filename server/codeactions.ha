@@ -46,7 +46,15 @@ export fn handle_code_action(s: *server, r: lsp::request) void = {
 
 	let arr: []json::value = [];
 	add_organize_imports_action(s, doc, uri, &arr);
-	add_unused_import_actions(s, doc, uri, &obj, &arr);
+	// Diagnostic-driven quickfixes run first: when the client echoes
+	// our unused-import diagnostic back in context.diagnostics, emit
+	// quickfixes keyed off it (so the LSP lightbulb appears on the
+	// diagnostic). The set of import indices it covered is then passed
+	// to the range-based path so we don't double up.
+	let covered: []size = [];
+	defer free(covered);
+	add_diagnostic_quickfixes(s, doc, uri, &obj, &arr, &covered);
+	add_unused_import_actions(s, doc, uri, &obj, &arr, covered);
 	send_array_ca(s, r.id, arr);
 };
 
@@ -226,9 +234,14 @@ fn send_array_ca(s: *server, id: lsp::id, arr: []json::value) void = {
 // Per-import quickfixes for unused imports whose source range overlaps
 // the request range, plus a single source action that removes them all.
 // When no imports are unused, nothing is appended.
+//
+// `covered` is the set of import indices already emitted as quickfixes
+// by [[add_diagnostic_quickfixes]]; we skip those here so the same
+// import never produces two duplicate menu entries.
 fn add_unused_import_actions(
 	s: *server, doc: *document, uri: str,
 	params: *json::object, arr: *[]json::value,
+	covered: []size,
 ) void = {
 	const data = analysis::bytes(&doc.buf);
 	const cache = parse_of(doc);
@@ -250,6 +263,7 @@ fn add_unused_import_actions(
 	// the menu short when the user isn't near an unused import.
 	for (let i = 0z; i < len(unused); i += 1) {
 		const idx = unused[i];
+		if (size_in_list(covered, idx)) continue;
 		const imp = &pr.subunit.imports[idx];
 		const (rm_start, rm_end) = import_removal_range(data, imp);
 		if (!range_overlaps_unused(data, doc.buf.line_index, enc,
@@ -288,6 +302,116 @@ fn add_unused_import_actions(
 		"source.removeUnused": json::value)!;
 	json::put(&batch, "edit", we_batch)!;
 	append(cur, batch: json::value)!;
+};
+
+// Reads context.diagnostics from the codeAction params and emits a
+// quickfix for each diagnostic whose `code` is "unused-import" and
+// whose `data.import_idx` references a real import. The quickfix
+// echoes the originating diagnostic back in its `diagnostics` field
+// so the LSP client can correlate it with the lightbulb on the
+// offending line. Import indices it emits for are appended to
+// `*covered` so [[add_unused_import_actions]] can skip them.
+fn add_diagnostic_quickfixes(
+	s: *server, doc: *document, uri: str,
+	params: *json::object, arr: *[]json::value,
+	covered: *[]size,
+) void = {
+	const ctx = match (json::get(params, "context")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case => return;
+		};
+	case => return;
+	};
+	const diags = match (json::get(&ctx, "diagnostics")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let a: []json::value => yield a;
+		case => return;
+		};
+	case => return;
+	};
+	if (len(diags) == 0) return;
+
+	const data = analysis::bytes(&doc.buf);
+	const cache = parse_of(doc);
+	const pr = &cache.pr;
+	if (len(pr.subunit.imports) == 0) return;
+	const enc = position_encoding(s);
+
+	let cur = *arr;
+	let cov = *covered;
+	defer { *arr = cur; *covered = cov; };
+
+	for (let i = 0z; i < len(diags); i += 1) {
+		const d_obj = match (diags[i]) {
+		case let o: json::object => yield o;
+		case => continue;
+		};
+		const code = match (json::get(&d_obj, "code")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str => yield s;
+			case => continue;
+			};
+		case => continue;
+		};
+		if (code != "unused-import") continue;
+		const data_obj = match (json::get(&d_obj, "data")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let o: json::object => yield o;
+			case => continue;
+			};
+		case => continue;
+		};
+		const idx_f = match (json::get(&data_obj, "import_idx")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let f: f64 => yield f;
+			case => continue;
+			};
+		case => continue;
+		};
+		if (idx_f < 0.0) continue;
+		const idx = idx_f: size;
+		if (idx >= len(pr.subunit.imports)) continue;
+		if (size_in_list(cov, idx)) continue;
+
+		const imp = &pr.subunit.imports[idx];
+		const (rm_start, rm_end) = import_removal_range(data, imp);
+		const title = unused_import_title(imp);
+		defer free(title);
+		const edit = build_removal_edit(data, doc.buf.line_index, enc,
+			rm_start, rm_end);
+		let edits: []json::value = [];
+		append(edits, edit)!;
+		const we = build_workspace_edit(uri, edits);
+
+		let action = json::newobject();
+		json::set(&action, "title", title: json::value)!;
+		json::set(&action, "kind", "quickfix": json::value)!;
+		// Echo the diagnostic so LSP clients can link the action to
+		// the lightbulb.
+		let diag_arr: []json::value = [];
+		const d_copy = match (json::dup(diags[i])) {
+		case let v: json::value => yield v;
+		case nomem => abort("oom in diag quickfix");
+		};
+		append(diag_arr, d_copy)!;
+		json::put(&action, "diagnostics", diag_arr: json::value)!;
+		json::put(&action, "edit", we)!;
+		append(cur, action: json::value)!;
+		append(cov, idx)!;
+	};
+};
+
+fn size_in_list(list: []size, v: size) bool = {
+	for (let i = 0z; i < len(list); i += 1) {
+		if (list[i] == v) return true;
+	};
+	return false;
 };
 
 // Indices into pr.subunit.imports that are wholly unused.
