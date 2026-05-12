@@ -3,7 +3,7 @@
 //
 // End-to-end tests: spawn the real binary and walk through the LSP
 // initialize/shutdown handshake. The buffering regression in
-// `cmd/hare-lsp/main.ha` (commit c6a) was invisible to unit tests because
+// `cmd/hare_lsp/main.ha` (commit c6a) was invisible to unit tests because
 // they wrote to a memio sink; only a real OS pipe surfaces it.
 
 use encoding::json;

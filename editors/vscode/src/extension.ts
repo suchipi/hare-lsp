@@ -26,6 +26,38 @@ const execFileAsync = promisify(execFile);
 
 let client: LanguageClient | undefined;
 
+type TestStatus = "passed" | "failed" | "skipped";
+
+interface TestEntry {
+  line: number;
+  status: TestStatus;
+}
+
+// uri -> testName -> { line, status }. Populated as `hare test` output
+// is parsed and consumed by applyDecorations() when an editor for the
+// file is visible.
+const testResults = new Map<string, Map<string, TestEntry>>();
+
+interface FailureLoc {
+  // URI of the file where the failing assertion lives. May differ from
+  // the test source file if the test called into a helper.
+  uri: string;
+  line: number;
+  col: number;
+  message: string;
+}
+
+// Test source uri -> testName -> failure locations (usually one per
+// failing test, but Hare's runner could in principle emit several).
+// Indexed by *test* source so a re-run of that test can clear the
+// associated underlines wherever they landed.
+const testFailures = new Map<string, Map<string, FailureLoc[]>>();
+
+let passedDecoration: vscode.TextEditorDecorationType | undefined;
+let failedDecoration: vscode.TextEditorDecorationType | undefined;
+let skippedDecoration: vscode.TextEditorDecorationType | undefined;
+let failureDiagnostics: vscode.DiagnosticCollection | undefined;
+
 // vscode-languageclient's default ErrorHandler shows a toast after just a
 // handful of restarts and requires the user to click "Restart" to bring
 // the server back. That's reasonable for a server that's expected to be
@@ -112,6 +144,26 @@ class HareLspErrorHandler implements ErrorHandler {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  const mkDecoration = (name: TestStatus, ruler: string) =>
+    vscode.window.createTextEditorDecorationType({
+      gutterIconPath: vscode.Uri.file(
+        context.asAbsolutePath(`media/test-${name}.svg`),
+      ),
+      gutterIconSize: "contain",
+      overviewRulerColor: ruler,
+      overviewRulerLane: vscode.OverviewRulerLane.Left,
+    });
+  passedDecoration = mkDecoration("passed", "#3fb950");
+  failedDecoration = mkDecoration("failed", "#f85149");
+  skippedDecoration = mkDecoration("skipped", "#d4a72c");
+  failureDiagnostics = vscode.languages.createDiagnosticCollection("hare-test");
+  context.subscriptions.push(
+    passedDecoration,
+    failedDecoration,
+    skippedDecoration,
+    failureDiagnostics,
+  );
+
   const serverPath = vscode.workspace
     .getConfiguration("hare-lsp")
     .get<string>("path") ?? "hare-lsp";
@@ -229,7 +281,42 @@ export function activate(context: vscode.ExtensionContext): void {
           const label = testName && testName.length > 0
             ? `hare test: ${testName}`
             : `hare test: ${modulePath.relative}`;
-          runHareInTerminal(hareArgs, modulePath.cwd, label, traceOutputChannel);
+          await saveIfDirty(uri);
+          // Look up which lines the tests live on so output parsing can
+          // attach gutter status to the right ranges.
+          const lenses = await fetchTestLenses(uri);
+          const lineOf = new Map<string, number>();
+          for (const l of lenses) lineOf.set(l.name, l.line);
+          // Clear previously recorded results for the tests we're about
+          // to re-run so stale gutter icons and underlines disappear
+          // immediately.
+          const perFile = testResults.get(uri);
+          if (perFile) {
+            if (testName && testName.length > 0) {
+              perFile.delete(testName);
+            } else {
+              perFile.clear();
+            }
+            refreshDecorationsForUri(uri);
+          }
+          clearFailuresFor(uri, testName && testName.length > 0 ? testName : undefined);
+          const parser = createTestOutputParser({
+            cwd: modulePath.cwd,
+            onResult: (name, status) => {
+              const line = lineOf.get(name);
+              if (line === undefined) return;
+              recordTestResult(uri, name, line, status);
+            },
+            onFailure: (name, failUri, fline, fcol, message) => {
+              recordTestFailure(uri, name, {
+                uri: failUri,
+                line: fline,
+                col: fcol,
+                message,
+              });
+            },
+          });
+          runHareInTerminal(hareArgs, modulePath.cwd, label, traceOutputChannel, parser);
           return null;
         }
         if (command === "hare-lsp.runModule") {
@@ -550,9 +637,67 @@ export function activate(context: vscode.ExtensionContext): void {
         { forceNewWindow: true },
       );
     }),
-    vscode.window.onDidChangeActiveTextEditor(() => {
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
       updateVisibility();
       void refreshStatus();
+      if (editor) applyDecorations(editor);
+    }),
+    vscode.window.onDidChangeVisibleTextEditors((editors) => {
+      for (const editor of editors) applyDecorations(editor);
+    }),
+    vscode.commands.registerCommand("hare-lsp.runTestsInFile", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== "hare") {
+        void vscode.window.showWarningMessage(
+          "Open a Hare file to run its tests.",
+        );
+        return;
+      }
+      if (editor.document.isDirty) await editor.document.save();
+      const uri = editor.document.uri.toString();
+      const lenses = await fetchTestLenses(uri);
+      if (lenses.length === 0) {
+        void vscode.window.showInformationMessage(
+          "No @test functions found in this file.",
+        );
+        return;
+      }
+      const modulePath = resolveModulePath(uri);
+      const lineOf = new Map<string, number>();
+      const names: string[] = [];
+      for (const l of lenses) {
+        lineOf.set(l.name, l.line);
+        names.push(l.name);
+      }
+      const perFile = testResults.get(uri);
+      if (perFile) {
+        perFile.clear();
+        refreshDecorationsForUri(uri);
+      }
+      clearFailuresFor(uri);
+      const parser = createTestOutputParser({
+        cwd: modulePath.cwd,
+        onResult: (name, status) => {
+          const line = lineOf.get(name);
+          if (line === undefined) return;
+          recordTestResult(uri, name, line, status);
+        },
+        onFailure: (name, failUri, fline, fcol, message) => {
+          recordTestFailure(uri, name, {
+            uri: failUri,
+            line: fline,
+            col: fcol,
+            message,
+          });
+        },
+      });
+      runHareInTerminal(
+        ["test", modulePath.relative, ...names],
+        modulePath.cwd,
+        `hare test: ${path.basename(editor.document.uri.fsPath)} (${names.length} tests)`,
+        traceOutputChannel,
+        parser,
+      );
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("hare.path")) {
@@ -599,6 +744,235 @@ function resolveModulePath(uri: string): { cwd: string; relative: string } {
   return { cwd, relative: rel.length > 0 ? rel : "." };
 }
 
+// Queries the server for code lenses on `uri`, then filters to the
+// `▶ Run test: <name>` lenses and extracts (name, line) for each. The
+// server emits these eagerly (no codeLens/resolve needed), so the
+// command + arguments are always populated.
+async function fetchTestLenses(
+  uri: string,
+): Promise<Array<{ name: string; line: number }>> {
+  if (!client) return [];
+  type LspCodeLens = {
+    range: { start: { line: number; character: number } };
+    command?: { command: string; arguments?: unknown[] };
+  };
+  let lenses: LspCodeLens[] | null = null;
+  try {
+    lenses = await client.sendRequest<LspCodeLens[] | null>(
+      "textDocument/codeLens",
+      { textDocument: { uri } },
+    );
+  } catch {
+    return [];
+  }
+  if (!lenses) return [];
+  const out: Array<{ name: string; line: number }> = [];
+  for (const lens of lenses) {
+    const cmd = lens.command;
+    if (!cmd || cmd.command !== "hare-lsp.runTest") continue;
+    const args = cmd.arguments ?? [];
+    if (args.length < 2) continue;
+    const name = typeof args[1] === "string" ? args[1] : "";
+    if (name.length === 0) continue;
+    out.push({ name, line: lens.range.start.line });
+  }
+  return out;
+}
+
+// Hare's test runner prints one line per test in the form
+// `<name>.....PASS in 0.000006000s` (FAIL / SKIP variants share the
+// shape). ANSI color codes only fire when stdout is a tty, and we spawn
+// over a pipe, so no escape stripping is needed.
+const TEST_RESULT_RE =
+  /^([A-Za-z_][A-Za-z0-9_]*)\.{2,}(PASS|FAIL|SKIP) in \d+\.\d+s\s*$/;
+
+// In the post-run `Failures:` section, each failure with a known
+// location prints as `<testname>: <path>:<line>:<col>: <message>`.
+// Backtrace lines (when present) start with hex addresses and don't
+// match this shape.
+const TEST_FAILURE_RE =
+  /^([A-Za-z_][A-Za-z0-9_]*): ([^:]+):(\d+):(\d+): (.+)$/;
+
+function parseTestStatus(status: string): TestStatus | undefined {
+  if (status === "PASS") return "passed";
+  if (status === "FAIL") return "failed";
+  if (status === "SKIP") return "skipped";
+  return undefined;
+}
+
+interface ParserCallbacks {
+  cwd: string;
+  onResult: (name: string, status: TestStatus) => void;
+  onFailure: (
+    testName: string,
+    uri: string,
+    line: number,
+    col: number,
+    message: string,
+  ) => void;
+}
+
+// Stateful line-buffered parser. Returns a function that should be
+// called with each chunk of child stdout/stderr; it invokes `onResult`
+// for each per-test status line and `onFailure` for each failure entry
+// in the trailing `Failures:` section.
+function createTestOutputParser(
+  cb: ParserCallbacks,
+): (chunk: string) => void {
+  let buf = "";
+  return (chunk: string): void => {
+    buf += chunk;
+    for (;;) {
+      const idx = buf.indexOf("\n");
+      if (idx < 0) break;
+      const line = buf.slice(0, idx).replace(/\r$/, "");
+      buf = buf.slice(idx + 1);
+      const r = TEST_RESULT_RE.exec(line);
+      if (r) {
+        const status = parseTestStatus(r[2]);
+        if (status) cb.onResult(r[1], status);
+        continue;
+      }
+      const f = TEST_FAILURE_RE.exec(line);
+      if (f) {
+        const rawPath = f[2];
+        const absPath = path.isAbsolute(rawPath)
+          ? rawPath
+          : path.resolve(cb.cwd, rawPath);
+        const uri = vscode.Uri.file(absPath).toString();
+        cb.onFailure(f[1], uri, Number(f[3]), Number(f[4]), f[5]);
+      }
+    }
+  };
+}
+
+function applyDecorations(editor: vscode.TextEditor): void {
+  if (editor.document.languageId !== "hare") return;
+  if (!passedDecoration || !failedDecoration || !skippedDecoration) return;
+  const uri = editor.document.uri.toString();
+  const entries = testResults.get(uri);
+  const passed: vscode.DecorationOptions[] = [];
+  const failed: vscode.DecorationOptions[] = [];
+  const skipped: vscode.DecorationOptions[] = [];
+  if (entries) {
+    for (const [name, entry] of entries) {
+      const range = new vscode.Range(entry.line, 0, entry.line, 0);
+      const hover = new vscode.MarkdownString(
+        `Hare test \`${name}\`: **${entry.status}**`,
+      );
+      const opts: vscode.DecorationOptions = { range, hoverMessage: hover };
+      if (entry.status === "passed") passed.push(opts);
+      else if (entry.status === "failed") failed.push(opts);
+      else skipped.push(opts);
+    }
+  }
+  editor.setDecorations(passedDecoration, passed);
+  editor.setDecorations(failedDecoration, failed);
+  editor.setDecorations(skippedDecoration, skipped);
+}
+
+function refreshDecorationsForUri(uri: string): void {
+  for (const editor of vscode.window.visibleTextEditors) {
+    if (editor.document.uri.toString() === uri) applyDecorations(editor);
+  }
+}
+
+// `hare test` reads from disk, so an unsaved buffer would be tested
+// against its on-disk contents. Save the matching document first so
+// the user is running what they see.
+async function saveIfDirty(uri: string): Promise<void> {
+  for (const doc of vscode.workspace.textDocuments) {
+    if (doc.uri.toString() !== uri) continue;
+    if (doc.isDirty) await doc.save();
+    return;
+  }
+}
+
+function recordTestResult(uri: string, name: string, line: number, status: TestStatus): void {
+  let perFile = testResults.get(uri);
+  if (!perFile) {
+    perFile = new Map();
+    testResults.set(uri, perFile);
+  }
+  perFile.set(name, { line, status });
+  refreshDecorationsForUri(uri);
+}
+
+// Walks `testFailures`, groups failure locations by target uri, and
+// republishes the diagnostic collection. Cheap enough for the volume
+// of failures a single `hare test` run produces.
+function rebuildFailureDiagnostics(): void {
+  if (!failureDiagnostics) return;
+  const byTarget = new Map<string, vscode.Diagnostic[]>();
+  for (const perFile of testFailures.values()) {
+    for (const [testName, locs] of perFile) {
+      for (const loc of locs) {
+        const start = new vscode.Position(
+          Math.max(0, loc.line - 1),
+          Math.max(0, loc.col - 1),
+        );
+        // Try to extend to the end of the line so the wavy underline
+        // is visible even when no doc is open we fall back to a
+        // zero-width range, which VSCode still renders as a 1-char
+        // wavy underline.
+        let end = start;
+        for (const doc of vscode.workspace.textDocuments) {
+          if (doc.uri.toString() === loc.uri) {
+            const lineLen = doc.lineAt(start.line).range.end.character;
+            end = new vscode.Position(start.line, lineLen);
+            break;
+          }
+        }
+        const diag = new vscode.Diagnostic(
+          new vscode.Range(start, end),
+          `${loc.message}\nFailing test: ${testName}`,
+          vscode.DiagnosticSeverity.Error,
+        );
+        diag.source = "hare test";
+        let bucket = byTarget.get(loc.uri);
+        if (!bucket) {
+          bucket = [];
+          byTarget.set(loc.uri, bucket);
+        }
+        bucket.push(diag);
+      }
+    }
+  }
+  failureDiagnostics.clear();
+  for (const [uri, diags] of byTarget) {
+    failureDiagnostics.set(vscode.Uri.parse(uri), diags);
+  }
+}
+
+function recordTestFailure(
+  sourceUri: string,
+  testName: string,
+  loc: FailureLoc,
+): void {
+  let perFile = testFailures.get(sourceUri);
+  if (!perFile) {
+    perFile = new Map();
+    testFailures.set(sourceUri, perFile);
+  }
+  let arr = perFile.get(testName);
+  if (!arr) {
+    arr = [];
+    perFile.set(testName, arr);
+  }
+  arr.push(loc);
+  rebuildFailureDiagnostics();
+}
+
+// Clears failure entries for one test (when re-running just that test)
+// or for every test in `sourceUri` (when running all tests in a file).
+function clearFailuresFor(sourceUri: string, testName?: string): void {
+  const perFile = testFailures.get(sourceUri);
+  if (!perFile) return;
+  if (testName === undefined) perFile.clear();
+  else perFile.delete(testName);
+  rebuildFailureDiagnostics();
+}
+
 // Backing session for the singleton "Hare" terminal. Created lazily on
 // the first run; replaced when the user closes the terminal. Subsequent
 // runs reuse the same session so output accumulates in one place rather
@@ -643,9 +1017,10 @@ class HareTerminalSession {
     argv: string[],
     cwd: string,
     env: Record<string, string>,
+    onChunk?: (text: string) => void,
   ): void {
     this.terminal.show(true);
-    const start = () => this.spawnChild(harePath, argv, cwd, env);
+    const start = () => this.spawnChild(harePath, argv, cwd, env, onChunk);
     if (this.opened) start();
     else this.pending.push(start);
   }
@@ -655,6 +1030,7 @@ class HareTerminalSession {
     argv: string[],
     cwd: string,
     env: Record<string, string>,
+    onChunk: ((text: string) => void) | undefined,
   ): void {
     // If a previous run is still in flight, kill it before starting a
     // new one. Its exit handler will still fire later; the guard in the
@@ -687,6 +1063,7 @@ class HareTerminalSession {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
       // Terminals require CRLF; the child emits bare LF.
       this.writeEmitter.fire(text.replace(/\r?\n/g, "\r\n"));
+      if (onChunk) onChunk(text);
     };
     child.stdout?.on("data", onData);
     child.stderr?.on("data", onData);
@@ -716,6 +1093,7 @@ function runHareInTerminal(
   cwd: string,
   label: string,
   channel: vscode.OutputChannel,
+  onChunk?: (text: string) => void,
 ): void {
   const config = vscode.workspace.getConfiguration("hare");
   const harePath = config.get<string>("path") ?? "hare";
@@ -738,5 +1116,5 @@ function runHareInTerminal(
   if (!activeHareSession || activeHareSession.isClosed) {
     activeHareSession = new HareTerminalSession();
   }
-  activeHareSession.run(harePath, argv, cwd, env);
+  activeHareSession.run(harePath, argv, cwd, env, onChunk);
 }
