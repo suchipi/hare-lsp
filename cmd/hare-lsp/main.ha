@@ -61,10 +61,11 @@ export fn main() void = {
 	const out_handle: io::handle = if (out_log is io::file)
 		&out_tee: io::handle else os::stdout_file;
 	if (err_log is io::file) {
-		// Replace the process-wide stderr so the existing
-		// `fmt::fprintln(os::stderr, ...)` call sites scattered
-		// through the server tee to the log too, without needing
-		// to thread the wrapped handle.
+		// Replace the process-wide stderr so structured log lines
+		// written by `server::slog_*` (and any direct os::stderr
+		// callers we haven't migrated) tee into the log file as
+		// well, without needing to thread the wrapped handle
+		// through every layer.
 		os::stderr = &err_tee;
 	};
 
