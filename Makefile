@@ -60,6 +60,34 @@ clean:
 	rm -rf hare-lsp harefmt .cache
 	rm -rf editors/vscode/dist editors/vscode/node_modules editors/vscode/*.vsix
 
+# Recovers from a wedged build. Symptoms it addresses:
+#  - `make` appears to hang at e.g. "130/133 tasks completed" for many
+#    minutes. The usual cause is a previous run leaving stale entries in
+#    `.cache/` (orphaned `.tmp` / `.tmp.s` files from a kill -9), or a
+#    zombie `./hare-lsp` from a panicked e2e test holding the shell
+#    pipeline's stderr pipe open and blocking hare's progress writes.
+#  - `make test` finishes producing output but the shell never returns,
+#    because a downstream `tee` / `tail` is waiting for EOF on a pipe
+#    that an orphaned `./hare-lsp` is still holding.
+# Strategy:
+#  1. Kill any `./hare-lsp` whose cwd is this workspace. We deliberately
+#     limit to this workspace so we don't disturb other conductor
+#     workspaces / running LSPs in editors.
+#  2. Remove `.cache/` outright. Hare's own locks self-heal on flock
+#     release, but stray `.tmp.s` files at the cache root from a killed
+#     hare-as.sh have been observed to confuse subsequent builds.
+unstuck:
+	@echo "[unstuck] killing orphan hare-lsp processes in this workspace..."
+	@for pid in $$(pgrep -f '\./hare-lsp$$' 2>/dev/null); do \
+		cwd=$$(lsof -p $$pid 2>/dev/null | awk '$$4=="cwd"{print $$NF}'); \
+		case "$$cwd" in \
+			"$(PWD)") echo "  killing $$pid (cwd=$$cwd)"; kill -TERM $$pid 2>/dev/null; sleep 1; kill -KILL $$pid 2>/dev/null || true ;; \
+		esac; \
+	done
+	@echo "[unstuck] removing .cache/ ..."
+	@rm -rf .cache
+	@echo "[unstuck] done. retry your build."
+
 install: hare-lsp harefmt
 	mkdir -p "$(DESTDIR)$(BINDIR)"
 	install -m755 hare-lsp "$(DESTDIR)$(BINDIR)/hare-lsp"
@@ -82,4 +110,4 @@ vscode-install: vscode-extension
 vscode-uninstall:
 	code --uninstall-extension local.hare-lsp
 
-.PHONY: all check-deps test clean install uninstall vscode-extension vscode-install vscode-uninstall
+.PHONY: all check-deps test clean unstuck install uninstall vscode-extension vscode-install vscode-uninstall
