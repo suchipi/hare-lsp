@@ -14,7 +14,6 @@
 use bytes;
 use fmt;
 use fs;
-use gitignore;
 use hare::lex;
 use io;
 use os;
