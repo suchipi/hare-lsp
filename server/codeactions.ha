@@ -3,6 +3,18 @@
 //
 // Code actions. Provides:
 //   - source.organizeImports: sort + dedupe `use` statements.
+//   - quickfix: remove a single unused `use` statement (one per detected
+//     unused import; only emitted when the request range overlaps the
+//     import).
+//   - source: remove all unused `use` statements in one batch.
+//
+// Unused-import detection is textual and conservative: it scans the
+// document body (everything after the last `use` statement) for
+// path-head identifiers, distinguishing namespace use (name followed by
+// `::`) from direct use (member name standalone). A `use foo;` is
+// considered unused only when `foo` never appears as the head of a `::`
+// path in the body. Wildcard imports (`use foo::*;`) are never flagged
+// because the introduced names are not statically knowable.
 
 use analysis;
 use encoding::json;
@@ -34,6 +46,7 @@ export fn handle_code_action(s: *server, r: lsp::request) void = {
 
 	let arr: []json::value = [];
 	add_organize_imports_action(s, doc, uri, &arr);
+	add_unused_import_actions(s, doc, uri, &obj, &arr);
 	send_array_ca(s, r.id, arr);
 };
 
@@ -208,4 +221,308 @@ fn send_array_ca(s: *server, id: lsp::id, arr: []json::value) void = {
 	case size => void;
 	case => void;
 	};
+};
+
+// Per-import quickfixes for unused imports whose source range overlaps
+// the request range, plus a single source action that removes them all.
+// When no imports are unused, nothing is appended.
+fn add_unused_import_actions(
+	s: *server, doc: *document, uri: str,
+	params: *json::object, arr: *[]json::value,
+) void = {
+	const data = analysis::bytes(&doc.buf);
+	const cache = parse_of(doc);
+	const pr = &cache.pr;
+	if (len(pr.subunit.imports) == 0) return;
+
+	const unused = find_unused_imports(data, &pr.subunit);
+	defer free(unused);
+	if (len(unused) == 0) return;
+
+	const req_range = extract_request_range(params);
+	const enc = position_encoding(s);
+
+	let cur = *arr;
+	defer { *arr = cur; };
+
+	// Per-import quickfixes only when the request range overlaps the
+	// import. Editors invoke code actions at the cursor, so this keeps
+	// the menu short when the user isn't near an unused import.
+	for (let i = 0z; i < len(unused); i += 1) {
+		const idx = unused[i];
+		const imp = &pr.subunit.imports[idx];
+		const (rm_start, rm_end) = import_removal_range(data, imp);
+		if (!range_overlaps_unused(data, doc.buf.line_index, enc,
+			req_range, rm_start, rm_end)) continue;
+
+		const title = unused_import_title(imp);
+		defer free(title);
+		const edit = build_removal_edit(data, doc.buf.line_index, enc,
+			rm_start, rm_end);
+
+		let edits: []json::value = [];
+		append(edits, edit)!;
+		const we = build_workspace_edit(uri, edits);
+		let action = json::newobject();
+		json::set(&action, "title", title: json::value)!;
+		json::set(&action, "kind", "quickfix": json::value)!;
+		json::put(&action, "edit", we)!;
+		append(cur, action: json::value)!;
+	};
+
+	// Single source action that removes every unused import at once.
+	let batch_edits: []json::value = [];
+	for (let i = 0z; i < len(unused); i += 1) {
+		const idx = unused[i];
+		const imp = &pr.subunit.imports[idx];
+		const (rm_start, rm_end) = import_removal_range(data, imp);
+		const edit = build_removal_edit(data, doc.buf.line_index, enc,
+			rm_start, rm_end);
+		append(batch_edits, edit)!;
+	};
+	const we_batch = build_workspace_edit(uri, batch_edits);
+	let batch = json::newobject();
+	json::set(&batch, "title",
+		"Remove all unused imports": json::value)!;
+	json::set(&batch, "kind",
+		"source.removeUnused": json::value)!;
+	json::put(&batch, "edit", we_batch)!;
+	append(cur, batch: json::value)!;
+};
+
+// Indices into pr.subunit.imports that are wholly unused.
+fn find_unused_imports(data: []u8, su: *ast::subunit) []size = {
+	let out: []size = [];
+	if (len(su.imports) == 0) return out;
+
+	// Scan everything past the last import statement (loc.end is the
+	// position of the `;`, so add 1).
+	let scan_start = su.imports[len(su.imports) - 1].loc.end.off: size + 1;
+	if (scan_start > len(data)) scan_start = len(data);
+	let ns_names: []str = [];
+	let direct_names: []str = [];
+	defer {
+		strings_finish_all(ns_names);
+		strings_finish_all(direct_names);
+	};
+	collect_body_path_heads(data, scan_start, &ns_names, &direct_names);
+
+	for (let i = 0z; i < len(su.imports); i += 1) {
+		const imp = &su.imports[i];
+		match (imp.bindings) {
+		case ast::import_wildcard =>
+			// `use foo::*;` exposes unknown names; can't decide.
+			continue;
+		case void =>
+			if (len(imp.ident) == 0) continue;
+			const name = imp.ident[len(imp.ident) - 1];
+			if (str_in_list(ns_names, name)) continue;
+			append(out, i)!;
+		case let a: ast::import_alias =>
+			if (str_in_list(ns_names, a)) continue;
+			append(out, i)!;
+		case let m: ast::import_members =>
+			let all_unused = true;
+			for (let j = 0z; j < len(m); j += 1) {
+				if (str_in_list(direct_names, m[j])) {
+					all_unused = false;
+					break;
+				};
+			};
+			if (all_unused) append(out, i)!;
+		};
+	};
+	return out;
+};
+
+// Walks `data` from `start`, recording path-head idents into either
+// ns_names (when the byte right after the ident is `::`) or direct_names
+// (otherwise). A path-head is an ident NOT preceded by `::`, so `foo` in
+// `bar::foo` is treated as a continuation and skipped. Comments, string
+// literals, char literals, and raw strings are skipped via
+// analysis::token_skip_noncode.
+fn collect_body_path_heads(
+	data: []u8, start: size,
+	ns_names: *[]str, direct_names: *[]str,
+) void = {
+	let ns = *ns_names;
+	let dr = *direct_names;
+	defer { *ns_names = ns; *direct_names = dr; };
+
+	let i = start;
+	const limit = len(data);
+	for (i < limit) {
+		const after = analysis::token_skip_noncode(data, i, limit);
+		if (after > i) {
+			i = after;
+			continue;
+		};
+		const b = data[i];
+		if (!analysis::is_ident_byte(b)) {
+			i += 1;
+			continue;
+		};
+		if (i > 0 && analysis::is_ident_byte(data[i - 1])) {
+			// Mid-ident byte; not a token boundary.
+			i += 1;
+			continue;
+		};
+		// Locate the end of this ident.
+		let e = i;
+		for (e < limit && analysis::is_ident_byte(data[e]); e += 1) void;
+		// Skip digit-leading (numeric literals).
+		if (b >= '0': u8 && b <= '9': u8) {
+			i = e;
+			continue;
+		};
+		// Skip path continuations.
+		if (i >= 2 && data[i - 1] == ':': u8 && data[i - 2] == ':': u8) {
+			i = e;
+			continue;
+		};
+		const name = strings::fromutf8(data[i..e])!;
+		if (e + 1 < limit && data[e] == ':': u8 && data[e + 1] == ':': u8) {
+			if (!str_in_list(ns, name)) {
+				append(ns, strings::dup(name)!)!;
+			};
+		} else {
+			if (!str_in_list(dr, name)) {
+				append(dr, strings::dup(name)!)!;
+			};
+		};
+		i = e;
+	};
+};
+
+fn str_in_list(list: []str, s: str) bool = {
+	for (let i = 0z; i < len(list); i += 1) {
+		if (list[i] == s) return true;
+	};
+	return false;
+};
+
+fn strings_finish_all(list: []str) void = {
+	for (let i = 0z; i < len(list); i += 1) {
+		free(list[i]);
+	};
+	free(list);
+};
+
+// Title to show in the editor's code-action menu. The introduced name
+// (last segment for void bindings, alias for aliased imports, full
+// member list otherwise) is the most useful piece for users.
+fn unused_import_title(imp: *ast::import) str = {
+	match (imp.bindings) {
+	case void =>
+		if (len(imp.ident) == 0) {
+			return strings::dup("Remove unused import")!;
+		};
+		const last = imp.ident[len(imp.ident) - 1];
+		return strings::concat("Remove unused import '",
+			last, "'")!;
+	case let a: ast::import_alias =>
+		return strings::concat("Remove unused import '", a, "'")!;
+	case let m: ast::import_members =>
+		const joined = strings::join("::", imp.ident...)!;
+		defer free(joined);
+		const inner = strings::join(", ", m...)!;
+		defer free(inner);
+		return strings::concat("Remove unused import '", joined,
+			"::{", inner, "}'")!;
+	case ast::import_wildcard =>
+		return strings::dup("Remove unused import")!;
+	};
+};
+
+// Returns the byte range [start, end) covering the full `use ...;\n?`
+// statement for an import. The AST's `loc` covers only the ident path,
+// so we walk back from loc.start over horizontal whitespace to find the
+// `use` keyword, and forward from loc.end (which sits at the `;`)
+// past the terminating `;` and any single trailing newline. We do not
+// cross newlines walking back, so any blank line above the import is
+// preserved.
+fn import_removal_range(data: []u8, imp: *ast::import) (size, size) = {
+	let s = imp.loc.start.off: size;
+	for (s > 0; s -= 1) {
+		const b = data[s - 1];
+		if (b != ' ': u8 && b != '\t': u8) break;
+	};
+	if (s >= 3 && data[s - 3] == 'u': u8 && data[s - 2] == 's': u8
+			&& data[s - 1] == 'e': u8
+			&& (s == 3 || !analysis::is_ident_byte(data[s - 4]))) {
+		s -= 3;
+	};
+	let e = imp.loc.end.off: size + 1;
+	if (e > len(data)) e = len(data);
+	if (e < len(data) && data[e] == '\n': u8) {
+		e += 1;
+	};
+	return (s, e);
+};
+
+// LSP range from the request params, or void if absent. We use this to
+// decide whether to emit per-import quickfixes for a given import.
+fn extract_request_range(params: *json::object) (lsp::range | void) = {
+	const range_v = match (json::get(params, "range")) {
+	case let p: *json::value => yield *p;
+	case => return void;
+	};
+	match (lsp::decode_range(range_v)) {
+	case let r: lsp::range => return r;
+	case lsp::bad_message => return void;
+	};
+};
+
+// Returns true when the request range overlaps the import's source
+// range, OR when no range was given. For non-empty ranges this is the
+// usual half-open overlap (a < end && start < b). For an empty range -
+// which is how editors encode a bare cursor position - we treat it as
+// the point at `a` and require it to fall in [imp_start, imp_end]; this
+// matches user intent ("the cursor is on this line").
+fn range_overlaps_unused(
+	data: []u8, line_index: []size, enc: analysis::encoding,
+	req: (lsp::range | void), imp_start: size, imp_end: size,
+) bool = {
+	const r = match (req) {
+	case let r: lsp::range => yield r;
+	case void => return true;
+	};
+	const a = analysis::position_to_byte(data, line_index, enc,
+		analysis::position { line = r.start.line, character = r.start.character });
+	const b = analysis::position_to_byte(data, line_index, enc,
+		analysis::position { line = r.end.line, character = r.end.character });
+	if (a == b) return a >= imp_start && a <= imp_end;
+	return a < imp_end && imp_start < b;
+};
+
+// Builds a single TextEdit removing [start..end) by emitting an empty
+// replacement at that range. Caller appends the result to a TextEdit[].
+fn build_removal_edit(
+	data: []u8, line_index: []size, enc: analysis::encoding,
+	start: size, end: size,
+) json::value = {
+	const sp = analysis::byte_to_position(data, line_index, enc, start);
+	const ep = analysis::byte_to_position(data, line_index, enc, end);
+	let edit = json::newobject();
+	let r_obj = json::newobject();
+	let s_obj = json::newobject();
+	json::put(&s_obj, "line", sp.line: f64)!;
+	json::put(&s_obj, "character", sp.character: f64)!;
+	let e_obj = json::newobject();
+	json::put(&e_obj, "line", ep.line: f64)!;
+	json::put(&e_obj, "character", ep.character: f64)!;
+	json::put(&r_obj, "start", s_obj)!;
+	json::put(&r_obj, "end", e_obj)!;
+	json::put(&edit, "range", r_obj)!;
+	json::set(&edit, "newText", "": json::value)!;
+	return edit: json::value;
+};
+
+// Wraps a TextEdit[] in a WorkspaceEdit { changes: { uri: edits } }.
+fn build_workspace_edit(uri: str, edits: []json::value) json::value = {
+	let changes = json::newobject();
+	json::put(&changes, uri, edits: json::value)!;
+	let we = json::newobject();
+	json::put(&we, "changes", changes)!;
+	return we: json::value;
 };

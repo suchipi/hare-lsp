@@ -139,6 +139,11 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 
 // Handles callHierarchy/outgoingCalls. For each function in the workspace
 // whose name appears within the source function's span, emit an entry.
+// Self (matching the source by uri+name) is excluded - recursive calls
+// would otherwise produce a tree node that loops to itself - and within
+// a single response we dedupe by (uri, name) so multiple workspace
+// entries pointing at the same function definition don't double-emit.
+// Cycle avoidance across calls is the client's responsibility.
 export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	const (item_name, item_uri) = match (parse_call_item(r.params)) {
 	case let v: (str, str) => yield v;
@@ -175,10 +180,13 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	// For every workspace function entry, if its name appears in body
 	// (as a token), record an outgoing call.
 	let arr: []json::value = [];
+	let visited: [](str, str) = [];
+	defer free(visited);
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const entry = &s.workspace_index.entries[i];
 		if (entry.kind != analysis::symbol_kind::FUNCTION) continue;
-		if (entry.short_name == item_name) continue;
+		if (entry.uri == item_uri && entry.short_name == item_name) continue;
+		if (call_visited_has(visited, entry.uri, entry.short_name)) continue;
 		if (!body_contains_token(body, entry.short_name)) continue;
 
 		// Build "to" CallHierarchyItem.
@@ -217,8 +225,16 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 		json::put(&outgoing, "to", to)!;
 		json::put(&outgoing, "fromRanges", from_ranges: json::value)!;
 		append(arr, outgoing: json::value)!;
+		append(visited, (entry.uri, entry.short_name))!;
 	};
 	send_array_local(s, r.id, arr);
+};
+
+fn call_visited_has(vis: [](str, str), uri: str, name: str) bool = {
+	for (let i = 0z; i < len(vis); i += 1) {
+		if (vis[i].0 == uri && vis[i].1 == name) return true;
+	};
+	return false;
 };
 
 fn body_contains_token(body: []u8, name: str) bool = {

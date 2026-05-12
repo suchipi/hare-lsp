@@ -118,6 +118,16 @@ Settings are read from the `hare` namespace. Defaults are in parentheses.
 | `inlayHints.parameterNames` | boolean | `true` | Show parameter-name hints at call sites. |
 | `inlayHints.inferredTypes` | boolean | `true` | Show inferred-type hints on `let`/`const`. |
 
+## Known limitations
+
+These features work but have caveats worth knowing before relying on them:
+
+- **References & rename are textual.** `textDocument/references` and `textDocument/rename` scan the workspace for ident tokens matching the cursor name. The scan respects comments, strings, and char literals, but it is **not scope-aware**: a `let foo` inside one function and a global `foo` are indistinguishable. Renaming a local that shadows a global will rewrite the global too. This matches what many LSPs (gopls's fallback, rust-analyzer in degraded mode) do; full scope-aware rename is on the roadmap. Workaround: when renaming a shadowing local, pick a unique new name first, then rename freely.
+- **Formatting requires a parseable file.** Full / range formatting only runs when the document parses cleanly. If there are syntax errors, on-type re-indent still fires (it operates on whitespace only and never rewrites tokens), but full/range formatting returns no edits. Save the file in a parseable state to format.
+- **Type hierarchy is name-based.** `typeHierarchy/supertypes` and `subtypes` match by short identifier name across the workspace. Two unrelated types with the same short name in different modules will appear linked.
+- **Inlay-hint types are best-effort.** Inferred types resolve literals, declared types, and simple expressions; complex inference (generic instantiations, deeply chained calls) may show no hint rather than a wrong one.
+- **`workspace/symbol` and document links** resolve stdlib imports only when `HAREPATH` overlaps a workspace folder.
+
 ## License
 
 MPL-2.0 — same as Hare itself.

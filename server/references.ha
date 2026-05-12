@@ -2,10 +2,16 @@
 // (c) hare-lsp authors
 //
 // References, prepareRename, and rename. The current implementation does a
-// textual ident-token scan across the workspace — that's faithful to what
+// textual ident-token scan across the workspace - that's faithful to what
 // many production LSPs (gopls, rust-analyzer's fallback path) do when full
-// scope-aware analysis is unavailable. False positives within shadowed
-// scopes are possible but rare in Hare.
+// scope-aware analysis is unavailable.
+//
+// Known limitation: the scan is not scope-aware. A `let foo` shadowing a
+// global `foo` is indistinguishable from the global, so a rename will
+// rewrite both. Comments, strings, char literals, and raw strings are
+// skipped via token_skip_noncode so prose matches don't produce false
+// positives. The README "Known limitations" section documents this for
+// users.
 
 use analysis;
 use bufio;
