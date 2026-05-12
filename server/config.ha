@@ -8,6 +8,7 @@
 // All fields are optional; defaults are populated by [[default_config]] and
 // [[apply_settings]] only overwrites fields the client actually provided.
 
+use analysis;
 use encoding::json;
 use lsp;
 use strings;
@@ -52,7 +53,20 @@ export type config = struct {
 	// Whether to render inlay hints for parameter names and inferred types.
 	inlay_hints_parameter_names: bool,
 	inlay_hints_inferred_types: bool,
+
+	// Max recursion depth for inferred-type hints. 0 disables anything
+	// beyond literals + declared types; higher values follow function-
+	// call return types, identifier bindings, and type aliases. The
+	// server clamps the effective value at [[INLAY_DEPTH_HARD_MAX]] to
+	// guard against pathological lookups.
+	inlay_hints_inferred_types_max_depth: u32,
+
+	// Configurable resource caps. See [[limits]] / [[default_limits]].
+	limits: limits,
 };
+
+// Absolute ceiling on `inlay_hints_inferred_types_max_depth`.
+export def INLAY_DEPTH_HARD_MAX: u32 = 16;
 
 // Indent style for formatter output.
 export type indent_style = enum {
@@ -74,6 +88,8 @@ export fn default_config() config = config {
 	format_insert_final_newline = true,
 	inlay_hints_parameter_names = true,
 	inlay_hints_inferred_types = true,
+	inlay_hints_inferred_types_max_depth = 3,
+	limits = default_limits(),
 };
 
 // Releases memory owned by the config.
@@ -131,8 +147,20 @@ export fn apply_configuration_response(s: *server, result: json::value) void = {
 	const old_ih_params = s.config.inlay_hints_parameter_names;
 	const old_ih_inferred = s.config.inlay_hints_inferred_types;
 	apply_settings(s, arr[0]);
+	apply_limits_to_indexes(s);
 	refresh_after_config_change(s, old_debounce, old_enable_build,
 		old_ih_params, old_ih_inferred);
+};
+
+// Propagates the configurable max-entries cap into the live workspace
+// and stdlib indexes. Called after [[apply_settings]] so the new value
+// takes effect prospectively. Lowering below current usage applies to
+// future inserts only; we don't proactively evict.
+fn apply_limits_to_indexes(s: *server) void = {
+	analysis::set_max_entries(&s.workspace_index,
+		s.config.limits.max_workspace_index_entries);
+	analysis::set_max_entries(&s.stdlib_index,
+		s.config.limits.max_workspace_index_entries);
 };
 
 // Handles the workspace/didChangeConfiguration notification.
@@ -179,6 +207,7 @@ export fn handle_did_change_configuration(s: *server, n: lsp::notification) void
 		match (json::get(&o, "hare")) {
 		case let p: *json::value =>
 			apply_settings(s, *p);
+			apply_limits_to_indexes(s);
 			refresh_after_config_change(s,
 				old_debounce, old_enable_build,
 				old_ih_params, old_ih_inferred);
@@ -188,6 +217,7 @@ export fn handle_did_change_configuration(s: *server, n: lsp::notification) void
 	case => void;
 	};
 	apply_settings(s, settings);
+	apply_limits_to_indexes(s);
 	refresh_after_config_change(s, old_debounce, old_enable_build,
 		old_ih_params, old_ih_inferred);
 };
@@ -388,6 +418,58 @@ export fn apply_settings(s: *server, v: json::value) void = {
 				};
 			case => void;
 			};
+			match (json::get(&iobj, "inferredTypesMaxDepth")) {
+			case let ip: *json::value =>
+				match (*ip) {
+				case let f: f64 =>
+					if (f >= 0.0) {
+						let n: u32 = f: u32;
+						if (n > INLAY_DEPTH_HARD_MAX) {
+							n = INLAY_DEPTH_HARD_MAX;
+						};
+						s.config.inlay_hints_inferred_types_max_depth = n;
+					};
+				case => void;
+				};
+			case => void;
+			};
+		case => void;
+		};
+	case => void;
+	};
+
+	// "limits": { maxOpenDocuments, maxTotalBufferBytes, ... }
+	match (json::get(&o, "limits")) {
+	case let p: *json::value =>
+		match (*p) {
+		case let lobj: json::object =>
+			apply_limit_u64(&lobj, "maxOpenDocuments",
+				&s.config.limits.max_open_documents);
+			apply_limit_u64(&lobj, "maxTotalBufferBytes",
+				&s.config.limits.max_total_buffer_bytes);
+			apply_limit_u64(&lobj, "maxPendingRequests",
+				&s.config.limits.max_pending_requests);
+			apply_limit_u64(&lobj, "maxCancelledIds",
+				&s.config.limits.max_cancelled_ids);
+			apply_limit_u64(&lobj, "maxDiagnosticsPerFile",
+				&s.config.limits.max_diagnostics_per_file);
+			apply_limit_u64(&lobj, "maxWorkspaceIndexEntries",
+				&s.config.limits.max_workspace_index_entries);
+		case => void;
+		};
+	case => void;
+	};
+};
+
+// Reads a non-negative integer from `lobj[key]` into `*out`. Ignores
+// missing keys, negative values, and non-numeric values so partial
+// settings don't clobber existing values.
+fn apply_limit_u64(lobj: *json::object, key: str, out: *size) void = {
+	match (json::get(lobj, key)) {
+	case let p: *json::value =>
+		match (*p) {
+		case let f: f64 =>
+			if (f >= 0.0) *out = f: size;
 		case => void;
 		};
 	case => void;

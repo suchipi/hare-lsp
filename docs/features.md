@@ -51,20 +51,23 @@ Targets LSP 3.17 and Hare v0.26.0.
 - Goto type definition: yes.
 - Goto implementation: aliased to type definition (Hare has no
   inheritance, so this is the closest sensible mapping).
-- Find references: scope-aware for locals; textual workspace scan for
-  top-level decls - see [Known limitations](#known-limitations).
+- Find references: scope-aware for locals; module-aware for top-level
+  decls (textual workspace scan re-resolves each hit against its
+  file's `use` list + workspace index to filter out same-named
+  unrelated decls).
 - Document highlight: yes.
 - Document symbols: yes (hierarchical).
 - Workspace symbols: yes, with `resolveProvider: true`.
 - Document links: yes (resolves `use foo::bar;` imports to file URIs
-  when the target module is inside a workspace folder or on a
-  workspace-overlapped `HAREPATH`).
+  for modules under any workspace folder or on `HAREPATH`).
 - Folding ranges: yes.
 - Selection ranges: yes.
 - Call hierarchy: yes (`prepareCallHierarchy`, `incomingCalls`,
   `outgoingCalls`).
 - Type hierarchy: yes (`prepareTypeHierarchy`, `supertypes`, `subtypes`).
-  Name-based - see limitations.
+  Module-aware: each referenced type ident is re-resolved against the
+  containing file's `use` list, so two unrelated types sharing a short
+  name in different modules are kept distinct.
 
 ## Editing
 
@@ -80,8 +83,9 @@ Targets LSP 3.17 and Hare v0.26.0.
   always fires, even on unparseable files.
 - Rename: yes, with `prepareProvider: true`. Scope-aware for locals
   (let/const/def/for/match/func-param bindings restrict the search to
-  the binding's lexical scope); top-level decls still fall back to a
-  workspace-wide textual scan - see limitations.
+  the binding's lexical scope); top-level decls use the same
+  module-aware filter as Find references, so a rename only rewrites
+  identifiers that re-resolve to the cursor's symbol.
 - Code actions: yes, with `resolveProvider: true`. Supported kinds:
   `source.organizeImports`, `quickfix`.
 - Code lenses: yes, with `resolveProvider: true`. Currently emits
@@ -147,6 +151,13 @@ Highlights:
 | `hare.format.insertFinalNewline` | `true` | Ensure trailing newline. |
 | `hare.inlayHints.parameterNames` | `true` | Param-name hints at call sites. |
 | `hare.inlayHints.inferredTypes` | `true` | Inferred-type hints on `let` / `const`. |
+| `hare.inlayHints.inferredTypesMaxDepth` | `3` | Max recursion depth for inferred-type hints; follows call return types and type aliases. Hard-capped at 16. |
+| `hare.limits.maxOpenDocuments` | `1024` | Cap on open documents. |
+| `hare.limits.maxTotalBufferBytes` | `268435456` | Cap on summed open-buffer bytes (256 MiB). |
+| `hare.limits.maxPendingRequests` | `4096` | Cap on in-flight server-initiated requests. |
+| `hare.limits.maxCancelledIds` | `256` | Cap on cancelled request ids retained. |
+| `hare.limits.maxDiagnosticsPerFile` | `1000` | Cap on diagnostics published per file. |
+| `hare.limits.maxWorkspaceIndexEntries` | `1000000` | Cap on workspace-index entries (also the absolute hard ceiling). |
 
 ## Environment
 
@@ -154,6 +165,7 @@ Highlights:
 | --- | --- |
 | `HARE_LSP_LOG_DIR` | Absolute directory to tee `hare-lsp-{in,out,err}.log` into. |
 | `HARE_LSP_LOG_LEVEL` | Minimum stderr log severity (`debug`/`info`/`warn`/`error`, default `info`). |
+| `HARE_LSP_MAX_BODY_BYTES` | Override the LSP transport's max request body size (default 32 MiB). Read at startup because the cap applies before `initialize` arrives. |
 
 ## CLI
 
@@ -166,34 +178,48 @@ Highlights:
 
 ## Known limitations
 
-- **References & rename are partly textual.** When the cursor resolves
-  to a local binding (`let` / `const` / `def` / `for` / `match` /
-  function parameter), the search is bounded to that binding's lexical
-  scope, so shadowing works correctly. For top-level decls the
-  workspace is still scanned textually: comments, strings, and char
-  literals are skipped, but two unrelated top-level identifiers with
-  the same name in different modules are indistinguishable. Renaming a
-  top-level symbol may rewrite same-named decls elsewhere.
+- **References & rename: locals are scope-aware; top-level decls are
+  module-aware via a re-resolve filter.** When the cursor resolves to
+  a local binding (`let` / `const` / `def` / `for` / `match` / function
+  parameter), the search is bounded to that binding's lexical scope.
+  For top-level decls the workspace is still scanned textually
+  (skipping comments, strings, and char literals), but every candidate
+  hit is then re-resolved against its own file's `use` list +
+  workspace index, so two unrelated top-level identifiers sharing a
+  short name in different modules are kept distinct. Textual hits in
+  unindexed files (stdlib, third-party that isn't on a workspace path)
+  are dropped, since they can't be authoritatively matched against a
+  workspace entry.
 - **Formatting requires a parseable file.** Full / range formatting
   only runs when the document parses cleanly. On-type re-indent still
-  fires on unparseable files (it operates on whitespace only).
-- **Workspace indexing is synchronous.** When a workspace folder is
-  added, the server walks every `*.ha` file under the new root on the
-  message-handling thread. For very large workspaces this blocks the
-  dispatch loop. Background indexing with progress is on the roadmap.
-- **Resource caps.** The server refuses to grow past hard caps: 1024
-  open documents, 256 MiB of open-buffer bytes, 1000 diagnostics per
-  file, 4096 in-flight server requests, and 1,000,000 workspace-index
-  entries. Hitting any cap is logged via `window/logMessage`.
-- **Type hierarchy is name-based.** `typeHierarchy/supertypes` and
-  `subtypes` match by short identifier name across the workspace. Two
-  unrelated types with the same short name in different modules will
-  appear linked.
-- **Inlay-hint types are best-effort.** Inferred types resolve literals,
-  declared types, and simple expressions; complex inference (generic
-  instantiations, deeply chained calls) may show no hint rather than a
-  wrong one.
-- **`workspace/symbol` and document links** resolve stdlib imports only
-  when `HAREPATH` overlaps a workspace folder.
-- **Body size limit.** The transport rejects LSP messages larger than
-  32 MiB by default.
+  fires on unparseable files (it operates on whitespace only). This is
+  intentional: a no-op format on a syntax error is a useful signal
+  that the file doesn't parse.
+- **Workspace indexing is chunked, not concurrent.** Hare is
+  single-threaded, so indexing runs cooperatively between LSP
+  messages: each dispatch tick processes a small batch and yields
+  back. Progress is reported via `$/progress` and the job can be
+  cancelled with `window/workDoneProgress/cancel`. Caveat: a fully
+  idle editor (sending no messages) won't drive the job forward —
+  typing or a pull-diagnostics request unblocks it. Results from
+  `workspace/symbol` may carry `isIncomplete: true` while the job is
+  still draining.
+- **Inlay-hint types are best-effort.** Inferred types resolve
+  literals, declared types, function-call return types, and follow
+  type-alias chains up to `hare.inlayHints.inferredTypesMaxDepth`
+  hops (default 3, hard cap 16). Complex inference (deeply chained
+  field accesses, generic-shaped constructs) may show no hint rather
+  than a wrong one. Only top-level `let` / `const` decls are scanned
+  today; bindings inside function bodies aren't covered yet.
+- **Body size limit.** The LSP transport rejects messages larger than
+  32 MiB by default. Override via the `HARE_LSP_MAX_BODY_BYTES`
+  environment variable when the client sends very large workspace
+  edits — the cap must be set before `initialize` arrives, so it's
+  an env var rather than a setting.
+- **Resource caps are configurable but bounded.** All caps (open
+  documents, total buffer bytes, in-flight requests, cancelled ids,
+  diagnostics per file, workspace-index entries) are tunable via
+  `hare.limits.*`. The workspace-index entry count has an absolute
+  ceiling of 1,000,000 regardless of the configured value. Lowering a
+  cap below current usage applies prospectively; the server does not
+  proactively evict.

@@ -126,8 +126,9 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 	const idx = doc.buf.line_index;
 
 	const total = len(r.errors);
-	const limit = if (total > MAX_DIAGNOSTICS_PER_FILE) {
-		yield MAX_DIAGNOSTICS_PER_FILE;
+	const cap = s.config.limits.max_diagnostics_per_file;
+	const limit = if (total > cap) {
+		yield cap;
 	} else {
 		yield total;
 	};

@@ -70,6 +70,14 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 		return;
 	};
 
+	// Resolve the cursor's symbol to a workspace entry. When this
+	// succeeds we use it to disambiguate textual hits across modules
+	// (drop hits that re-resolve to a different decl). When it fails
+	// (unindexed file, fresh symbol, stdlib-only target), fall back to
+	// the unfiltered scan to preserve prior behavior.
+	const expected = expected_entry_for_cursor(s, doc, data,
+		ident_range.0, target);
+
 	let arr: []json::value = [];
 	let cancelled = false;
 	for (let i = 0z; i < len(s.documents); i += 1) {
@@ -77,7 +85,8 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 			cancelled = true;
 			break;
 		};
-		const more = find_references_in_doc(s, &s.documents[i], target);
+		const more = find_references_in_doc(s, &s.documents[i],
+			target, expected);
 		append(arr, more...)!;
 		free(more);
 	};
@@ -90,7 +99,8 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 		};
 		const path = s.workspace_index.indexed_files[i];
 		if (is_in_open_paths(seen, path)) continue;
-		const more = find_references_in_file_on_disk(path, target);
+		const more = find_references_in_file_on_disk(s, path, target,
+			expected);
 		append(arr, more...)!;
 		free(more);
 	};
@@ -163,12 +173,36 @@ fn is_in_open_paths(open_paths: []str, path: str) bool = {
 
 fn find_references_in_doc(
 	s: *server, doc: *document, target: str,
+	expected: (*analysis::workspace_entry | void),
 ) []json::value = {
 	const data = analysis::bytes(&doc.buf);
-	return scan_text_for_ident_static(data, doc.uri, doc.buf.line_index, target);
+	const offsets = scan_text_for_ident_offsets_in_range(data, target,
+		0z, len(data));
+	defer free(offsets);
+	const name_len = len(strings::toutf8(target));
+	let arr: []json::value = [];
+	if (expected is void) {
+		for (let i = 0z; i < len(offsets); i += 1) {
+			append(arr, build_location(data, doc.uri,
+				doc.buf.line_index, offsets[i], name_len))!;
+		};
+		return arr;
+	};
+	const exp = expected as *analysis::workspace_entry;
+	const path = lsp::uri_decode_path(doc.uri);
+	defer free(path);
+	for (let i = 0z; i < len(offsets); i += 1) {
+		if (!hit_resolves_to(s, path, data, offsets[i], exp)) continue;
+		append(arr, build_location(data, doc.uri, doc.buf.line_index,
+			offsets[i], name_len))!;
+	};
+	return arr;
 };
 
-fn find_references_in_file_on_disk(path: str, target: str) []json::value = {
+fn find_references_in_file_on_disk(
+	s: *server, path: str, target: str,
+	expected: (*analysis::workspace_entry | void),
+) []json::value = {
 	const f = match (os::open(path)) {
 	case let f: io::file => yield f;
 	case fs::error => return [];
@@ -191,7 +225,24 @@ fn find_references_in_file_on_disk(path: str, target: str) []json::value = {
 	defer free(idx);
 	const uri = strings::concat("file://", path)!;
 	defer free(uri);
-	return scan_text_for_ident_static(buf, uri, idx, target);
+	const offsets = scan_text_for_ident_offsets_in_range(buf, target,
+		0z, len(buf));
+	defer free(offsets);
+	const name_len = len(strings::toutf8(target));
+	let arr: []json::value = [];
+	if (expected is void) {
+		for (let i = 0z; i < len(offsets); i += 1) {
+			append(arr, build_location(buf, uri, idx,
+				offsets[i], name_len))!;
+		};
+		return arr;
+	};
+	const exp = expected as *analysis::workspace_entry;
+	for (let i = 0z; i < len(offsets); i += 1) {
+		if (!hit_resolves_to(s, path, buf, offsets[i], exp)) continue;
+		append(arr, build_location(buf, uri, idx, offsets[i], name_len))!;
+	};
+	return arr;
 };
 
 // Resolves the cursor in `doc` at `off` to a scope_binding scoped to the
@@ -233,14 +284,29 @@ fn scan_text_for_ident_static_in_range(
 	data: []u8, uri: str, line_index: []size, target: str,
 	start: size, end: size,
 ) []json::value = {
+	const offsets = scan_text_for_ident_offsets_in_range(data, target,
+		start, end);
+	defer free(offsets);
 	let arr: []json::value = [];
+	for (let i = 0z; i < len(offsets); i += 1) {
+		append(arr, build_location(data, uri, line_index, offsets[i],
+			len(strings::toutf8(target))): json::value)!;
+	};
+	return arr;
+};
+
+// Returns the byte offsets where ident-token occurrences of `target`
+// begin in `data[start..end]`. Same skipping rules as the location-
+// emitting scan but returns offsets so callers can filter before
+// building Location objects.
+fn scan_text_for_ident_offsets_in_range(
+	data: []u8, target: str, start: size, end: size,
+) []size = {
+	let out: []size = [];
 	const t = strings::toutf8(target);
 	const limit = if (end > len(data)) len(data) else end;
 	let i = start;
 	for (i + len(t) <= limit) {
-		// Skip past any non-code region starting at `i` (string,
-		// rune, raw string, comment). When token_skip_noncode
-		// advances, we continue from the new position.
 		const after = analysis::token_skip_noncode(data, i, limit);
 		if (after > i) {
 			i = after;
@@ -265,26 +331,35 @@ fn scan_text_for_ident_static_in_range(
 			i += 1;
 			continue;
 		};
-		const start_pos = analysis::byte_to_position(data, line_index,
-			analysis::encoding::UTF16, i);
-		const end_pos = analysis::byte_to_position(data, line_index,
-			analysis::encoding::UTF16, i + len(t));
-		let loc = json::newobject();
-		json::set(&loc, "uri", uri: json::value)!;
-		let r = json::newobject();
-		let s_obj = json::newobject();
-		json::put(&s_obj, "line", start_pos.line: f64)!;
-		json::put(&s_obj, "character", start_pos.character: f64)!;
-		let e_obj = json::newobject();
-		json::put(&e_obj, "line", end_pos.line: f64)!;
-		json::put(&e_obj, "character", end_pos.character: f64)!;
-		json::put(&r, "start", s_obj)!;
-		json::put(&r, "end", e_obj)!;
-		json::put(&loc, "range", r)!;
-		append(arr, loc: json::value)!;
+		append(out, i)!;
 		i += len(t);
 	};
-	return arr;
+	return out;
+};
+
+// Builds an LSP Location JSON value for an ident hit at byte offset `off`
+// of length `name_len`. Always uses UTF-16 positions (matching the scan
+// callers' historical behavior).
+fn build_location(
+	data: []u8, uri: str, line_index: []size, off: size, name_len: size,
+) json::value = {
+	const start_pos = analysis::byte_to_position(data, line_index,
+		analysis::encoding::UTF16, off);
+	const end_pos = analysis::byte_to_position(data, line_index,
+		analysis::encoding::UTF16, off + name_len);
+	let loc = json::newobject();
+	json::set(&loc, "uri", uri: json::value)!;
+	let r = json::newobject();
+	let s_obj = json::newobject();
+	json::put(&s_obj, "line", start_pos.line: f64)!;
+	json::put(&s_obj, "character", start_pos.character: f64)!;
+	let e_obj = json::newobject();
+	json::put(&e_obj, "line", end_pos.line: f64)!;
+	json::put(&e_obj, "character", end_pos.character: f64)!;
+	json::put(&r, "start", s_obj)!;
+	json::put(&r, "end", e_obj)!;
+	json::put(&loc, "range", r)!;
+	return loc: json::value;
 };
 
 // Handles textDocument/prepareRename. Returns the identifier's range (so
@@ -389,6 +464,10 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 	// scope, so rename limits its edits to that range. Skips the
 	// workspace and other-document scan entirely.
 	const local = scope_local_binding(doc, target, ident_range.0: u32);
+	const expected: (*analysis::workspace_entry | void) = if (local is scope_local)
+		void
+	else
+		expected_entry_for_cursor(s, doc, data, ident_range.0, target);
 	if (local is scope_local) {
 		const lb = local as scope_local;
 		let more = scan_text_for_ident_static_in_range(data, doc.uri,
@@ -402,7 +481,8 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 				cancelled = true;
 				break;
 			};
-			const more = find_references_in_doc(s, &s.documents[i], target);
+			const more = find_references_in_doc(s, &s.documents[i],
+				target, expected);
 			append(locs, more...)!;
 			free(more);
 		};
@@ -416,7 +496,8 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 		};
 		const path = s.workspace_index.indexed_files[i];
 		if (is_in_open_paths(seen, path)) continue;
-		const more = find_references_in_file_on_disk(path, target);
+		const more = find_references_in_file_on_disk(s, path, target,
+			expected);
 		append(locs, more...)!;
 		free(more);
 	};

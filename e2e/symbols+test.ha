@@ -107,6 +107,39 @@ export fn ask() int = answer();
 		"workspace/symbol result must include isIncomplete");
 };
 
+// workspace/symbol must surface stdlib symbols even when the user has
+// never navigated through the relevant module. The first call kicks
+// off a full stdlib indexing job; we poll until a stdlib symbol
+// becomes findable.
+@test fn e2e_workspace_symbol_finds_stdlib_symbol() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	// `newscanner` lives only in stdlib (bufio). Poll up to ~10s for
+	// the indexing job to populate enough of the stdlib to find it.
+	let found = false;
+	for (let attempt = 0z; attempt < 50z; attempt += 1) {
+		const id = 1210.0 + attempt: f64;
+		const tmpl = `{"jsonrpc":"2.0","id":`;
+		const id_buf: [16]u8 = [0...];
+		const id_str = fmt::bsprintf(id_buf, "{}", id: f64)!;
+		const req = strings::concat(tmpl, id_str,
+			`,"method":"workspace/symbol","params":{"query":"newscanner"}}`)!;
+		defer free(req);
+		send(&s, strings::toutf8(req));
+		const body = wait_for_response(&s, id);
+		defer free(body);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, `"newscanner"`)) {
+			found = true;
+			break;
+		};
+	};
+	assert(found,
+		"workspace/symbol must eventually surface a stdlib symbol after indexing");
+};
+
 @test fn e2e_workspace_symbol_resolve_passthrough() void = {
 	let s = spawn_session();
 	defer finish_session(&s);

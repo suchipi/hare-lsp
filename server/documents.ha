@@ -621,10 +621,11 @@ fn warn_unknown_uri(s: *server, method: str, uri: str) void = {
 // untouched.
 fn check_open_capacity(s: *server, uri: str, incoming_bytes: size) bool = {
 	const replacing = has_document(s, uri);
-	if (!replacing && len(s.documents) >= MAX_OPEN_DOCUMENTS) {
+	if (!replacing && len(s.documents) >= s.config.limits.max_open_documents) {
 		const msg = fmt::asprintf(
 			"textDocument/didOpen: refusing to open {} (already {} documents open; cap {})",
-			uri, len(s.documents), MAX_OPEN_DOCUMENTS)!;
+			uri, len(s.documents),
+			s.config.limits.max_open_documents)!;
 		defer free(msg);
 		log_warning(s, msg);
 		return false;
@@ -634,10 +635,11 @@ fn check_open_capacity(s: *server, uri: str, incoming_bytes: size) bool = {
 		if (replacing && s.documents[i].uri == uri) continue;
 		total += len(analysis::bytes(&s.documents[i].buf));
 	};
-	if (total > MAX_TOTAL_BUFFER_BYTES) {
+	if (total > s.config.limits.max_total_buffer_bytes) {
 		const msg = fmt::asprintf(
 			"textDocument/didOpen: refusing to open {} ({} bytes would exceed total cap of {} bytes)",
-			uri, incoming_bytes, MAX_TOTAL_BUFFER_BYTES)!;
+			uri, incoming_bytes,
+			s.config.limits.max_total_buffer_bytes)!;
 		defer free(msg);
 		log_warning(s, msg);
 		return false;
@@ -653,10 +655,11 @@ fn check_buffer_capacity(s: *server, uri: str) bool = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		total += len(analysis::bytes(&s.documents[i].buf));
 	};
-	if (total > MAX_TOTAL_BUFFER_BYTES) {
+	if (total > s.config.limits.max_total_buffer_bytes) {
 		const msg = fmt::asprintf(
 			"textDocument/didChange: total buffer size {} exceeds cap {}; dropping {}",
-			total, MAX_TOTAL_BUFFER_BYTES, uri)!;
+			total, s.config.limits.max_total_buffer_bytes,
+			uri)!;
 		defer free(msg);
 		log_warning(s, msg);
 		return false;

@@ -25,27 +25,16 @@ export fn scan_workspace_folders(s: *server) void = {
 
 	log_info(s, "hare-lsp: indexing workspace...");
 
-	let total: size = 0;
-	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
-		const path = uri_to_local_path(s.workspace_folders[i].uri);
-		defer free(path);
-		total += analysis::index_directory(&s.workspace_index, path);
+	let roots: []str = [];
+	defer {
+		for (let i = 0z; i < len(roots); i += 1) free(roots[i]);
+		free(roots);
 	};
-
-	const msg = fmt_indexed_summary(total, len(s.workspace_folders));
-	defer free(msg);
-	log_info(s, msg);
-
-	// Notify clients that workspace symbols / diagnostics may be stale.
-	request_diagnostic_refresh(s);
-};
-
-fn fmt_indexed_summary(files: size, folders: size) str = {
-	let buf = memio::dynamic();
-	defer io::close(&buf)!;
-	fmt::fprintf(&buf, "hare-lsp: indexed {} file(s) across {} folder(s)",
-		files, folders)!;
-	return strings::dup(memio::string(&buf)!)!;
+	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
+		append(roots, uri_to_local_path(s.workspace_folders[i].uri))!;
+	};
+	start_index_job(s, roots, &s.workspace_index, "Indexing workspace",
+		"hare-lsp: indexed");
 };
 
 fn uri_to_local_path(uri: str) str = lsp::uri_decode_path(uri);
@@ -75,12 +64,18 @@ export fn cached_parse_or_drop_stale(
 // the client knows to refine.
 def WORKSPACE_SYMBOL_CAP: size = 200;
 
-// Handles workspace/symbol. Performs a fuzzy substring match on the
-// index. The result shape is a WorkspaceSymbolList so we can carry
-// `isIncomplete` when the matches were capped. Polls cancellation
-// every 32 result-building iterations so the user can abandon a slow
-// query.
+// Handles workspace/symbol. Performs a fuzzy substring match across the
+// workspace index AND the stdlib index. The result shape is a
+// WorkspaceSymbolList so we can carry `isIncomplete` either when the
+// matches were capped or when stdlib indexing hasn't finished yet.
+// Polls cancellation every 32 result-building iterations so the user
+// can abandon a slow query.
 export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
+	// Kick off full stdlib indexing on first call so subsequent
+	// queries can match stdlib symbols. The job is chunked so this
+	// returns immediately.
+	ensure_full_stdlib_indexed(s);
+
 	const query_str = match (extract_query(r.params)) {
 	case let s: str => yield s;
 	case void => yield "";
@@ -99,37 +94,66 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 	let cap: size = 0;
 	let cancelled = false;
 	if (len(query_str) == 0) {
-		total = len(s.workspace_index.entries);
+		total = len(s.workspace_index.entries) +
+			len(s.stdlib_index.entries);
 		cap = if (total < WORKSPACE_SYMBOL_CAP) total else WORKSPACE_SYMBOL_CAP;
-		for (let i = 0z; i < cap; i += 1) {
-			if (i % 32 == 0 && check_cancel(s, r.id)) {
-				cancelled = true;
-				break;
-			};
-			append(arr, encode_workspace_symbol(&s.workspace_index.entries[i]))!;
-		};
-	} else {
-		const matches = analysis::fuzzy_search(&s.workspace_index, query_str);
-		defer free(matches);
-		total = len(matches);
-		cap = if (total < WORKSPACE_SYMBOL_CAP) total else WORKSPACE_SYMBOL_CAP;
-		for (let i = 0z; i < cap; i += 1) {
+		// Emit workspace entries first so they outrank stdlib in
+		// the truncated set.
+		for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
+			if (len(arr) >= cap) break;
 			if (i % 32 == 0 && check_cancel(s, r.id)) {
 				cancelled = true;
 				break;
 			};
 			append(arr, encode_workspace_symbol(
-				&s.workspace_index.entries[matches[i]]))!;
+				&s.workspace_index.entries[i]))!;
+		};
+		if (!cancelled) for (let i = 0z; i < len(s.stdlib_index.entries); i += 1) {
+			if (len(arr) >= cap) break;
+			if (i % 32 == 0 && check_cancel(s, r.id)) {
+				cancelled = true;
+				break;
+			};
+			append(arr, encode_workspace_symbol(
+				&s.stdlib_index.entries[i]))!;
+		};
+	} else {
+		const ws = analysis::fuzzy_search(&s.workspace_index,
+			query_str);
+		defer free(ws);
+		const stdlib = analysis::fuzzy_search(&s.stdlib_index,
+			query_str);
+		defer free(stdlib);
+		total = len(ws) + len(stdlib);
+		cap = if (total < WORKSPACE_SYMBOL_CAP) total else WORKSPACE_SYMBOL_CAP;
+		for (let i = 0z; i < len(ws); i += 1) {
+			if (len(arr) >= cap) break;
+			if (i % 32 == 0 && check_cancel(s, r.id)) {
+				cancelled = true;
+				break;
+			};
+			append(arr, encode_workspace_symbol(
+				&s.workspace_index.entries[ws[i]]))!;
+		};
+		if (!cancelled) for (let i = 0z; i < len(stdlib); i += 1) {
+			if (len(arr) >= cap) break;
+			if (i % 32 == 0 && check_cancel(s, r.id)) {
+				cancelled = true;
+				break;
+			};
+			append(arr, encode_workspace_symbol(
+				&s.stdlib_index.entries[stdlib[i]]))!;
 		};
 	};
 	if (cancelled) return;
 
-	// Build the WorkspaceSymbolList: { isIncomplete, items }. The list
-	// shape was added in LSP 3.17 and is preferred over the bare-array
-	// response when the server may truncate.
+	// `isIncomplete` is true either when results were truncated or
+	// when stdlib indexing is still pending (in which case more
+	// matches may appear on a subsequent query).
+	const indexing_in_flight = len(s.pending_index_jobs) > 0;
 	let result_obj = json::newobject();
 	json::put(&result_obj, "isIncomplete",
-		(total > cap): json::value)!;
+		(total > cap || indexing_in_flight): json::value)!;
 	json::put(&result_obj, "items", arr: json::value)!;
 	arr_owned = false;
 	const result_v: json::value = result_obj;

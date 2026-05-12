@@ -14,6 +14,7 @@
 // to analysis::workspace_index when this file's index has no match).
 
 use ascii;
+use strings;
 
 // Returns the (start_byte, end_byte) of the identifier-like token at
 // `off`, or void if `off` is not on an identifier character.
@@ -52,4 +53,25 @@ export fn ident_at(text: []u8, off: size) ((size, size) | void) = {
 export fn is_ident_byte(b: u8) bool = {
 	if (ascii::isalnum(b: rune)) return true;
 	return b == '_': u8;
+};
+
+// Returns the qualifier prefix immediately before the ident starting at
+// `ident_start`, or an empty allocated string if the ident is bare. For
+// `foo::bar` with the cursor on `bar` (ident_start pointing at the 'b'),
+// returns "foo". The "::" must be directly adjacent to ident_start; any
+// whitespace between qualifier and "::" yields no qualifier.
+//
+// The returned string is always freshly allocated; caller frees.
+export fn qualifier_prefix_at(data: []u8, ident_start: size) str = {
+	if (ident_start < 2) return strings::dup("")!;
+	if (data[ident_start - 1] != ':': u8 || data[ident_start - 2] != ':': u8) {
+		return strings::dup("")!;
+	};
+	let q_end = ident_start - 2;
+	let q_start = q_end;
+	for (q_start > 0; q_start -= 1) {
+		if (!is_ident_byte(data[q_start - 1])) break;
+	};
+	if (q_start == q_end) return strings::dup("")!;
+	return strings::dup(strings::fromutf8(data[q_start..q_end])!)!;
 };

@@ -101,6 +101,18 @@ export type server = struct {
 	// each keystroke.
 	file_parse_cache: file_parse_cache,
 
+	// FIFO queue of in-flight indexing jobs. The head is drained one
+	// batch at a time between dispatch ticks in [[run]]. New jobs are
+	// appended via [[start_index_job]]. Both workspace and full-stdlib
+	// indexing flow through this queue so they don't trample each
+	// other.
+	pending_index_jobs: []*workspace_index_job,
+
+	// True after [[ensure_full_stdlib_indexed]] has enqueued a job
+	// (whether or not it has finished). Used to make
+	// `workspace/symbol` invoke stdlib indexing once per session.
+	stdlib_fully_indexed: bool,
+
 	// Minimum severity of stderr log lines emitted via `slog_*`. See
 	// `log.ha`. Defaults to INFO; can be overridden by setting the
 	// HARE_LSP_LOG_LEVEL env var before launching the binary.
@@ -124,6 +136,18 @@ export type server_state = enum {
 // Process exit codes per LSP spec.
 export def EXIT_OK: int = 0;
 export def EXIT_ERROR: int = 1;
+
+// Like [[new]] but lets the caller override the LSP transport's max
+// body size. Used by `cmd/hare-lsp/main.ha` when `HARE_LSP_MAX_BODY_BYTES`
+// is set so very large workspace edits can be accepted.
+export fn new_with_max_body(
+	reader_src: *bufio::scanner, out: io::handle, max_body: size,
+) server = {
+	let s = new(reader_src, out);
+	lsp::finish_reader(&s.reader);
+	s.reader = lsp::new_reader_with_limit(reader_src, max_body);
+	return s;
+};
 
 // Constructs a new server bound to the given input scanner and output handle.
 // The scanner must outlive the server. Caller is responsible for finishing it.
@@ -150,6 +174,8 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	stdlib_index = analysis::new_workspace_index(),
 	indexed_stdlib_modules = [],
 	file_parse_cache = new_file_parse_cache(),
+	pending_index_jobs = [],
+	stdlib_fully_indexed = false,
 	log_min_level = log_level_from_env(),
 };
 
@@ -200,6 +226,7 @@ export fn finish(s: *server) void = {
 	};
 	free(s.indexed_stdlib_modules);
 	finish_file_parse_cache(&s.file_parse_cache);
+	finish_pending_index(s);
 };
 
 // Runs the main message loop until the client sends `exit` (or EOF). Returns
@@ -252,6 +279,11 @@ export fn run(s: *server) int = {
 		// coalesces; a trailing edit publishes once any later message
 		// arrives.
 		flush_pending_diagnostics(s);
+		// Drain one batch of background workspace indexing, if any.
+		// Cooperative: each batch processes a small number of files
+		// then yields back to the loop so the next message is served
+		// promptly.
+		drain_index_job(s);
 	};
 	return EXIT_OK;
 };
@@ -321,7 +353,7 @@ fn pending_index(s: *server, id: i64) int = {
 // is dropped. A client that never replies to outgoing requests otherwise
 // grows this slice without bound.
 export fn pending_remember(s: *server, id: i64, method: str) void = {
-	if (len(s.pending_requests) >= MAX_PENDING_REQUESTS) {
+	if (len(s.pending_requests) >= s.config.limits.max_pending_requests) {
 		free(s.pending_requests[0].method);
 		delete(s.pending_requests[0]);
 	};

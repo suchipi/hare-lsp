@@ -5,6 +5,9 @@
 
 use encoding::json;
 use fmt;
+use fs;
+use io;
+use os;
 use strings;
 
 @test fn e2e_references_finds_call_site_and_decl() void = {
@@ -160,6 +163,165 @@ export fn shadow() void = {
 		// rename must not touch any of them.
 		assert(line >= 7.0,
 			"local-rename edit must stay inside the shadowing function");
+	};
+};
+
+// Two top-level functions named `samename` in different modules must not
+// be conflated by the workspace scan: references from the cursor in
+// `mod_a` must return hits only from `mod_a`.
+@test fn e2e_references_distinguishes_same_name_across_modules() void = {
+	const root = setup_crossmod_workspace("refs");
+	defer cleanup_crossmod_workspace(root);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	init_with_workspace_folder(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const uri_a = strings::concat("file://", root, "/mod_a/file.ha")!;
+	defer free(uri_a);
+	open_doc(&s, uri_a,
+		"export fn samename() int = 1;\n");
+
+	// Cursor on `samename` in mod_a (line 0, col 12).
+	const tmpl = `{"jsonrpc":"2.0","id":1520,"method":"textDocument/references","params":{"textDocument":{"uri":"`;
+	const req = strings::concat(tmpl, uri_a,
+		`"},"position":{"line":0,"character":12},"context":{"includeDeclaration":true}}}`)!;
+	defer free(req);
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1520.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const arr = *(json::get(&obj, "result") as *json::value)
+		as []json::value;
+	for (let i = 0z; i < len(arr); i += 1) {
+		const loc = arr[i] as json::object;
+		const u = *(json::get(&loc, "uri") as *json::value) as str;
+		assert(strings::contains(u, "/mod_a/"),
+			"references should only return hits in the cursor's module");
+		assert(!strings::contains(u, "/mod_b/"),
+			"references must not leak into the unrelated same-named module");
+	};
+};
+
+// Same fixture, but for textDocument/rename: the workspace edit should
+// touch only mod_a's file.
+@test fn e2e_rename_distinguishes_same_name_across_modules() void = {
+	const root = setup_crossmod_workspace("rename");
+	defer cleanup_crossmod_workspace(root);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	init_with_workspace_folder(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const uri_a = strings::concat("file://", root, "/mod_a/file.ha")!;
+	defer free(uri_a);
+	open_doc(&s, uri_a,
+		"export fn samename() int = 1;\n");
+
+	const tmpl = `{"jsonrpc":"2.0","id":1521,"method":"textDocument/rename","params":{"textDocument":{"uri":"`;
+	const req = strings::concat(tmpl, uri_a,
+		`"},"position":{"line":0,"character":12},"newName":"renamed"}}`)!;
+	defer free(req);
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1521.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = (*(json::get(&obj, "result") as *json::value))
+		as json::object;
+	const changes = (*(json::get(&result, "changes") as *json::value))
+		as json::object;
+	// mod_a's URI key should exist with a non-empty edit list; mod_b's
+	// must not appear at all.
+	const uri_b = strings::concat("file://", root, "/mod_b/file.ha")!;
+	defer free(uri_b);
+	assert(json::get(&changes, uri_a) is *json::value,
+		"rename must produce an edit for the cursor's file");
+	assert(!(json::get(&changes, uri_b) is *json::value),
+		"rename must not touch the unrelated same-named module");
+};
+
+// Sets up `.tmp/e2e-crossmod-<label>/{mod_a,mod_b}/file.ha`, returns the
+// absolute path to the root. Caller frees and should call
+// [[cleanup_crossmod_workspace]].
+fn setup_crossmod_workspace(label: str) str = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-crossmod-", label)!;
+	// Clean up any leftover state from a previous run before recreating.
+	cleanup_crossmod_workspace(root);
+	const mod_a = strings::concat(root, "/mod_a")!;
+	defer free(mod_a);
+	const mod_b = strings::concat(root, "/mod_b")!;
+	defer free(mod_b);
+	match (os::mkdirs(mod_a, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", mod_a, fs::strerror(e));
+	};
+	match (os::mkdirs(mod_b, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", mod_b, fs::strerror(e));
+	};
+	const file_a = strings::concat(mod_a, "/file.ha")!;
+	defer free(file_a);
+	const file_b = strings::concat(mod_b, "/file.ha")!;
+	defer free(file_b);
+	write_test_file(file_a, "export fn samename() int = 1;\n");
+	write_test_file(file_b, "export fn samename() int = 2;\n");
+	return root;
+};
+
+fn cleanup_crossmod_workspace(root: str) void = {
+	match (os::rmdirall(root)) {
+	case void => void;
+	case fs::error => void;
+	};
+};
+
+fn write_test_file(path: str, body: str) void = {
+	const f = match (os::create(path, 0o644: fs::mode)) {
+	case let f: io::file => yield f;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot create {}: {}", path, fs::strerror(e));
+	};
+	defer io::close(f)!;
+	match (io::writeall(f, strings::toutf8(body))) {
+	case size => void;
+	case let e: io::error =>
+		fmt::fatalf("e2e: cannot write {}: {}", path, io::strerror(e));
+	};
+};
+
+fn init_with_workspace_folder(s: *session, root: str) void = {
+	const msg = strings::concat(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
+		root,
+		`","workspaceFolders":[{"uri":"file://`,
+		root,
+		`","name":"crossmod"}],"capabilities":{}}}`)!;
+	defer free(msg);
+	send(s, strings::toutf8(msg));
+	free(wait_for_response(s, 1.0));
+	send(s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+};
+
+fn drain_until_indexed_ref(s: *session) void = {
+	for (let i = 0z; i < 20z; i += 1) {
+		const body = recv(s);
+		defer free(body);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, "indexed") &&
+				strings::contains(text, "file(s)")) return;
 	};
 };
 

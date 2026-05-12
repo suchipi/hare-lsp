@@ -5,9 +5,10 @@
 // keeps a per-file index of declarations, plus a flat name -> []entry
 // table for fast workspace-symbol lookup.
 //
-// The current implementation does a synchronous walk on demand. Step 28's
-// hardening pass will move expensive walks behind a $/progress-reported
-// background task that yields between files.
+// Discovery is split from indexing so callers can drive the work in
+// chunks: [[collect_ha_files]] returns paths only, and
+// [[read_and_index_file]] does the per-file parse+populate. The chunked
+// driver lives in `server/workspace_index_job.ha`.
 
 use fs;
 use io;
@@ -51,12 +52,24 @@ export type workspace_index = struct {
 	entries: []workspace_entry,
 	// File paths whose directories were scanned. Used to avoid re-indexing.
 	indexed_files: []str,
+	// Runtime cap; never exceeds [[MAX_INDEX_ENTRIES]]. Settable via
+	// [[set_max_entries]]; defaults to MAX_INDEX_ENTRIES.
+	max_entries: size,
 };
 
 // Returns an empty index.
 export fn new_workspace_index() workspace_index = workspace_index {
 	entries = [],
 	indexed_files = [],
+	max_entries = MAX_INDEX_ENTRIES,
+};
+
+// Lowers the runtime cap below the absolute ceiling. Values above
+// [[MAX_INDEX_ENTRIES]] are clamped (the analysis-side cap is a
+// hard guard against runaway memory). No-op if `n` is zero.
+export fn set_max_entries(idx: *workspace_index, n: size) void = {
+	if (n == 0) return;
+	idx.max_entries = if (n > MAX_INDEX_ENTRIES) MAX_INDEX_ENTRIES else n;
 };
 
 // Releases owned memory.
@@ -112,7 +125,7 @@ export fn drop_file(idx: *workspace_index, path_str: str) void = {
 // already-tracked file still works.
 export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 	drop_file(idx, file_path);
-	if (len(idx.entries) >= MAX_INDEX_ENTRIES) {
+	if (len(idx.entries) >= idx.max_entries) {
 		return;
 	};
 	let pr = parse_recover(text, file_path);
@@ -151,7 +164,9 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 // file. For "/repo/foo/bar.ha" returns "foo". For "/repo/os/+darwin/x.ha"
 // returns "os" — Hare's `+tag` / `-tag` directories belong to their
 // parent module, not to a separate module named after the tag.
-fn module_from_path(file_path: str) str = {
+//
+// The returned string is always freshly allocated; caller frees.
+export fn module_from_path(file_path: str) str = {
 	const last_slash = match (strings::rindex(file_path, '/')) {
 	case let i: size => yield i;
 	case void => return strings::dup("")!;
@@ -181,12 +196,36 @@ fn module_from_path(file_path: str) str = {
 // files are skipped silently so a permission-denied subdir doesn't take
 // down the whole walk.
 export fn index_directory(idx: *workspace_index, root: str) size = {
+	const paths = collect_ha_files(root);
+	defer free_path_slice(paths);
 	let count = 0z;
-	walk_dir(idx, root, &count);
+	for (let i = 0z; i < len(paths); i += 1) {
+		if (read_and_index_file(idx, paths[i])) count += 1;
+	};
 	return count;
 };
 
-fn walk_dir(idx: *workspace_index, dir: str, count: *size) void = {
+// Returns the absolute paths of every `*.ha` file reachable under `root`.
+// Performs only filesystem traversal — no parsing or indexing — so it's
+// suitable for use by background jobs that want to drain work in
+// chunks. Best-effort: directories that can't be opened are skipped.
+//
+// Caller frees the returned slice and each string via [[free_path_slice]].
+export fn collect_ha_files(root: str) []str = {
+	let out: []str = [];
+	walk_collect(root, &out);
+	return out;
+};
+
+// Frees every string in `paths` and the slice itself.
+export fn free_path_slice(paths: []str) void = {
+	for (let i = 0z; i < len(paths); i += 1) {
+		free(paths[i]);
+	};
+	free(paths);
+};
+
+fn walk_collect(dir: str, out: *[]str) void = {
 	const it = match (os::iter(dir)) {
 	case let it: *fs::iterator => yield it;
 	case fs::error => return;
@@ -196,40 +235,51 @@ fn walk_dir(idx: *workspace_index, dir: str, count: *size) void = {
 		const entry = match (fs::next(it)) {
 		case let e: fs::dirent => yield e;
 		case done => break;
-		case let e: fs::error =>
-			break;
+		case let e: fs::error => break;
 		};
 		if (entry.name == "." || entry.name == "..") continue;
 		const sub = strings::concat(dir, "/", entry.name)!;
-		defer free(sub);
 		if (fs::isdir(entry.ftype)) {
-			walk_dir(idx, sub, count);
+			walk_collect(sub, out);
+			free(sub);
 			continue;
 		};
-		if (!fs::isfile(entry.ftype)) continue;
-		if (!strings::hassuffix(entry.name, ".ha")) continue;
-		// Read the file.
-		const f = match (os::open(sub)) {
-		case let f: io::file => yield f;
-		case fs::error => continue;
+		if (!fs::isfile(entry.ftype)) {
+			free(sub);
+			continue;
 		};
-		defer match (io::close(f)) { case => void; };
-		let buf: []u8 = [];
-		let chunk: [4096]u8 = [0...];
-		for (true) {
-			match (io::read(f, chunk[..])) {
-			case let n: size =>
-				append(buf, chunk[..n]...)!;
-			case io::EOF =>
-				break;
-			case io::error =>
-				break;
-			};
+		if (!strings::hassuffix(entry.name, ".ha")) {
+			free(sub);
+			continue;
 		};
-		index_file(idx, sub, buf);
-		free(buf);
-		*count += 1;
+		append(out, sub)!;
 	};
+};
+
+// Reads `path` from disk and feeds it to [[index_file]]. Returns true on
+// success, false on I/O error. Exposed so that chunked index jobs can
+// process one file per tick.
+export fn read_and_index_file(idx: *workspace_index, path: str) bool = {
+	const f = match (os::open(path)) {
+	case let f: io::file => yield f;
+	case fs::error => return false;
+	};
+	defer match (io::close(f)) { case => void; };
+	let buf: []u8 = [];
+	let chunk: [4096]u8 = [0...];
+	for (true) {
+		match (io::read(f, chunk[..])) {
+		case let n: size =>
+			append(buf, chunk[..n]...)!;
+		case io::EOF =>
+			break;
+		case io::error =>
+			break;
+		};
+	};
+	index_file(idx, path, buf);
+	free(buf);
+	return true;
 };
 
 // Looks up entries by short name. Returns a borrowed slice; callers must
