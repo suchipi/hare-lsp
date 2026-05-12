@@ -79,4 +79,7 @@ vscode-extension:
 vscode-install: vscode-extension
 	cd $(VSCODE_DIR) && code --install-extension hare-lsp-*.vsix
 
-.PHONY: all check-deps test clean install uninstall vscode-extension vscode-install
+vscode-uninstall:
+	code --uninstall-extension local.hare-lsp
+
+.PHONY: all check-deps test clean install uninstall vscode-extension vscode-install vscode-uninstall
