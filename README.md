@@ -31,11 +31,18 @@ make
 sudo make install   # installs to /usr/local/bin/hare-lsp
 ```
 
+After installing, run `hare-lsp --doctor` to verify your environment
+(checks `hare` on `$PATH`, HAREPATH entries, hare-json, and any
+`HARE_LSP_LOG_DIR` you've set).
+
 ### Test
 
 ```sh
 make test
 ```
+
+For a full feature matrix - including what's supported, what's not, and
+known limitations - see [docs/features.md](docs/features.md).
 
 ## Editor setup
 

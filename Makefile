@@ -43,6 +43,7 @@ hare-lsp: $(shell find cmd lsp server analysis hare -name '*.ha' 2>/dev/null)
 test: hare-lsp
 	mkdir -p .cache .tmp
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS)
+	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS) ./cmd/hare-lsp
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS) e2e
 
 clean:
