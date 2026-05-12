@@ -78,31 +78,39 @@ fn sym_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	abort("response not found");
 };
 
-// Returns `file://<root>/<module>/` where <root> is the HAREPATH entry
-// that contains <module> as a subdirectory. Falls back to the
-// /usr/local/src/hare/stdlib layout when $HAREPATH is unset (matches
-// STDLIB_DEFAULTS in stdlib_index.ha). Returned string is owned.
+// Returns `file://<root>/<module>/` where <root> is the first candidate
+// directory containing <module> as a subdir. Candidates are the
+// $HAREPATH entries (in order), followed by the same /usr/src/hare ->
+// /usr/local/src/hare default the server falls back to. Returned string
+// is owned.
 fn sym_stdlib_module_prefix(module: str) str = {
-	let root = "";
+	let candidates: []str = [];
+	defer free(candidates);
 	match (os::getenv("HAREPATH")) {
 	case let raw: str =>
 		const tok = strings::tokenize(raw, ":");
 		for (let item => strings::next_token(&tok)) {
 			if (len(item) == 0) continue;
-			const candidate = strings::concat(item, "/", module)!;
-			defer free(candidate);
-			const ok = match (os::stat(candidate)) {
-			case let st: fs::filestat => yield fs::isdir(st.mode);
-			case => yield false;
-			};
-			if (ok) {
-				root = item;
-				break;
-			};
+			append(candidates, item)!;
 		};
 	case void => void;
 	};
-	if (len(root) == 0) root = "/usr/local/src/hare/stdlib";
+	append(candidates, default_stdlib_root())!;
+
+	let root = "";
+	for (let i = 0z; i < len(candidates); i += 1) {
+		const candidate = strings::concat(candidates[i], "/", module)!;
+		defer free(candidate);
+		const ok = match (os::stat(candidate)) {
+		case let st: fs::filestat => yield fs::isdir(st.mode);
+		case => yield false;
+		};
+		if (ok) {
+			root = candidates[i];
+			break;
+		};
+	};
+	if (len(root) == 0) root = default_stdlib_root();
 	return strings::concat("file://", root, "/", module, "/")!;
 };
 

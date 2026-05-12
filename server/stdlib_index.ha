@@ -15,20 +15,15 @@ use fs;
 use os;
 use strings;
 
-// Default search paths used when $HAREPATH isn't set in the server's env.
-// vscode-languageclient spawns us without inheriting the user's shell
-// rc-files, so we can't rely on $HAREPATH being present.
-const STDLIB_DEFAULTS: [_]str = [
-	"/usr/local/src/hare/stdlib",
-	"/usr/local/src/hare/third-party",
-];
-
 // Returns the list of stdlib search roots in priority order:
 //   1. `hare.harepath` setting when non-empty (gives editor users
 //      explicit control even when their shell-set $HAREPATH isn't
 //      inherited).
 //   2. $HAREPATH env var
-//   3. Built-in defaults for /usr/local/src/hare.
+//   3. Built-in defaults: the distro-package layout under /usr/src/hare
+//      when present (e.g. Alpine's `hare` apk), else /usr/local/src/hare
+//      (the upstream source-install default). stdlib and third-party are
+//      checked independently.
 fn stdlib_search_paths(s: *server) []str = {
 	let out: []str = [];
 	if (len(s.config.harepath) > 0) {
@@ -50,11 +45,27 @@ fn stdlib_search_paths(s: *server) []str = {
 		};
 	};
 	if (len(out) == 0) {
-		for (let i = 0z; i < len(STDLIB_DEFAULTS); i += 1) {
-			append(out, strings::dup(STDLIB_DEFAULTS[i])!)!;
-		};
+		append(out, strings::dup(default_stdlib_root())!)!;
+		append(out, strings::dup(default_thirdparty_root())!)!;
 	};
 	return out;
+};
+
+// /usr/src/hare/stdlib when it exists (Alpine etc.), else the upstream
+// source-install default. Mirrors the same priority in stdlib_search_paths
+// and in symbols_test's sym_stdlib_module_prefix.
+fn default_stdlib_root() str = {
+	if (is_directory("/usr/src/hare/stdlib")) {
+		return "/usr/src/hare/stdlib";
+	};
+	return "/usr/local/src/hare/stdlib";
+};
+
+fn default_thirdparty_root() str = {
+	if (is_directory("/usr/src/hare/third-party")) {
+		return "/usr/src/hare/third-party";
+	};
+	return "/usr/local/src/hare/third-party";
 };
 
 // Ensures the named module (e.g. "bufio", "unix::poll") has been scanned

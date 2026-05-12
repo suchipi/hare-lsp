@@ -86,7 +86,7 @@
           "hare.harepath": {
             "type": "string",
             "default": "",
-            "description": "Colon-separated module search paths (overrides $HAREPATH for the language server). Useful when VSCode is launched without inheriting the user's shell environment. Empty falls back to $HAREPATH then /usr/local/src/hare/{stdlib,third-party}."
+            "description": "Colon-separated module search paths (overrides $HAREPATH for the language server). Useful when VSCode is launched without inheriting the user's shell environment. Empty falls back to $HAREPATH, then /usr/src/hare/{stdlib,third-party} (distro packages, e.g. Alpine), then /usr/local/src/hare/{stdlib,third-party} (upstream source install)."
           },
           "hare.tags": {
             "type": "array",
