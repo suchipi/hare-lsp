@@ -793,6 +793,146 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(value, "|"));
 };
 
+// Mirrors `let s = if (start > len(b)) len(b) else start;` from
+// analysis/buffer.ha line 76. Both branches yield `size`, so the binding's
+// inferred type is `size` — not an echo of the if-else source.
+@test fn hover_let_if_else_with_len_infers_size() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		"fn f(start: size, b: []u8) void = { let s = if (start > len(b)) len(b) else start; };\\n";
+	nav_open(&s, "file:///ifb.ha", src);
+
+	// Cursor on `s` (line 0, char 40).
+	const params =
+		`{"textDocument":{"uri":"file:///ifb.ha"},"position":{"line":0,"character":40}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 492.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 492.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "let s"));
+	assert(strings::contains(value, ": size"));
+	assert(!strings::contains(value, "if ("));
+};
+
+// Mirrors `const old_len = e - s;` from analysis/buffer.ha line 80: a
+// subtraction between two locals whose types must be discovered by walking
+// back to their declarations.
+@test fn hover_const_subtraction_of_locals_infers_size() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		"fn f(b: []u8) void = { let e: size = len(b); let s: size = 0z; const old_len = e - s; };\\n";
+	nav_open(&s, "file:///sub.ha", src);
+
+	// Position on `old_len`.
+	const params =
+		`{"textDocument":{"uri":"file:///sub.ha"},"position":{"line":0,"character":69}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 493.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 493.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "const old_len"));
+	assert(strings::contains(value, ": size"));
+	assert(!strings::contains(value, " = e - s"));
+};
+
+// Mirrors `const delta = len(new_text): ssize - old_len: ssize;` from
+// analysis/buffer.ha line 81: a subtraction whose operands are both casts
+// to a concrete type. The cast type drives the result.
+@test fn hover_const_subtraction_of_casts_infers_cast_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		"type ssize = i64;\\nfn f(new_text: []u8, old_len: size) void = { const delta = len(new_text): ssize - old_len: ssize; };\\n";
+	nav_open(&s, "file:///cst.ha", src);
+
+	// Position on `delta` (line 1, char 53).
+	const params =
+		`{"textDocument":{"uri":"file:///cst.ha"},"position":{"line":1,"character":53}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 494.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 494.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "const delta"));
+	assert(strings::contains(value, ": ssize"));
+	assert(!strings::contains(value, " = len("));
+};
+
+// Comparison operators always yield `bool`, regardless of operand type.
+@test fn hover_let_comparison_infers_bool() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		"fn f(a: size, b: size) void = { let cmp = a < b; };\\n";
+	nav_open(&s, "file:///cmp.ha", src);
+
+	const params =
+		`{"textDocument":{"uri":"file:///cmp.ha"},"position":{"line":0,"character":36}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 495.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 495.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "let cmp"));
+	assert(strings::contains(value, ": bool"));
+};
+
 @test fn hover_on_use_module_shows_readme() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);

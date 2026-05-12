@@ -1074,11 +1074,32 @@ fn render_local_binding(
 //   - `?` / `!` wrappers, by recursing into the inner expression and
 //     stripping any error-flagged variants from the resulting type
 //     (matching Hare's actual semantics for propagate / error-assert).
+//   - `if`/`else` expressions (recurses into the true branch, falls back
+//     to the false branch).
+//   - `len(x)` expressions (always `size`).
+//   - binary arithmetic expressions: comparison/logical ops render as
+//     `bool`; arithmetic ops recurse into the operands.
+//   - bare identifiers that resolve to a local `let`/`const` binding in
+//     the same file, by following the binding's declared or inferred type.
 // Other forms return void; the caller falls back to echoing the source.
 fn infer_type_from_init(
 	srv: *server,
 	doc: *document,
 	init: *ast::expr,
+) (str | void) = {
+	return infer_type_from_init_at(srv, doc, init, 0);
+};
+
+// Bounds the local-identifier follow-through in infer_type_from_init. Eight
+// hops is comfortably more than any real chain (`let a = b; let b = c; ...`)
+// and protects against pathological cycles in malformed code.
+def MAX_LOCAL_INFER_DEPTH: u32 = 8;
+
+fn infer_type_from_init_at(
+	srv: *server,
+	doc: *document,
+	init: *ast::expr,
+	depth: u32,
 ) (str | void) = {
 	match (init.expr) {
 	case let l: ast::literal_expr =>
@@ -1100,6 +1121,181 @@ fn infer_type_from_init(
 		return infer_unwrapped_init(srv, doc, p: *ast::expr);
 	case let m: ast::match_expr =>
 		return infer_match_expr_type(srv, doc, &m);
+	case let ie: ast::if_expr =>
+		match (infer_type_from_init_at(srv, doc, ie.tbranch, depth)) {
+		case let t: str =>
+			return t;
+		case void => void;
+		};
+		match (ie.fbranch) {
+		case let fb: *ast::expr =>
+			return infer_type_from_init_at(srv, doc, fb, depth);
+		case null =>
+			return void;
+		};
+	case ast::len_expr =>
+		return strings::dup("size")!;
+	case let ba: ast::binarithm_expr =>
+		return infer_binarithm_type(srv, doc, ba, depth);
+	case let a: ast::access_expr =>
+		return infer_access_expr_type(srv, doc, a,
+			init.loc.start.off: size, depth);
+	case =>
+		return void;
+	};
+};
+
+// Best-effort type of a binary arithmetic expression. Comparison / logical
+// operators always produce `bool`; other operators take on the operand type,
+// so we recurse into the left operand first and fall back to the right when
+// the left can't be inferred.
+fn infer_binarithm_type(
+	srv: *server,
+	doc: *document,
+	ba: ast::binarithm_expr,
+	depth: u32,
+) (str | void) = {
+	switch (ba.op) {
+	case ast::binarithm_op::LAND,
+		ast::binarithm_op::LOR,
+		ast::binarithm_op::LXOR,
+		ast::binarithm_op::LEQUAL,
+		ast::binarithm_op::NEQUAL,
+		ast::binarithm_op::LESS,
+		ast::binarithm_op::LESSEQ,
+		ast::binarithm_op::GT,
+		ast::binarithm_op::GTEQ =>
+		return strings::dup("bool")!;
+	case =>
+		match (infer_type_from_init_at(srv, doc, ba.lvalue, depth)) {
+		case let t: str =>
+			return t;
+		case void => void;
+		};
+		return infer_type_from_init_at(srv, doc, ba.rvalue, depth);
+	};
+};
+
+// Resolves a bare identifier to a same-file local `let`/`const` binding and
+// returns its declared or inferred type. Qualified accesses (`foo::bar`,
+// `obj.field`, indexing) are out of scope here.
+fn infer_access_expr_type(
+	srv: *server,
+	doc: *document,
+	a: ast::access_expr,
+	off: size,
+	depth: u32,
+) (str | void) = {
+	if (depth >= MAX_LOCAL_INFER_DEPTH) return void;
+	const id = match (a) {
+	case let id: ast::access_identifier =>
+		yield id;
+	case =>
+		return void;
+	};
+	if (len(id) != 1) return void;
+	const cache = parse_of(doc);
+	const b = match (find_local_binding_node(&cache.pr.subunit, id[0], off)) {
+	case let b: *ast::binding =>
+		yield b;
+	case void =>
+		return void;
+	};
+	match (b._type) {
+	case let t: *ast::_type =>
+		let buf = memio::dynamic();
+		defer lsp::safe_close(&buf);
+		match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
+		case size => void;
+		case =>
+			return void;
+		};
+		return strings::dup(memio::string(&buf)!)!;
+	case null =>
+		return infer_type_from_init_at(srv, doc, b.init, depth + 1);
+	};
+};
+
+// Walks the subunit for the `let`/`const` binding of `name` whose lexical
+// scope contains `off`, returning the binding node. Mirrors the structural
+// walk in walk_for_local but exposes the raw binding so the caller can read
+// its declared or initializer type instead of rendering a hover string.
+fn find_local_binding_node(
+	su: *ast::subunit,
+	name: str,
+	off: size,
+) (*ast::binding | void) = {
+	for (let i = 0z; i < len(su.decls); i += 1) {
+		const d = &su.decls[i];
+		if (off < d.loc.start.off: size) continue;
+		if (off > d.loc.end.off: size) continue;
+		const f = match (d.decl) {
+		case let f: ast::decl_func =>
+			yield f;
+		case =>
+			continue;
+		};
+		const body = match (f.body) {
+		case let e: *ast::expr =>
+			yield e;
+		case null =>
+			return void;
+		};
+		return walk_for_local_binding_node(body, name, off);
+	};
+	return void;
+};
+
+fn walk_for_local_binding_node(
+	e: *ast::expr,
+	name: str,
+	off: size,
+) (*ast::binding | void) = {
+	match (e.expr) {
+	case let b: ast::binding_expr =>
+		for (let i = 0z; i < len(b.bindings); i += 1) {
+			const bd = &b.bindings[i];
+			for (let j = 0z; j < len(bd.names); j += 1) {
+				if (bd.names[j] != name) continue;
+				return bd;
+			};
+		};
+		return walk_for_local_binding_node(b.bindings[0].init, name, off);
+	case let c: ast::compound_expr =>
+		let hit: (*ast::binding | void) = void;
+		for (let i = 0z; i < len(c.exprs); i += 1) {
+			const child = c.exprs[i];
+			if (child.loc.start.off: size > off) break;
+			match (walk_for_local_binding_node(child, name, off)) {
+			case let r: *ast::binding =>
+				hit = r;
+			case void => void;
+			};
+		};
+		return hit;
+	case let ie: ast::if_expr =>
+		match (walk_for_local_binding_node(ie.tbranch, name, off)) {
+		case let r: *ast::binding =>
+			return r;
+		case void => void;
+		};
+		match (ie.fbranch) {
+		case let fb: *ast::expr =>
+			return walk_for_local_binding_node(fb, name, off);
+		case null =>
+			return void;
+		};
+	case let fr: ast::for_expr =>
+		match (fr.bindings) {
+		case let b: *ast::expr =>
+			match (walk_for_local_binding_node(b, name, off)) {
+			case let r: *ast::binding =>
+				return r;
+			case void => void;
+			};
+		case null => void;
+		};
+		return walk_for_local_binding_node(fr.body, name, off);
 	case =>
 		return void;
 	};
