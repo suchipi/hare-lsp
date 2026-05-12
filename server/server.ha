@@ -144,7 +144,7 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = {
 };
 
 // Like [[new]] but lets the caller override the LSP transport's max
-// body size. Used by `cmd/hare-lsp/main.ha` when `HARE_LSP_MAX_BODY_BYTES`
+// body size. Used by `cmd/hare_lsp/main.ha` when `HARE_LSP_MAX_BODY_BYTES`
 // is set so very large workspace edits can be accepted. Constructs the
 // reader directly with the custom limit rather than allocating a
 // default reader and immediately replacing it.

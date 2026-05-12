@@ -8,7 +8,7 @@
 // These tests guard against regressions that unit tests can't catch — most
 // notably anything tied to the real `os::stdout` (which is a buffered handle
 // and historically caused the server to never flush its initialize response
-// to a long-lived client). See `cmd/hare-lsp/main.ha` for context.
+// to a long-lived client). See `cmd/hare_lsp/main.ha` for context.
 //
 // Tests require ./hare-lsp to exist at the repo root. The Makefile's
 // `test-e2e` target builds it first.

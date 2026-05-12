@@ -14,18 +14,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # We run the build inside `docker run alpine:edge` rather than using
-      # `container: alpine:edge` at the job level so actions/checkout
-      # executes on the host and doesn't have to deal with musl/node
-      # quirks.
+      # We run the build inside a container based on alpine:edge rather
+      # than using `container: alpine:edge` at the job level so
+      # actions/checkout executes on the host and doesn't have to deal
+      # with musl/node quirks.
+      #
+      # The image (alpine:edge + apk packages) is built once and cached
+      # via the GitHub Actions cache backend, so subsequent runs skip
+      # the apk install layer entirely when alpine:edge's digest and
+      # the package list are unchanged.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build cached test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .github/docker
+          tags: hare-lsp-ci:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Build and test in Alpine
         # HAREFLAGS=-j1 keeps `hare build` from spawning one qbe per CPU.
         # A single qbe compiling the server module already needs several
         # GB, so the default parallelism easily exhausts the runner.
         run: |
-          docker run --rm -v "$PWD":/workspace -w /workspace alpine:edge sh -c '
+          docker run --rm -v "$PWD":/workspace -w /workspace hare-lsp-ci:latest sh -c '
             set -eux
-            apk add --no-cache git make musl-dev gcc bash hare hare-json
             free -m
             make HAREFLAGS=-j1
             make HAREFLAGS=-j1 test
