@@ -44,6 +44,6 @@ The complete settings tree is documented in the main
 
 - Helix uses LSP positions in UTF-16 by default; the server negotiates
   this at `initialize` and replies in the matching encoding.
-- Inlay hints are rendered inline if you have
-  `editor.inline-diagnostics.cursor-line = "hint"` (or similar) in your
-  helix config; see the Helix docs for the current option name.
+- Inlay hints require `editor.lsp.display-inlay-hints = true` in your
+  helix config. (`editor.inline-diagnostics.*` is a separate feature for
+  inline diagnostic-message rendering and does not control inlay hints.)

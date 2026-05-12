@@ -19,15 +19,21 @@ Eglot needs a major mode mapped to `.ha` files. Install one of:
 - Any custom `define-derived-mode` of your own; eglot only needs the
   symbol to dispatch on.
 
-If you don't want a dedicated mode, you can hook eglot directly to
-`prog-mode` for `.ha` files, but you'll miss out on font-lock:
+If you don't want to install hare-mode, define a trivial derived mode of
+your own. Eglot dispatches on derived modes, so do NOT register
+`prog-mode` directly: that would make eglot try to launch `hare-lsp` in
+every prog-mode-derived buffer (python-mode, c-mode, rust-mode, ...).
 
 ```elisp
-(add-to-list 'auto-mode-alist '("\\.ha\\'" . prog-mode))
+(define-derived-mode hare-mode prog-mode "Hare")
+(add-to-list 'auto-mode-alist '("\\.ha\\'" . hare-mode))
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs
-               '(prog-mode . ("hare-lsp"))))
+               '(hare-mode . ("hare-lsp"))))
 ```
+
+You'll still miss out on font-lock, but eglot will only attach to
+`.ha` buffers.
 
 ## Settings
 
