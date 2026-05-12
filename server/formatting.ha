@@ -39,7 +39,24 @@ export fn format_error_finish(e: *format_error) void = {
 // [[apply_indent_style]]. If parsing produces any diagnostics we refuse
 // to format and return the first one - reformatting partially-parsed
 // source would rewrite over the user's in-flight edits.
+//
+// The formatter is run TWICE in a row and the second pass's output is
+// returned. The single-pass build is not provably idempotent in
+// pathological cases (e.g. a struct literal collapses to single-line
+// on pass 1, then a containing call shrinks enough to no longer want
+// the wrap, etc.); a guaranteed second pass converges those rare
+// drifts so a single user-facing `harefmt --write .` invocation
+// always produces output that `harefmt --check .` immediately accepts.
 export fn format_source(data: []u8, path: str) (str | format_error) = {
+	const first = format_source_once(data, path)?;
+	defer free(first);
+	const second = format_source_once(strings::toutf8(first), path)?;
+	return second;
+};
+
+// Single formatting pass. Internal; callers want `format_source`,
+// which runs this twice for idempotency.
+fn format_source_once(data: []u8, path: str) (str | format_error) = {
 	let pr = analysis::parse_recover(data, path);
 	defer analysis::finish_parse_result(&pr);
 	if (len(pr.errors) > 0) {
@@ -114,11 +131,24 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 		send_array_fmt(s, r.id, []);
 		return;
 	};
-	const formatted_raw = memio::string(&buf)!;
-	const formatted_str =
-		apply_indent_style(
-			formatted_raw, s.config.format_indent_style, s.config.format_indent_width,
-		);
+	// Re-run the formatter on its own output to converge any
+	// drift (a single pass isn't provably idempotent in all
+	// cases). Mirrors `format_source`'s two-pass guarantee so the
+	// LSP and the harefmt CLI behave the same.
+	const first_pass = memio::string(&buf)!;
+	const formatted_raw = match (format_source_once(strings::toutf8(first_pass),
+		uri)) {
+	case let s: str =>
+		yield s;
+	case let e: format_error =>
+		// Second pass shouldn't ever fail on output of the
+		// first pass, but if it does just use the first.
+		format_error_finish(&e);
+		yield strings::dup(first_pass)!;
+	};
+	defer free(formatted_raw);
+	const formatted_str = apply_indent_style(formatted_raw,
+		s.config.format_indent_style, s.config.format_indent_width);
 	defer if (formatted_str != formatted_raw) free(formatted_str);
 	const formatted = strings::toutf8(formatted_str);
 
@@ -131,8 +161,8 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	// Build a single full-document text edit.
 	const enc = position_encoding(s);
 	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, 0);
-	const end_pos =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, len(data));
+	const end_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, len(data));
 	let edit = json::newobject();
 	let r_obj = json::newobject();
 	let s_obj = json::newobject();
@@ -197,22 +227,18 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 	// Convert range to byte offsets.
 	const enc = position_encoding(s);
-	const range_start =
-		analysis::position_to_byte(
-			data, doc.buf.line_index, enc,
-			analysis::position {
-				line = range.start.line,
-				character = range.start.character,
-			},
-		);
-	const range_end =
-		analysis::position_to_byte(
-			data, doc.buf.line_index, enc,
-			analysis::position {
-				line = range.end.line,
-				character = range.end.character,
-			},
-		);
+	const range_start = analysis::position_to_byte(data,
+		doc.buf.line_index, enc,
+		analysis::position {
+			line = range.start.line,
+			character = range.start.character,
+		});
+	const range_end = analysis::position_to_byte(data,
+		doc.buf.line_index, enc,
+		analysis::position {
+			line = range.end.line,
+			character = range.end.character,
+		});
 
 	// Empty range — nothing to format.
 	if (range_start >= range_end) {
@@ -248,10 +274,8 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	// don't belong in the range edit.
 	const _ = pop_before(&cursor, decl_range_start);
 
-	let d =
-		build_decls_range_doc(
-			&pr.subunit, first_idx: size, last_idx: size, &cursor, bl, data,
-		);
+	let d = build_decls_range_doc(&pr.subunit,
+		first_idx: size, last_idx: size, &cursor, bl, data);
 	defer doc_finish(&d);
 
 	let buf = memio::dynamic();
@@ -263,20 +287,18 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const formatted_str = memio::string(&buf)!;
-	const formatted_str_with_indent =
-		apply_indent_style(
-			formatted_str, s.config.format_indent_style, s.config.format_indent_width,
-		);
+	const formatted_str_with_indent = apply_indent_style(formatted_str,
+		s.config.format_indent_style, s.config.format_indent_width);
 	defer if (formatted_str_with_indent != formatted_str)
 		free(formatted_str_with_indent);
 	_ = decl_range_end; // silence unused warning if any
 
 	const replace_start = pr.subunit.decls[first_idx: size].loc.start.off: size;
 	const replace_end = pr.subunit.decls[last_idx: size].loc.end.off: size;
-	const start_pos =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, replace_start);
-	const end_pos =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, replace_end);
+	const start_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, replace_start);
+	const end_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, replace_end);
 
 	let edit = json::newobject();
 	let r_obj = json::newobject();
@@ -352,11 +374,9 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	};
 	const data = analysis::bytes(&doc.buf);
 	const enc = position_encoding(s);
-	const cursor_off =
-		analysis::position_to_byte(
-			data, doc.buf.line_index, enc,
-			analysis::position { line = pos.line, character = pos.character },
-		);
+	const cursor_off = analysis::position_to_byte(data,
+		doc.buf.line_index, enc,
+		analysis::position { line = pos.line, character = pos.character });
 	if (cursor_off == 0 || cursor_off > len(data)) {
 		send_array_fmt(s, r.id, []);
 		return;
@@ -423,10 +443,10 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	};
 
 	// Build a TextEdit replacing the leading whitespace.
-	const start_pos =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, line_start);
-	const end_pos =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, cur_ws_end);
+	const start_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, line_start);
+	const end_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, cur_ws_end);
 	const new_text = strings::fromutf8(new_indent)!;
 
 	let edit = json::newobject();

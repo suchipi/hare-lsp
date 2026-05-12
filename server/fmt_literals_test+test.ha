@@ -356,10 +356,9 @@ fn fmt_literals_roundtrip(src: str) str = {
 	defer free(out);
 	// Must NOT produce one arg per line at the call site.
 	assert(
-		!strings::contains(
-			out, "h_with_a_longish_name(\n\t\t\"alpha-one\",\n"
-			"\t\t\"bravo-two\"",
-		),
+		!strings::contains(out,
+			"h_with_a_longish_name(\n\t\t\"alpha-one\",\n"
+			"\t\t\"bravo-two\""),
 		"fill-mode call must not put every arg on its own line"
 	);
 	// Must contain at least two args glued together with a comma+

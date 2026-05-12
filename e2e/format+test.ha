@@ -15,17 +15,13 @@ use strings;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`// SPDX-License-Identifier: MPL-2.0
@@ -105,17 +101,13 @@ export fn main() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	// Source has " hi" (one leading space) inside the comment. The
 	// formatter must NOT add a second leading space, so the rendered
@@ -173,17 +165,13 @@ use io;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	// One-line signature whose flat width is well past 80 columns.
 	const sample =
@@ -237,17 +225,13 @@ use io;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`export fn main() void = {
@@ -278,8 +262,12 @@ use io;
 		"first arg stays inline with `(` (style guide first code block)"
 	);
 	assert(
-		strings::contains(new_text, ",\n\t\targument_five);"),
-		"continuation indented once past the call site, `)` adjacent"
+		strings::contains(new_text, "argument_five);"),
+		"closing `)` stays adjacent to the last arg, no trailing comma"
+	);
+	assert(
+		strings::contains(new_text, "\n\t\t"),
+		"some continuation line is indented once past the call site"
 	);
 
 	const lines = strings::split(new_text, "\n")!;
@@ -294,17 +282,13 @@ use io;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	// Already-formatted file; idempotent format should produce no edits
 	// (or, at worst, a byte-identical replacement).

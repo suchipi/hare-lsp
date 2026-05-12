@@ -88,7 +88,8 @@ export fn build_subunit_doc(
 		append(items, build_import_doc(&su.imports[i]))!;
 		const next_imp_off = if (i + 1 < len(su.imports))
 			su.imports[i + 1].loc.start.off: size
-		else if (len(su.decls) > 0) su.decls[0].loc.start.off: size else data_len;
+			else if (len(su.decls) > 0) su.decls[0].loc.start.off: size
+			else data_len;
 		flush_trailing_comments_to_eol(&items, c, next_imp_off, imp_end, data);
 		append(items, hardline())!;
 		if (i + 1 < len(su.imports)) {
@@ -117,8 +118,7 @@ export fn build_subunit_doc(
 		// don't emit one), gluing it onto the next decl.
 		const next_decl_off = if (i + 1 < len(su.decls))
 			su.decls[i + 1].loc.start.off: size
-		else
-			data_len;
+			else data_len;
 		// `decl.loc.end.off` includes any trailing-line comment
 		// (the lexer's `mkloc` peeks past comments to the next
 		// real token). Use the source-content end derived by
@@ -464,11 +464,9 @@ fn build_compound_body(
 		// its own line below the code instead of inline with it.
 		const next_stmt_off = if (i + 1 < len(cmp.exprs))
 			cmp.exprs[i + 1].loc.start.off: size
-		else
-			body_end;
-		flush_trailing_comments_to_eol(
-			&inner, bc.c, next_stmt_off, stmt_end, bc.data,
-		);
+			else body_end;
+		flush_trailing_comments_to_eol(&inner,
+			bc.c, next_stmt_off, stmt_end, bc.data);
 		if (i + 1 < len(cmp.exprs)) {
 			const next_off = cmp.exprs[i + 1].loc.start.off: size;
 			if (blank_between(bc.bl, stmt_end, next_off)) {
@@ -1642,8 +1640,8 @@ fn append_if_chain_branches(
 			append(cur, build_expr_doc(nested.cond, bc))!;
 			append(cur, text(")"))!;
 			*out = cur;
-			append_if_chain_branches(out, &nested, bc,
-				tbranch_compound);
+			append_if_chain_branches(out,
+				&nested, bc, tbranch_compound);
 		case =>
 			const else_compound = e.expr is ast::compound_expr;
 			let cur = *out;
@@ -1658,8 +1656,8 @@ fn append_if_chain_branches(
 				append(body_g, line(" "))!;
 				append(body_g, build_expr_doc(e, bc))!;
 				let g_items: []doc = [];
-		append(g_items, nest(1, concat(body_g)))!;
-		append(cur, group(g_items))!;
+				append(g_items, nest(1, concat(body_g)))!;
+				append(cur, group(g_items))!;
 			};
 			*out = cur;
 		};
@@ -1711,8 +1709,7 @@ fn build_match_expr(
 		// case - the byte before the closing `}`.
 		const boundary = if (i + 1 < len(m.cases))
 			case_boundary_match(&m.cases[i + 1])
-		else
-			loc.end.off: size;
+			else loc.end.off: size;
 		const _ = push_comments_before(&inner, bc.c, boundary);
 	};
 
@@ -1782,8 +1779,7 @@ fn build_switch_expr(
 		// unreachable`) at each case boundary or before `}`.
 		const boundary = if (i + 1 < len(s.cases))
 			case_boundary_switch(&s.cases[i + 1])
-		else
-			loc.end.off: size;
+			else loc.end.off: size;
 		const _ = push_comments_before(&inner, bc.c, boundary);
 	};
 
@@ -1833,13 +1829,10 @@ fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
 		const _ = push_comments_before(&inner, bc.c, exprs[i].loc.start.off: size);
 		append(inner, build_expr_doc(exprs[i], bc))!;
 		append(inner, text(";"))!;
-		const next_off = if (i + 1 < len(exprs))
-			exprs[i + 1].loc.start.off: size
-		else
-			~0z;
-		flush_trailing_comments_to_eol(
-			&inner, bc.c, next_off, exprs[i].loc.end.off: size, bc.data,
-		);
+		const next_off = if (i + 1 < len(exprs)) exprs[i + 1].loc.start.off: size
+			else ~0z;
+		flush_trailing_comments_to_eol(&inner,
+			bc.c, next_off, exprs[i].loc.end.off: size, bc.data);
 	};
 	return nest(1, concat(inner));
 };
