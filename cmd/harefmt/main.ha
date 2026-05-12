@@ -11,6 +11,7 @@
 // mandates tabs for indentation, so harefmt doesn't expose
 // --indent-* knobs.
 
+use bytes;
 use fmt;
 use fs;
 use gitignore;
@@ -20,6 +21,7 @@ use os;
 use path;
 use server;
 use strings;
+use unix;
 
 def VERSION: str = "0.0.1";
 
@@ -231,20 +233,17 @@ fn run_stdout(path: str) int = {
 	return 0;
 };
 
-// Processes one path arg in --write or --check mode. Looks up the
-// path's classification (file vs directory), collects ancestor ignore
-// layers, and dispatches to per-file processing or directory descent.
+// Processes one path arg in --write or --check mode. Files named
+// explicitly on the command line are formatted regardless of any
+// ignore file - the user pointed at this specific path, and silently
+// skipping it would be surprising. Ignore files only narrow what a
+// directory walk discovers, matching prettier's behaviour.
 fn process_path(path: str, opts: ignore_opts, st: *state) void = {
 	const abs = strings::dup(os::resolve(path))!;
 	defer free(abs);
 	const cl = classify_arg(abs);
 	switch (cl) {
 	case arg_class::FILE =>
-		const parent_dir = strings::dup(path::dirname(abs))!;
-		defer free(parent_dir);
-		const layers = collect_ancestors(parent_dir, opts);
-		defer finish_layers(layers);
-		if (gitignore::evaluate_layers(layers, abs, false)) return;
 		process_file(abs, st);
 	case arg_class::DIRECTORY =>
 		const layers = collect_ancestors(abs, opts);
@@ -304,7 +303,7 @@ fn process_file(abs: str, st: *state) void = {
 	defer free(result);
 
 	const result_bytes = strings::toutf8(result);
-	if (bytes_equal(result_bytes, data)) return;
+	if (bytes::equal(result_bytes, data)) return;
 
 	switch (st.mode) {
 	case mode::CHECK =>
@@ -339,23 +338,60 @@ fn read_file(path: str) ([]u8 | fs::error | io::error) = {
 	return io::drain(f)?;
 };
 
-// Writes `data` to `path`, preserving the original file's permissions
-// when possible. Direct truncate write (no temp-file / rename).
+// Writes `data` to `path` atomically: writes to a sibling temp file
+// in the same directory, then renames over the destination. Rename
+// within a single directory is atomic on every POSIX filesystem we
+// care about, so an interrupted run leaves either the old file
+// intact or the new one in place - never a partial write.
+// Original file's permissions are preserved when known.
 fn write_file(path: str, data: []u8) (void | fs::error | io::error) = {
 	const mode = match (os::stat(path)) {
 	case let st: fs::filestat => yield fs::mode_perm(st.mode);
 	case fs::error => yield 0o644: fs::mode;
 	};
-	const f = os::create(path, mode,
+	const dir = path::dirname(path);
+	const base = path::basename(path);
+	// Hidden filename so a stray crash leaves something the user's
+	// globs won't pick up; pid disambiguates concurrent harefmt
+	// invocations targeting the same file.
+	const tmp_name = fmt::asprintf(".{}.harefmt.{}.tmp",
+		base, unix::getpid(): u64)!;
+	defer free(tmp_name);
+	const tmp_path = strings::concat(dir, "/", tmp_name)!;
+	defer free(tmp_path);
+
+	match (write_tmp(tmp_path, mode, data)) {
+	case void => void;
+	case let e: fs::error =>
+		safe_remove(tmp_path);
+		return e;
+	case let e: io::error =>
+		safe_remove(tmp_path);
+		return e;
+	};
+	match (os::move(tmp_path, path)) {
+	case void => void;
+	case let e: fs::error =>
+		safe_remove(tmp_path);
+		return e;
+	};
+};
+
+fn write_tmp(
+	tmp_path: str,
+	mode: fs::mode,
+	data: []u8,
+) (void | fs::error | io::error) = {
+	const f = os::create(tmp_path, mode,
 		fs::flag::WRONLY | fs::flag::TRUNC)?;
 	defer io::close(f)!;
 	io::writeall(f, data)?;
 };
 
-fn bytes_equal(a: []u8, b: []u8) bool = {
-	if (len(a) != len(b)) return false;
-	for (let i = 0z; i < len(a); i += 1) {
-		if (a[i] != b[i]) return false;
+fn safe_remove(path: str) void = {
+	match (os::remove(path)) {
+	case void => void;
+	case fs::error => void;
 	};
-	return true;
 };
+

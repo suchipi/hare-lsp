@@ -27,6 +27,7 @@
 //   - `**` as a whole path component matches zero or more components.
 //     `**foo` is not treated as `**`; it collapses to `*foo`.
 
+use bytes;
 use strings;
 
 // A single segment of a compiled pattern. When `double_star` is true,
@@ -101,7 +102,7 @@ export fn parse_pattern(line: str) (pattern | void) = {
 
 	let core = raw[i..end];
 	// Any remaining `/` inside the body is also an anchor signal.
-	if (!anchored && bytes_contains(core, '/': u8)) {
+	if (!anchored && bytes::contains(core, '/': u8)) {
 		anchored = true;
 	};
 
@@ -221,9 +222,3 @@ fn preprocess_line(line: str) (str | void) = {
 	return result;
 };
 
-fn bytes_contains(buf: []u8, c: u8) bool = {
-	for (let i = 0z; i < len(buf); i += 1) {
-		if (buf[i] == c) return true;
-	};
-	return false;
-};
