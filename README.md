@@ -39,32 +39,12 @@ make test
 
 ## Editor setup
 
-### Neovim (nvim-lspconfig)
+Per-editor setup recipes live under [docs/editors/](docs/editors/):
 
-```lua
-local lspconfig = require('lspconfig')
-local configs = require('lspconfig.configs')
-
-if not configs.hare_lsp then
-  configs.hare_lsp = {
-    default_config = {
-      cmd = { 'hare-lsp' },
-      filetypes = { 'hare' },
-      -- nvim-lspconfig 0.2+: vim.fs.root; older versions:
-      -- lspconfig.util.find_git_ancestor.
-      root_dir = function(fname)
-        if vim.fs and vim.fs.root then
-          return vim.fs.root(fname, { '.git' })
-        end
-        return lspconfig.util.find_git_ancestor(fname)
-      end,
-      settings = {},
-    },
-  }
-end
-
-lspconfig.hare_lsp.setup{}
-```
+- [Neovim](docs/editors/neovim.md) - built-in `vim.lsp.start`, nvim-lspconfig, or the drop-in plugin at [editors/nvim/](editors/nvim/) (with `:checkhealth hare-lsp`).
+- [Helix](docs/editors/helix.md) - `languages.toml` snippet.
+- [Emacs](docs/editors/emacs.md) - eglot and lsp-mode.
+- [Zed](docs/editors/zed.md) - settings.json wiring (third-party extension required for the Hare language).
 
 ### VSCode
 
@@ -75,30 +55,6 @@ make vscode-install
 ```
 
 This runs `npm install`, packages the extension as a `.vsix`, and installs it via the `code` CLI. See [editors/vscode/README.md](editors/vscode/README.md) for development details.
-
-### Helix
-
-```toml
-# ~/.config/helix/languages.toml
-[language-server.hare-lsp]
-command = "hare-lsp"
-
-[[language]]
-name = "hare"
-language-servers = ["hare-lsp"]
-```
-
-(Helix has a built-in `hare` language; verify with `hx --health hare`.)
-
-### Emacs (eglot)
-
-```elisp
-(with-eval-after-load 'eglot
-  (add-to-list 'eglot-server-programs
-               '(hare-mode . ("hare-lsp"))))
-```
-
-(Requires [hare-mode](https://git.sr.ht/~bbuccianti/hare-mode).)
 
 ## Configuration
 
