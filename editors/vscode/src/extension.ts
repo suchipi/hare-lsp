@@ -715,6 +715,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  installTerminalShellWatcher(context, traceOutputChannel);
+
   updateVisibility();
   void refreshStatus();
 
@@ -781,10 +783,18 @@ async function fetchTestLenses(
 
 // Hare's test runner prints one line per test in the form
 // `<name>.....PASS in 0.000006000s` (FAIL / SKIP variants share the
-// shape). ANSI color codes only fire when stdout is a tty, and we spawn
-// over a pipe, so no escape stripping is needed.
+// shape). The in-extension pty path captures from a pipe (no colors);
+// the shell-integration path captures from a real terminal, which may
+// include ANSI escapes - those are stripped in createTestOutputParser.
 const TEST_RESULT_RE =
   /^([A-Za-z_][A-Za-z0-9_]*)\.{2,}(PASS|FAIL|SKIP) in \d+\.\d+s\s*$/;
+
+// CSI / OSC escape sequences. Conservative: covers `\x1b[…m`, cursor
+// moves, OSC strings terminated by BEL or ST, and bare single-char
+// escapes. Good enough for Hare's runner output.
+const ANSI_ESCAPE_RE =
+  // eslint-disable-next-line no-control-regex
+  /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
 
 // In the post-run `Failures:` section, each failure with a known
 // location prints as `<testname>: <path>:<line>:<col>: <message>`.
@@ -817,11 +827,11 @@ interface ParserCallbacks {
 // for each per-test status line and `onFailure` for each failure entry
 // in the trailing `Failures:` section.
 function createTestOutputParser(
-  cb: ParserCallbacks,
+  cb: ParserCallbacks & { stripAnsi?: boolean },
 ): (chunk: string) => void {
   let buf = "";
   return (chunk: string): void => {
-    buf += chunk;
+    buf += cb.stripAnsi ? chunk.replace(ANSI_ESCAPE_RE, "") : chunk;
     for (;;) {
       const idx = buf.indexOf("\n");
       if (idx < 0) break;
@@ -1117,4 +1127,273 @@ function runHareInTerminal(
     activeHareSession = new HareTerminalSession();
   }
   activeHareSession.run(harePath, argv, cwd, env, onChunk);
+}
+
+// Workspace-wide test name -> location index. Built lazily on first
+// lookup so we don't scan every .ha file at startup. Invalidated on
+// .ha file changes; entire cache is dropped rather than per-file
+// surgery, since the scan is cheap and re-runs are rare.
+interface TestLocation {
+  uri: string;
+  line: number;
+}
+
+let workspaceTestIndex: Map<string, TestLocation> | undefined;
+let workspaceTestIndexBuilding: Promise<Map<string, TestLocation>> | undefined;
+
+function invalidateWorkspaceTestIndex(): void {
+  workspaceTestIndex = undefined;
+  workspaceTestIndexBuilding = undefined;
+}
+
+async function getWorkspaceTestIndex(): Promise<Map<string, TestLocation>> {
+  if (workspaceTestIndex) return workspaceTestIndex;
+  if (workspaceTestIndexBuilding) return workspaceTestIndexBuilding;
+  workspaceTestIndexBuilding = buildWorkspaceTestIndex().then((idx) => {
+    workspaceTestIndex = idx;
+    workspaceTestIndexBuilding = undefined;
+    return idx;
+  });
+  return workspaceTestIndexBuilding;
+}
+
+// Matches `@test fn name`, `@test export fn name`, `@test @other fn name`,
+// and `@test\nfn name` (attributes on their own line). Whitespace and
+// other attributes between `@test` and `fn` are tolerated. Captures the
+// function name.
+const TEST_DECL_RE =
+  /@test\b[^{}]*?\bfn\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+
+// Replaces line-comment bodies and double-quoted string contents with
+// spaces so [[TEST_DECL_RE]] can't false-match on `// @test fn fake`
+// or on `@test` appearing inside a string literal. Lengths and newline
+// positions are preserved so byte offsets and line numbers stay
+// consistent with the original text. Strings are terminated at a bare
+// newline to bound the damage from an unclosed `"`; Hare string
+// literals don't span lines anyway.
+function stripCommentsAndStrings(text: string): string {
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (c === "/" && text[i + 1] === "/") {
+      out += "  ";
+      i += 2;
+      while (i < n && text[i] !== "\n") {
+        out += " ";
+        i += 1;
+      }
+      continue;
+    }
+    if (c === "\"") {
+      out += " ";
+      i += 1;
+      while (i < n && text[i] !== "\"" && text[i] !== "\n") {
+        if (text[i] === "\\" && i + 1 < n && text[i + 1] !== "\n") {
+          out += "  ";
+          i += 2;
+          continue;
+        }
+        out += " ";
+        i += 1;
+      }
+      if (i < n && text[i] === "\"") {
+        out += " ";
+        i += 1;
+      }
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
+async function buildWorkspaceTestIndex(): Promise<Map<string, TestLocation>> {
+  const idx = new Map<string, TestLocation>();
+  // Exclude node_modules and the local hare build cache. *.ha files
+  // shouldn't generally appear there but the build cache lives at
+  // .cache/ and contains generated .ssa / .o / .tmp.s - no Hare source,
+  // so the exclusion is mostly defensive.
+  const files = await vscode.workspace.findFiles(
+    "**/*.ha",
+    "{**/node_modules/**,**/.cache/**}",
+  );
+  await Promise.all(
+    files.map(async (file) => {
+      let bytes: Uint8Array;
+      try {
+        bytes = await vscode.workspace.fs.readFile(file);
+      } catch {
+        return;
+      }
+      const raw = Buffer.from(bytes).toString("utf8");
+      const text = stripCommentsAndStrings(raw);
+      const uri = file.toString();
+      TEST_DECL_RE.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = TEST_DECL_RE.exec(text)) !== null) {
+        const name = m[1];
+        // Line where the captured `fn name` lives: count newlines up
+        // to the start of `name` in the match.
+        const nameStart = m.index + m[0].lastIndexOf(name);
+        let line = 0;
+        for (let i = 0; i < nameStart; i += 1) {
+          if (text.charCodeAt(i) === 10) line += 1;
+        }
+        // First write wins; in the rare case two files declare a test
+        // with the same name we'll paint the gutter on the first found.
+        if (!idx.has(name)) idx.set(name, { uri, line });
+      }
+    }),
+  );
+  return idx;
+}
+
+// Hooks every shell execution started in a VSCode terminal so that
+// `hare test` output (including via `make test`, ssh wrappers, or any
+// other command whose stdout matches the Hare runner's per-test result
+// format) updates the gutter test status. Filtering is done on output
+// shape, not on the command line, so wrappers Just Work.
+//
+// Requires shell integration to be active in the terminal. VSCode
+// auto-injects this for bash/zsh/fish/pwsh; when it isn't active we
+// silently degrade (no events fire).
+function installTerminalShellWatcher(
+  context: vscode.ExtensionContext,
+  channel: vscode.OutputChannel,
+): void {
+  if (typeof vscode.window.onDidStartTerminalShellExecution !== "function") {
+    channel.appendLine(
+      "[hare-lsp] terminal shell integration API not available; skipping watcher",
+    );
+    return;
+  }
+
+  // Drop the cached test index whenever any .ha file is created,
+  // changed, or deleted. We don't react to the events themselves; the
+  // next lookup will lazily rebuild.
+  const watcher = vscode.workspace.createFileSystemWatcher("**/*.ha");
+  context.subscriptions.push(
+    watcher,
+    watcher.onDidChange(invalidateWorkspaceTestIndex),
+    watcher.onDidCreate(invalidateWorkspaceTestIndex),
+    watcher.onDidDelete(invalidateWorkspaceTestIndex),
+  );
+
+  context.subscriptions.push(
+    vscode.window.onDidStartTerminalShellExecution(async (event) => {
+      // Resolve the workspace test name index up front so the parser
+      // callbacks can run synchronously. Cheap when cached; on cold
+      // start, this races the first output chunks but is normally
+      // ready well before the runner emits its first PASS/FAIL line.
+      const idxPromise = getWorkspaceTestIndex();
+
+      // The execution's cwd, when known, lets us resolve relative
+      // paths in failure entries.
+      const cwdUri = event.shellIntegration.cwd
+        ?? vscode.workspace.workspaceFolders?.[0]?.uri;
+      const cwd = cwdUri?.fsPath ?? process.cwd();
+
+      // Lazily-populated; bound to `idx` once the promise resolves.
+      let idx: Map<string, TestLocation> | undefined;
+      const clearedSources = new Set<string>();
+      let sawTestLine = false;
+
+      // Records a result/failure into the global maps. If the test
+      // source uri isn't known yet (index still building), buffer
+      // until it is - keeps gutter updates in order.
+      const pendingResults: Array<{ name: string; status: TestStatus }> = [];
+      const pendingFailures: Array<{
+        name: string;
+        loc: FailureLoc;
+      }> = [];
+
+      const apply = (name: string, status: TestStatus): void => {
+        if (!idx) return;
+        const loc = idx.get(name);
+        if (!loc) return;
+        if (!clearedSources.has(loc.uri)) {
+          clearedSources.add(loc.uri);
+          const perFile = testResults.get(loc.uri);
+          if (perFile) {
+            perFile.clear();
+            refreshDecorationsForUri(loc.uri);
+          }
+          clearFailuresFor(loc.uri);
+        }
+        recordTestResult(loc.uri, name, loc.line, status);
+      };
+
+      const applyFailure = (name: string, loc: FailureLoc): void => {
+        if (!idx) return;
+        const source = idx.get(name);
+        // If we can't resolve a source uri, fall back to keying the
+        // failure under the failure location's uri. The diagnostic
+        // still publishes correctly; only re-run clearing degrades.
+        const sourceUri = source?.uri ?? loc.uri;
+        if (!clearedSources.has(sourceUri)) {
+          clearedSources.add(sourceUri);
+          clearFailuresFor(sourceUri);
+        }
+        recordTestFailure(sourceUri, name, loc);
+      };
+
+      const parser = createTestOutputParser({
+        cwd,
+        stripAnsi: true,
+        onResult: (name, status) => {
+          sawTestLine = true;
+          if (idx) apply(name, status);
+          else pendingResults.push({ name, status });
+        },
+        onFailure: (name, failUri, fline, fcol, message) => {
+          const loc: FailureLoc = {
+            uri: failUri,
+            line: fline,
+            col: fcol,
+            message,
+          };
+          if (idx) applyFailure(name, loc);
+          else pendingFailures.push({ name, loc });
+        },
+      });
+
+      idxPromise.then((built) => {
+        idx = built;
+        for (const p of pendingResults) apply(p.name, p.status);
+        pendingResults.length = 0;
+        for (const p of pendingFailures) applyFailure(p.name, p.loc);
+        pendingFailures.length = 0;
+      }).catch(() => {/* index build failure is non-fatal */});
+
+      try {
+        const stream = event.execution.read();
+        for await (const chunk of stream) parser(chunk);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        channel.appendLine(
+          `[hare-lsp] terminal shell read error: ${message}`,
+        );
+      }
+      // Drain anything still pending after the execution ends. The
+      // index promise is virtually always settled by now, but await
+      // it once more to be safe.
+      try {
+        idx = await idxPromise;
+        for (const p of pendingResults) apply(p.name, p.status);
+        pendingResults.length = 0;
+        for (const p of pendingFailures) applyFailure(p.name, p.loc);
+        pendingFailures.length = 0;
+      } catch {
+        // ignore
+      }
+      if (sawTestLine) {
+        channel.appendLine(
+          `[hare-lsp] terminal shell execution finished, gutter updated: ${event.execution.commandLine.value}`,
+        );
+      }
+    }),
+  );
 }
