@@ -538,18 +538,14 @@ fn build_func_proto_doc(t: *ast::func_type, bc: *build_ctx) doc = {
 };
 
 fn build_enum_type(e: *ast::enum_type, bc: *build_ctx) doc = {
-	// Build the body as a softline-separated list so a short enum
-	// (e.g. `enum { NONE, WRITE, CHECK, STDOUT }`) renders inline if
-	// it fits. The Wadler `group` chooses flat or broken once based
-	// on total flat width; in broken mode every softline becomes
-	// a newline, restoring the historic one-variant-per-line layout.
-	// Flat: `enum { A, B, C }` (single-line style: spaces after `{`
-	// and before `}`, no trailing comma).
-	// Broken: `enum {\n\tA,\n\tB,\n\tC,\n}` (multi-line style:
-	// each on its own line, trailing comma required).
+	// Always render multi-line (one variant per line, trailing
+	// comma). Per project convention enums are not collapsed onto
+	// a single line even when they would fit, since editing a
+	// constant set of names is easier when each lives on its own
+	// line and version-control diffs touch one line per change.
 	let inner: []doc = [];
-	append(inner, line(" "))!;
 	for (let i = 0z; i < len(e.values); i += 1) {
+		append(inner, hardline())!;
 		const v = &e.values[i];
 		append(inner, text(v.name))!;
 		match (v.value) {
@@ -558,13 +554,7 @@ fn build_enum_type(e: *ast::enum_type, bc: *build_ctx) doc = {
 			append(inner, text(" = "))!;
 			append(inner, build_expr_doc(ex, bc))!;
 		};
-		if (i + 1 < len(e.values)) {
-			append(inner, text(","))!;
-			append(inner, line(" "))!;
-		};
-	};
-	if (len(e.values) > 0) {
-		append(inner, if_broken(","))!;
+		append(inner, text(","))!;
 	};
 
 	let outer: []doc = [];
@@ -575,9 +565,9 @@ fn build_enum_type(e: *ast::enum_type, bc: *build_ctx) doc = {
 	};
 	append(outer, text("{"))!;
 	append(outer, nest(1, concat(inner)))!;
-	append(outer, line(" "))!;
+	append(outer, hardline())!;
 	append(outer, text("}"))!;
-	return group(outer);
+	return concat(outer);
 };
 
 fn build_list_type(l: *ast::list_type, bc: *build_ctx) doc = {
@@ -621,8 +611,9 @@ fn build_struct_union_type(t: *ast::_type, bc: *build_ctx) doc = {
 	// 80 cols. Per the Hare style guide, single-line struct uses
 	// `{ field, field }` (spaces, no trailing comma); multi-line
 	// uses one field per line with a required trailing comma.
+	const force_break = source_opens_multiline(bc, t.loc, ['{': u8]);
 	let inner: []doc = [];
-	append(inner, line(" "))!;
+	append(inner, leading_softline(force_break, " "))!;
 	for (let i = 0z; i < len(members); i += 1) {
 		const m = &members[i];
 		// Flush comments above this field. Approximation: use the
@@ -1232,25 +1223,50 @@ fn build_call_expr(c: *ast::call_expr, bc: *build_ctx) doc = {
 	append(items, build_expr_doc(c.lvalue, bc))!;
 	if (np) append(items, text(")"))!;
 
-	let inner: []doc = [];
-	append(inner, line(""))!;
+	if (len(c.args) == 0 && !c.variadic) {
+		append(items, text("()"))!;
+		return concat(items);
+	};
+
+	// Pack arguments into fill mode so when the call doesn't fit
+	// on a single line, args wrap greedily (as many per line as fit
+	// at indent + 1) instead of being forced one-per-line. When the
+	// outer group decides to break, a softline before `)` puts the
+	// closing paren on its own line at the call's outer indent -
+	// this gives the trailing arg a clean line and avoids cases
+	// where `arg)?;` would push past 80 cols.
+	//
+	// Variadic spreads (`fn(a, b, args...)`) glue the trailing
+	// `...` directly onto the last argument with no space and no
+	// leading comma, so the last arg + `...` are folded into a
+	// single fill content item. Variadic spread also suppresses the
+	// trailing comma in broken mode (it would be a syntax error).
+	let fill_items: []doc = [];
 	for (let i = 0z; i < len(c.args); i += 1) {
-		append(inner, build_expr_doc(c.args[i], bc))!;
-		if (i + 1 < len(c.args)) {
-			append(inner, text(","))!;
-			append(inner, line(" "))!;
+		let arg_pieces: []doc = [];
+		append(arg_pieces, build_expr_doc(c.args[i], bc))!;
+		const is_last = i + 1 == len(c.args);
+		if (is_last && c.variadic) {
+			append(arg_pieces, text("..."))!;
+		} else if (!is_last) {
+			append(arg_pieces, text(","))!;
+		};
+		append(fill_items, concat(arg_pieces))!;
+		if (!is_last) {
+			append(fill_items, line(" "))!;
 		};
 	};
-	if (c.variadic) {
-		append(inner, text("..."))!;
-	};
-	if (len(c.args) > 0 && !c.variadic) {
-		append(inner, if_broken(","))!;
+
+	let nested_items: []doc = [];
+	append(nested_items, line(""))!;
+	append(nested_items, fill(fill_items))!;
+	if (!c.variadic) {
+		append(nested_items, if_broken(","))!;
 	};
 
 	let g_items: []doc = [];
 	append(g_items, text("("))!;
-	append(g_items, nest(1, concat(inner)))!;
+	append(g_items, nest(1, concat(nested_items)))!;
 	append(g_items, line(""))!;
 	append(g_items, text(")"))!;
 	append(items, group(g_items))!;
@@ -1658,11 +1674,11 @@ fn build_literal_expr(
 		};
 		return text(render_literal(l));
 	case let a: ast::array_literal =>
-		return build_array_literal(&a, bc);
+		return build_array_literal(&a, loc, bc);
 	case let s: ast::struct_literal =>
-		return build_struct_literal(&s, bc);
+		return build_struct_literal(&s, loc, bc);
 	case let t: ast::tuple_literal =>
-		return build_tuple_literal(t, bc);
+		return build_tuple_literal(t, loc, bc);
 	};
 };
 
@@ -1785,6 +1801,56 @@ fn is_numeric_or_rune_storage(s: ast::builtin_type) bool = {
 	};
 };
 
+// Returns true if the source bytes between the opening delimiter
+// (`{`, `[`, or `(`) at or after `loc.start.off` and the first
+// non-whitespace byte after it contain a `\n`. Mirrors prettier's
+// "magic newline" heuristic: if the user wrote the container's
+// opening brace on its own line, treat that as an explicit request
+// to keep the container expanded across multiple lines even when
+// the contents would fit inline.
+//
+// `open_chars` is the set of byte values that count as the opening
+// delimiter (e.g. `['{': u8]` for struct literals). The scan starts
+// at `loc.start.off` and walks forward until one of those bytes is
+// found; everything before is treated as the type alias / keyword
+// prefix. Returns false if no opening delimiter is found within
+// `loc`'s range or if the next non-whitespace byte after it is
+// reached without seeing a `\n`.
+fn source_opens_multiline(
+	bc: *build_ctx,
+	loc: ast::location,
+	open_chars: []u8,
+) bool = {
+	const data = bc.data;
+	const start = loc.start.off: size;
+	const end = loc.end.off: size + 1;
+	if (start >= len(data) || end > len(data) || end <= start) {
+		return false;
+	};
+	let i = start;
+	for (i < end) {
+		const b = data[i];
+		let is_open = false;
+		for (let j = 0z; j < len(open_chars); j += 1) {
+			if (b == open_chars[j]) {
+				is_open = true;
+				break;
+			};
+		};
+		if (is_open) break;
+		i += 1;
+	};
+	if (i >= end) return false;
+	i += 1;
+	for (i < end) {
+		const b = data[i];
+		if (b == '\n': u8) return true;
+		if (b != ' ': u8 && b != '\t': u8) return false;
+		i += 1;
+	};
+	return false;
+};
+
 // Returns the verbatim source bytes covered by `loc`, or void if the
 // loc is out of range. Used for non-string literals (numbers, runes)
 // where we want to preserve the user's chosen lexical form rather
@@ -1827,9 +1893,14 @@ fn end_first_string_segment(data: []u8, start: size) size = {
 	return i;
 };
 
-fn build_array_literal(a: *ast::array_literal, bc: *build_ctx) doc = {
+fn build_array_literal(
+	a: *ast::array_literal,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
+	const force_break = source_opens_multiline(bc, loc, ['[': u8]);
 	let inner: []doc = [];
-	append(inner, line(""))!;
+	append(inner, leading_softline(force_break, ""))!;
 	for (let i = 0z; i < len(a.values); i += 1) {
 		append(inner, build_expr_doc(a.values[i], bc))!;
 		if (i + 1 < len(a.values)) {
@@ -1852,9 +1923,14 @@ fn build_array_literal(a: *ast::array_literal, bc: *build_ctx) doc = {
 	return group(g_items);
 };
 
-fn build_tuple_literal(t: ast::tuple_literal, bc: *build_ctx) doc = {
+fn build_tuple_literal(
+	t: ast::tuple_literal,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
+	const force_break = source_opens_multiline(bc, loc, ['(': u8]);
 	let inner: []doc = [];
-	append(inner, line(""))!;
+	append(inner, leading_softline(force_break, ""))!;
 	for (let i = 0z; i < len(t); i += 1) {
 		append(inner, build_expr_doc(t[i], bc))!;
 		if (i + 1 < len(t)) {
@@ -1874,7 +1950,23 @@ fn build_tuple_literal(t: ast::tuple_literal, bc: *build_ctx) doc = {
 	return group(g_items);
 };
 
-fn build_struct_literal(s: *ast::struct_literal, bc: *build_ctx) doc = {
+// Returns the leading separator inside a container body. When
+// `force_break` is true (the source opened the container with a
+// trailing newline after `{`/`[`/`(`), emit a `hardline()` so the
+// enclosing group renders broken even if the contents would fit.
+// Otherwise emit the usual softline. `flat_text` is what the softline
+// renders as in flat mode (`""` for `[]`/`()` containers, `" "` for
+// `{}` containers per the Hare style guide).
+fn leading_softline(force_break: bool, flat_text: str) doc = {
+	if (force_break) return hardline();
+	return line(flat_text);
+};
+
+fn build_struct_literal(
+	s: *ast::struct_literal,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
 	let outer: []doc = [];
 	if (len(s.alias) > 0) {
 		append(outer, text(render_ident(s.alias)))!;
@@ -1887,8 +1979,9 @@ fn build_struct_literal(s: *ast::struct_literal, bc: *build_ctx) doc = {
 	// render as `point { x = 1, y = 2 }` on a single line. The
 	// trailing autofill / undefined markers (`...`, `@undefined...`)
 	// stay attached to the field list with the same softline spacing.
+	const force_break = source_opens_multiline(bc, loc, ['{': u8]);
 	let inner: []doc = [];
-	append(inner, line(" "))!;
+	append(inner, leading_softline(force_break, " "))!;
 	for (let i = 0z; i < len(s.fields); i += 1) {
 		match (s.fields[i]) {
 		case let v: ast::struct_value =>
@@ -1905,7 +1998,12 @@ fn build_struct_literal(s: *ast::struct_literal, bc: *build_ctx) doc = {
 			append(inner, text(" = "))!;
 			append(inner, build_expr_doc(v.init, bc))!;
 		case let nested: *ast::struct_literal =>
-			append(inner, build_struct_literal(nested, bc))!;
+			append(inner, build_struct_literal(nested, loc, bc))!;
+		// Nested literal: use the parent loc as a stand-in
+		// (the AST doesn't expose a per-nested-literal loc
+		// here). The magic-newline check will likely return
+		// the parent's answer, which is the right default.
+
 		};
 		if (i + 1 < len(s.fields)) {
 			append(inner, text(","))!;

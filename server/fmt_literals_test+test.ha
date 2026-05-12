@@ -179,23 +179,23 @@ fn fmt_literals_roundtrip(src: str) str = {
 	);
 };
 
-@test fn fmt_short_enum_renders_single_line() void = {
-	// `enum { A, B, C }` is a permissible single-line form per the
-	// Hare style guide (parallel to single-line struct types) and
-	// is what hare::unparse produces for short enums. We previously
-	// always broke them across lines via hardlines.
+@test fn fmt_enum_always_renders_multi_line() void = {
+	// Enums are always rendered multi-line, one variant per line
+	// with a trailing comma, even when the contents would fit on
+	// one line. This makes adding/removing variants a one-line
+	// version-control change and avoids accidental reflow churn.
 	const src = "type mode = enum { NONE, WRITE, CHECK };\n";
 	const out = fmt_literals_roundtrip(src);
 	defer free(out);
 	assert(
-		strings::contains(out, "enum { NONE, WRITE, CHECK }"),
-		"short enums must render as single-line"
+		strings::contains(out, "enum {\n\tNONE,\n\tWRITE,\n\tCHECK,\n}"),
+		"short enums must still be expanded one-variant-per-line"
 	);
 };
 
 @test fn fmt_long_enum_renders_multi_line() void = {
-	// A long enum should still wrap into multi-line form with a
-	// trailing comma on the last variant.
+	// A long enum is also multi-line with a trailing comma on the
+	// last variant.
 	const src =
 		"type m = enum { ONEWITHALONGNAME, TWOWITHALONGNAME, "
 		"THREEWITHALONGNAME, FOURWITHALONGNAME, FIVEWITHALONGNAME };\n";
@@ -283,6 +283,103 @@ fn fmt_literals_roundtrip(src: str) str = {
 	assert(
 		close_idx is size && fc_idx as size < close_idx as size,
 		"first-field comment must stay inside the struct's `}`"
+	);
+};
+
+@test fn fmt_struct_literal_source_multiline_stays_multiline() void = {
+	// Magic-newline heuristic (mirrors prettier's JS formatter): when
+	// the source put a newline immediately after `{`, treat that as
+	// an explicit "expand this" signal and keep the literal expanded
+	// even when it would fit inline.
+	const src =
+		"type point = struct { x: int, y: int };\n"
+		"export fn f() void = {\n"
+		"\tlet p = point {\n"
+		"\t\tx = 1,\n"
+		"\t\ty = 2,\n"
+		"\t};\n"
+		"\tlet _ = p;\n"
+		"};\n";
+	const out = fmt_literals_roundtrip(src);
+	defer free(out);
+	assert(
+		strings::contains(out, "point {\n\t\tx = 1,\n\t\ty = 2,\n\t};"),
+		"source-multiline struct literal must stay multiline"
+	);
+};
+
+@test fn fmt_array_literal_source_multiline_stays_multiline() void = {
+	const src =
+		"export fn f() void = {\n"
+		"\tconst arr: []int = [\n"
+		"\t\t1,\n"
+		"\t\t2,\n"
+		"\t\t3,\n"
+		"\t];\n"
+		"\tlet _ = arr;\n"
+		"};\n";
+	const out = fmt_literals_roundtrip(src);
+	defer free(out);
+	assert(
+		strings::contains(out, "= [\n\t\t1,\n\t\t2,\n\t\t3,\n\t];"),
+		"source-multiline array literal must stay multiline"
+	);
+};
+
+@test fn fmt_call_fits_inline() void = {
+	const src =
+		"export fn f() void = { g(1, 2, 3); };\n"
+		"fn g(a: int, b: int, c: int) void = void;\n";
+	const out = fmt_literals_roundtrip(src);
+	defer free(out);
+	assert(
+		strings::contains(out, "g(1, 2, 3);"),
+		"short calls must stay on one line"
+	);
+};
+
+@test fn fmt_call_wraps_with_fill_not_one_per_line() void = {
+	// When a call doesn't fit on one line, args should pack greedily
+	// onto continuation lines (indented once) rather than each going
+	// onto its own line. The trailing `)` lands on its own line at
+	// the call's outer indent, so the last arg gets a clean line and
+	// `)?;` doesn't push past 80 cols.
+	const src =
+		"fn h_with_a_longish_name(aa: str, bb: str, cc: str, dd: str,"
+		" ee: str, ff: str) void = void;\n"
+		"export fn x() void = {\n"
+		"\th_with_a_longish_name(\"alpha-one\", \"bravo-two\","
+		" \"charlie-three\", \"delta-four\", \"echo-five\","
+		" \"foxtrot-six\");\n"
+		"};\n";
+	const out = fmt_literals_roundtrip(src);
+	defer free(out);
+	// Must NOT produce one arg per line at the call site.
+	assert(
+		!strings::contains(
+			out, "h_with_a_longish_name(\n\t\t\"alpha-one\",\n"
+			"\t\t\"bravo-two\"",
+		),
+		"fill-mode call must not put every arg on its own line"
+	);
+	// Must contain at least two args glued together with a comma+
+	// space on at least one of the wrapped lines.
+	assert(
+		strings::contains(out, "\", \""),
+		"fill-mode call should pack multiple short args per line"
+	);
+};
+
+@test fn fmt_struct_type_source_multiline_stays_multiline() void = {
+	const src = "type point = struct {\n"
+		"\tx: int,\n"
+		"\ty: int,\n"
+		"};\n";
+	const out = fmt_literals_roundtrip(src);
+	defer free(out);
+	assert(
+		strings::contains(out, "struct {\n\tx: int,\n\ty: int,\n};"),
+		"source-multiline struct type must stay multiline"
 	);
 };
 
