@@ -4,9 +4,11 @@
 use bufio;
 use bytes;
 use encoding::json;
+use fs;
 use io;
 use lsp;
 use memio;
+use os;
 use strconv;
 use strings;
 
@@ -74,6 +76,42 @@ fn sym_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		off = body_start + length;
 	};
 	abort("response not found");
+};
+
+// Returns `file://<root>/<module>/` where <root> is the first candidate
+// directory containing <module> as a subdir. Candidates are the
+// $HAREPATH entries (in order), followed by the same /usr/src/hare ->
+// /usr/local/src/hare default the server falls back to. Returned string
+// is owned.
+fn sym_stdlib_module_prefix(module: str) str = {
+	let candidates: []str = [];
+	defer free(candidates);
+	match (os::getenv("HAREPATH")) {
+	case let raw: str =>
+		const tok = strings::tokenize(raw, ":");
+		for (let item => strings::next_token(&tok)) {
+			if (len(item) == 0) continue;
+			append(candidates, item)!;
+		};
+	case void => void;
+	};
+	append(candidates, default_stdlib_root())!;
+
+	let root = "";
+	for (let i = 0z; i < len(candidates); i += 1) {
+		const candidate = strings::concat(candidates[i], "/", module)!;
+		defer free(candidate);
+		const ok = match (os::stat(candidate)) {
+		case let st: fs::filestat => yield fs::isdir(st.mode);
+		case => yield false;
+		};
+		if (ok) {
+			root = candidates[i];
+			break;
+		};
+	};
+	if (len(root) == 0) root = default_stdlib_root();
+	return strings::concat("file://", root, "/", module, "/")!;
 };
 
 @test fn document_symbol_lists_all_decls() void = {
@@ -179,9 +217,13 @@ fn sym_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const rv = sym_skip_to_response(out, 11.0);
 	defer json::finish(rv);
 	const ro = *(json::get(&(rv as json::object), "result") as *json::value) as json::object;
-	// Should now have a `target` field starting with file:///usr/local/src/hare/stdlib/io/.
+	// Should now have a `target` field pointing at a .ha file inside
+	// the io stdlib module. Build the expected prefix from $HAREPATH so
+	// the assertion is install-layout agnostic.
 	const target = *(json::get(&ro, "target") as *json::value) as str;
-	assert(strings::hasprefix(target, "file:///usr/local/src/hare/stdlib/io/"));
+	const expected_prefix = sym_stdlib_module_prefix("io");
+	defer free(expected_prefix);
+	assert(strings::hasprefix(target, expected_prefix));
 	assert(strings::hassuffix(target, ".ha"));
 };
 

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    # x64 free runners have 16 GB RAM; the arm64 partner runners only have
+    # 8 GB, and qbe compiling the server module overruns that even with
+    # -j1.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # We run the build inside `docker run alpine:edge` rather than using
+      # `container: alpine:edge` at the job level so actions/checkout
+      # executes on the host and doesn't have to deal with musl/node
+      # quirks.
+      - name: Build and test in Alpine
+        # HAREFLAGS=-j1 keeps `hare build` from spawning one qbe per CPU.
+        # A single qbe compiling the server module already needs several
+        # GB, so the default parallelism easily exhausts the runner.
+        run: |
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine:edge sh -c '
+            set -eux
+            apk add --no-cache git make musl-dev gcc bash hare hare-json
+            free -m
+            make HAREFLAGS=-j1
+            make HAREFLAGS=-j1 test
+          '
+
+  vscode-extension:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `npm run package` runs `tsc -p ./` (typecheck + emit) then
+      # `vsce package`, so it covers both compile errors and packaging
+      # regressions in one shot.
+      - name: Typecheck and package
+        run: npm run package
