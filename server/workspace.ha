@@ -42,6 +42,54 @@ export fn has_workspace_folder(s: *server, uri: str) bool = {
 	return false;
 };
 
+// Returns a freshly-allocated path string for the deepest workspace
+// folder that contains `file_path`, or an empty string when no folder
+// matches. Caller frees.
+//
+// Spawning `hare build` from the workspace root (rather than the file's
+// directory) means a relative `HARECACHE` like `.cache` lands in the
+// project's cache rather than scattering `.cache/` directories beside
+// every file the user touches.
+export fn workspace_root_for_path(s: *server, file_path: str) str = {
+	let best: str = "";
+	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
+		const dir = lsp::uri_decode_path(s.workspace_folders[i].uri);
+		if (len(dir) == 0) {
+			free(dir);
+			continue;
+		};
+		const prefix = strings::concat(dir, "/")!;
+		defer free(prefix);
+		const matched = strings::hasprefix(file_path, prefix)
+			|| file_path == dir;
+		if (matched && len(dir) > len(best)) {
+			free(best);
+			best = dir;
+		} else {
+			free(dir);
+		};
+	};
+	return best;
+};
+
+// Like [[workspace_root_for_path]] but falls back to the file's parent
+// directory when no workspace folder matches. Used by command spawn
+// sites so that single-file editing (no open workspace folder) still
+// has a sensible cwd; otherwise the child inherits the LSP's own cwd,
+// which is `/` under vscode-languageclient.
+export fn spawn_cwd_for_path(s: *server, file_path: str) str = {
+	const root = workspace_root_for_path(s, file_path);
+	if (len(root) > 0) return root;
+	free(root);
+	const idx = strings::rindex(file_path, '/');
+	match (idx) {
+	case let i: size =>
+		return strings::dup(strings::sub(file_path, 0, i))!;
+	case void =>
+		return strings::dup("")!;
+	};
+};
+
 // Decodes the `workspaceFolders` array from initialize params, returning a
 // freshly-allocated slice the caller takes ownership of.
 //

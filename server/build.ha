@@ -56,6 +56,13 @@ export fn finish_build_diagnostics(d: []build_diagnostic) void = {
 // `hare_path` is the path to the `hare` binary (typically just "hare" so
 // PATH is consulted). Build tags are passed via -T <tag> for each tag.
 //
+// `cwd` is the working directory the child is spawned in and the base
+// used to resolve relative diagnostic paths. Callers should pass the
+// containing workspace root (not the file's directory) so a relative
+// `HARECACHE` like `.cache` doesn't drop a cache dir next to whatever
+// file the user just saved. An empty `cwd` leaves the child in our
+// own cwd.
+//
 // timeout_ms is the wall-clock deadline (in milliseconds) before the
 // subprocess is terminated and the partial output returned. Zero
 // disables the timeout (waits indefinitely). A hung build that
@@ -64,6 +71,7 @@ export fn finish_build_diagnostics(d: []build_diagnostic) void = {
 export fn run_build(
 	hare_path: str,
 	file_path: str,
+	cwd: str,
 	tags: []str,
 	timeout_ms: u32,
 ) []build_diagnostic = {
@@ -94,12 +102,8 @@ export fn run_build(
 		return [];
 	};
 
-	// Determine the working directory: the directory containing file_path.
-	// For files without a directory part (relative), we leave dir unset so
-	// the child runs in our cwd.
-	const dir = dirname(file_path);
-	if (len(dir) > 0) {
-		exec::chdir(&cmd, dir);
+	if (len(cwd) > 0) {
+		exec::chdir(&cmd, cwd);
 	};
 
 	// Redirect child stderr -> write_fd. Also nullfd stdin/stdout so a
@@ -203,7 +207,7 @@ export fn run_build(
 	case =>
 		return [];
 	};
-	return parse_compiler_output(text, dir);
+	return parse_compiler_output(text, cwd);
 };
 
 // Builds the argument list `[name, args...]`, used to splat for exec::cmd.
@@ -212,17 +216,6 @@ fn build_args(name: str, args: []str) []str = {
 	append(out, name)!;
 	append(out, args...)!;
 	return out;
-};
-
-// Returns the directory portion of `file_path`, or "" if there is none.
-fn dirname(file_path: str) str = {
-	const idx = strings::rindex(file_path, '/');
-	match (idx) {
-	case let i: size =>
-		return strings::sub(file_path, 0, i);
-	case void =>
-		return "";
-	};
 };
 
 // Parses the compiler's stderr text into diagnostics. `cwd` (if non-empty)
