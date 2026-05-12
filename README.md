@@ -130,8 +130,15 @@ The canonical JSON Schema for these settings is checked in at [editors/vscode/sc
 
 ## Known limitations
 
+These features work but have caveats worth knowing before relying on them:
+
+- **References & rename are textual.** `textDocument/references` and `textDocument/rename` scan the workspace for ident tokens matching the cursor name. The scan respects comments, strings, and char literals, but it is **not scope-aware**: a `let foo` inside one function and a global `foo` are indistinguishable. Renaming a local that shadows a global will rewrite the global too. This matches what many LSPs (gopls's fallback, rust-analyzer in degraded mode) do; full scope-aware rename is on the roadmap. Workaround: when renaming a shadowing local, pick a unique new name first, then rename freely.
+- **Formatting requires a parseable file.** Full / range formatting only runs when the document parses cleanly. If there are syntax errors, on-type re-indent still fires (it operates on whitespace only and never rewrites tokens), but full/range formatting returns no edits. Save the file in a parseable state to format.
 - **Workspace indexing is synchronous.** When a workspace folder is added (via `workspace/didChangeWorkspaceFolders` or the initial `initialize` scan) the server walks every `*.ha` file under the new root on the message-handling thread. For very large workspaces (tens of thousands of files) this blocks the dispatch loop, including `$/cancelRequest`. Smaller workspaces are unaffected. Background indexing with progress reporting is planned but not yet implemented.
 - **Resource caps.** The server refuses to grow past hard caps on open documents (1024), total open-buffer bytes (256 MiB), per-file diagnostics (1000; further parse errors are summarised in a single trailing diagnostic), in-flight server requests (4096), and workspace-index entries (1,000,000). Hitting any cap is logged via `window/logMessage`.
+- **Type hierarchy is name-based.** `typeHierarchy/supertypes` and `subtypes` match by short identifier name across the workspace. Two unrelated types with the same short name in different modules will appear linked.
+- **Inlay-hint types are best-effort.** Inferred types resolve literals, declared types, and simple expressions; complex inference (generic instantiations, deeply chained calls) may show no hint rather than a wrong one.
+- **`workspace/symbol` and document links** resolve stdlib imports only when `HAREPATH` overlaps a workspace folder.
 
 ## License
 
