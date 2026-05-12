@@ -200,7 +200,7 @@ Highlights:
   messages: each dispatch tick processes a small batch and yields
   back. Progress is reported via `$/progress` and the job can be
   cancelled with `window/workDoneProgress/cancel`. Caveat: a fully
-  idle editor (sending no messages) won't drive the job forward —
+  idle editor (sending no messages) won't drive the job forward;
   typing or a pull-diagnostics request unblocks it. Results from
   `workspace/symbol` may carry `isIncomplete: true` while the job is
   still draining.
@@ -214,8 +214,8 @@ Highlights:
 - **Body size limit.** The LSP transport rejects messages larger than
   32 MiB by default. Override via the `HARE_LSP_MAX_BODY_BYTES`
   environment variable when the client sends very large workspace
-  edits — the cap must be set before `initialize` arrives, so it's
-  an env var rather than a setting.
+  edits. The cap must be set before `initialize` arrives, which is
+  why it's an env var rather than a setting.
 - **Resource caps are configurable but bounded.** All caps (open
   documents, total buffer bytes, in-flight requests, cancelled ids,
   diagnostics per file, workspace-index entries) are tunable via
