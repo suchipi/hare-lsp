@@ -97,6 +97,7 @@ export fn ensure_stdlib_module_indexed(s: *server, module: str) bool = {
 		indexed = true;
 		// We index every matching path: a module may legitimately
 		// appear in more than one root (e.g. stdlib vs third-party).
+
 	};
 	if (indexed) {
 		append(s.indexed_stdlib_modules, strings::dup(module)!)!;
@@ -111,8 +112,7 @@ fn module_subpath(module: str) str = {
 	const bytes = strings::toutf8(module);
 	let i = 0z;
 	for (i < len(bytes); i += 1) {
-		if (i + 1 < len(bytes) && bytes[i] == ':': u8
-				&& bytes[i + 1] == ':': u8) {
+		if (i + 1 < len(bytes) && bytes[i] == ':': u8 && bytes[i + 1] == ':': u8) {
 			append(out, '/': u8)!;
 			i += 1;
 			continue;
@@ -145,6 +145,7 @@ export fn ensure_full_stdlib_indexed(s: *server) void = {
 		free(roots);
 	};
 	if (len(roots) == 0) return;
-	start_index_job(s, roots, &s.stdlib_index, "Indexing stdlib",
-		"hare-lsp: indexed stdlib");
+	start_index_job(
+		s, roots, &s.stdlib_index, "Indexing stdlib", "hare-lsp: indexed stdlib",
+	);
 };

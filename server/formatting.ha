@@ -73,13 +73,15 @@ export fn format_source(data: []u8, path: str) (str | format_error) = {
 
 export fn handle_formatting(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_request(r.params)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_array_fmt(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_array_fmt(s, r.id, []);
 		return;
@@ -113,8 +115,10 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const formatted_raw = memio::string(&buf)!;
-	const formatted_str = apply_indent_style(formatted_raw,
-		s.config.format_indent_style, s.config.format_indent_width);
+	const formatted_str =
+		apply_indent_style(
+			formatted_raw, s.config.format_indent_style, s.config.format_indent_width,
+		);
 	defer if (formatted_str != formatted_raw) free(formatted_str);
 	const formatted = strings::toutf8(formatted_str);
 
@@ -127,7 +131,8 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	// Build a single full-document text edit.
 	const enc = position_encoding(s);
 	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, 0);
-	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, len(data));
+	const end_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, len(data));
 	let edit = json::newobject();
 	let r_obj = json::newobject();
 	let s_obj = json::newobject();
@@ -148,31 +153,36 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 
 export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	const obj = match (params_obj_fmt(r.params)) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case void =>
 		send_array_fmt(s, r.id, []);
 		return;
 	};
 	const uri = match (uri_from_request(r.params)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_array_fmt(s, r.id, []);
 		return;
 	};
 	const range_v = match (json::get(&obj, "range")) {
-	case let p: *json::value => yield *p;
+	case let p: *json::value =>
+		yield *p;
 	case =>
 		send_array_fmt(s, r.id, []);
 		return;
 	};
 	const range = match (lsp::decode_range(range_v)) {
-	case let r: lsp::range => yield r;
+	case let r: lsp::range =>
+		yield r;
 	case lsp::bad_message =>
 		send_array_fmt(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_array_fmt(s, r.id, []);
 		return;
@@ -187,14 +197,22 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 	// Convert range to byte offsets.
 	const enc = position_encoding(s);
-	const range_start = analysis::position_to_byte(data, doc.buf.line_index, enc,
-		analysis::position {
-			line = range.start.line, character = range.start.character,
-		});
-	const range_end = analysis::position_to_byte(data, doc.buf.line_index, enc,
-		analysis::position {
-			line = range.end.line, character = range.end.character,
-		});
+	const range_start =
+		analysis::position_to_byte(
+			data, doc.buf.line_index, enc,
+			analysis::position {
+				line = range.start.line,
+				character = range.start.character,
+			},
+		);
+	const range_end =
+		analysis::position_to_byte(
+			data, doc.buf.line_index, enc,
+			analysis::position {
+				line = range.end.line,
+				character = range.end.character,
+			},
+		);
 
 	// Empty range — nothing to format.
 	if (range_start >= range_end) {
@@ -230,8 +248,10 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	// don't belong in the range edit.
 	const _ = pop_before(&cursor, decl_range_start);
 
-	let d = build_decls_range_doc(&pr.subunit, first_idx: size,
-		last_idx: size, &cursor, bl, data);
+	let d =
+		build_decls_range_doc(
+			&pr.subunit, first_idx: size, last_idx: size, &cursor, bl, data,
+		);
 	defer doc_finish(&d);
 
 	let buf = memio::dynamic();
@@ -243,15 +263,20 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const formatted_str = memio::string(&buf)!;
-	const formatted_str_with_indent = apply_indent_style(formatted_str,
-		s.config.format_indent_style, s.config.format_indent_width);
-	defer if (formatted_str_with_indent != formatted_str) free(formatted_str_with_indent);
+	const formatted_str_with_indent =
+		apply_indent_style(
+			formatted_str, s.config.format_indent_style, s.config.format_indent_width,
+		);
+	defer if (formatted_str_with_indent != formatted_str)
+		free(formatted_str_with_indent);
 	_ = decl_range_end; // silence unused warning if any
 
 	const replace_start = pr.subunit.decls[first_idx: size].loc.start.off: size;
 	const replace_end = pr.subunit.decls[last_idx: size].loc.end.off: size;
-	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, replace_start);
-	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, replace_end);
+	const start_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, replace_start);
+	const end_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, replace_end);
 
 	let edit = json::newobject();
 	let r_obj = json::newobject();
@@ -273,13 +298,15 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	const obj = match (params_obj_fmt(r.params)) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case void =>
 		send_array_fmt(s, r.id, []);
 		return;
 	};
 	const uri = match (uri_from_request(r.params)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_array_fmt(s, r.id, []);
 		return;
@@ -287,7 +314,8 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	const ch = match (json::get(&obj, "ch")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
+		case let s: str =>
+			yield s;
 		case =>
 			send_array_fmt(s, r.id, []);
 			return;
@@ -302,27 +330,33 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const pos_v = match (json::get(&obj, "position")) {
-	case let p: *json::value => yield *p;
+	case let p: *json::value =>
+		yield *p;
 	case =>
 		send_array_fmt(s, r.id, []);
 		return;
 	};
 	const pos = match (lsp::decode_position(pos_v)) {
-	case let p: lsp::position => yield p;
+	case let p: lsp::position =>
+		yield p;
 	case lsp::bad_message =>
 		send_array_fmt(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_array_fmt(s, r.id, []);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
 	const enc = position_encoding(s);
-	const cursor_off = analysis::position_to_byte(data, doc.buf.line_index, enc,
-		analysis::position { line = pos.line, character = pos.character });
+	const cursor_off =
+		analysis::position_to_byte(
+			data, doc.buf.line_index, enc,
+			analysis::position { line = pos.line, character = pos.character },
+		);
 	if (cursor_off == 0 || cursor_off > len(data)) {
 		send_array_fmt(s, r.id, []);
 		return;
@@ -389,8 +423,10 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	};
 
 	// Build a TextEdit replacing the leading whitespace.
-	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, line_start);
-	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, cur_ws_end);
+	const start_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, line_start);
+	const end_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, cur_ws_end);
 	const new_text = strings::fromutf8(new_indent)!;
 
 	let edit = json::newobject();
@@ -455,28 +491,38 @@ fn bytes_equal(a: []u8, b: []u8) bool = {
 
 fn uri_from_request(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const td = match (json::get(&obj, "textDocument")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	match (json::get(&td, "uri")) {
 	case let p: *json::value =>
 		match (*p) {
-		case let s: str => return s;
-		case => return void;
+		case let s: str =>
+			return s;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 };
 
@@ -489,8 +535,9 @@ fn send_array_fmt(s: *server, id: lsp::id, arr: []json::value) void = {
 	};
 };
 
-fn params_obj_fmt(p: (json::value | void)) (json::object | void) =
-	lsp::params_object(p);
+fn params_obj_fmt(
+	p: (json::value | void),
+) (json::object | void) = lsp::params_object(p);
 
 // Post-processes pretty-printer output to honour an indent style.
 // `pretty` always emits tabs; when `style == SPACE`, expand the leading
@@ -499,7 +546,11 @@ fn params_obj_fmt(p: (json::value | void)) (json::object | void) =
 // Returns the input string unchanged when style == TAB, otherwise a
 // freshly-allocated string the caller must free if it differs from the
 // input.
-export fn apply_indent_style(source: str, style: indent_style, width: u32) str = {
+export fn apply_indent_style(
+	source: str,
+	style: indent_style,
+	width: u32,
+) str = {
 	if (style == indent_style::TAB) return source;
 	const w = width: size;
 	const src = strings::toutf8(source);

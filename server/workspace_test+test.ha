@@ -12,7 +12,10 @@ use os;
 use strings;
 
 @test fn decode_workspace_folders_handles_array() void = {
-	let v = json::loadstr(`[{"uri":"file:///a","name":"a"},{"uri":"file:///b","name":"b"}]`)!;
+	let v =
+		json::loadstr(
+			`[{"uri":"file:///a","name":"a"},{"uri":"file:///b","name":"b"}]`,
+		)!;
 	defer json::finish(v);
 	const folders = decode_workspace_folders(v);
 	defer {
@@ -58,7 +61,10 @@ use strings;
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
@@ -75,7 +81,8 @@ use strings;
 	set_workspace_folders(&s, init);
 
 	// Build a didChangeWorkspaceFolders notification: remove a, add c.
-	const params_str = `{"event":{"added":[{"uri":"file:///c","name":"c"}],"removed":[{"uri":"file:///a","name":"a"}]}}`;
+	const params_str =
+		`{"event":{"added":[{"uri":"file:///c","name":"c"}],"removed":[{"uri":"file:///a","name":"a"}]}}`;
 	let pv = json::loadstr(params_str)!;
 	defer json::finish(pv);
 	const n = lsp::notification {
@@ -98,7 +105,10 @@ use strings;
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
@@ -123,7 +133,10 @@ use strings;
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
@@ -149,18 +162,25 @@ use strings;
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
-	const params = `{"processId":42,"workspaceFolders":[{"uri":"file:///proj","name":"proj"}],"capabilities":{}}`;
+	const params =
+		`{"processId":42,"workspaceFolders":[{"uri":"file:///proj","name":"proj"}],"capabilities":{}}`;
 	let pv = json::loadstr(params)!;
 	const r = lsp::request {
 		id = 1.0,
 		method = strings::dup("initialize")!,
 		params = pv,
 	};
-	defer { free(r.method); json::finish(pv); };
+	defer {
+		free(r.method);
+		json::finish(pv);
+	};
 
 	handle_initialize(&s, r);
 
@@ -175,7 +195,10 @@ use strings;
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
@@ -186,7 +209,10 @@ use strings;
 		method = strings::dup("initialize")!,
 		params = pv,
 	};
-	defer { free(r.method); json::finish(pv); };
+	defer {
+		free(r.method);
+		json::finish(pv);
+	};
 
 	handle_initialize(&s, r);
 
@@ -200,18 +226,25 @@ use strings;
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
-	const params = `{"capabilities":{"general":{"positionEncodings":["utf-16","utf-8"]}}}`;
+	const params =
+		`{"capabilities":{"general":{"positionEncodings":["utf-16","utf-8"]}}}`;
 	let pv = json::loadstr(params)!;
 	const r = lsp::request {
 		id = 1.0,
 		method = strings::dup("initialize")!,
 		params = pv,
 	};
-	defer { free(r.method); json::finish(pv); };
+	defer {
+		free(r.method);
+		json::finish(pv);
+	};
 	handle_initialize(&s, r);
 
 	assert(s.negotiated_encoding == analysis::encoding::UTF8);
@@ -229,7 +262,10 @@ use strings;
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
@@ -240,7 +276,10 @@ use strings;
 		method = strings::dup("initialize")!,
 		params = pv,
 	};
-	defer { free(r.method); json::finish(pv); };
+	defer {
+		free(r.method);
+		json::finish(pv);
+	};
 	handle_initialize(&s, r);
 
 	assert(s.negotiated_encoding == analysis::encoding::UTF16);
@@ -252,7 +291,10 @@ use strings;
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
@@ -265,7 +307,10 @@ use strings;
 	wsfx_mkdir(dir_y);
 	wsfx_write(path_x, "export fn xfunc() void = void;\n");
 	wsfx_write(path_y, "export fn yfunc() void = void;\n");
-	defer { wsfx_rm(path_x); wsfx_rm(path_y); };
+	defer {
+		wsfx_rm(path_x);
+		wsfx_rm(path_y);
+	};
 
 	// Initialize with folder x.
 	let init: []workspace_folder = [];
@@ -280,7 +325,8 @@ use strings;
 	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "yfunc")) == 0);
 
 	// Send didChangeWorkspaceFolders: add y, remove x.
-	const params_str = `{"event":{"added":[{"uri":"file://.tmp/lspwsfy","name":"y"}],"removed":[{"uri":"file://.tmp/lspwsfx","name":"x"}]}}`;
+	const params_str =
+		`{"event":{"added":[{"uri":"file://.tmp/lspwsfy","name":"y"}],"removed":[{"uri":"file://.tmp/lspwsfx","name":"x"}]}}`;
 	let pv = json::loadstr(params_str)!;
 	defer json::finish(pv);
 	const n = lsp::notification {
@@ -303,8 +349,10 @@ fn wsfx_mkdir(path: str) void = {
 
 fn wsfx_write(path: str, text: str) void = {
 	const f = match (os::create(path, 0o644)) {
-	case let h: io::file => yield h;
-	case fs::error => return;
+	case let h: io::file =>
+		yield h;
+	case fs::error =>
+		return;
 	};
 	defer io::close(f)!;
 	io::writeall(f, strings::toutf8(text))!;
@@ -322,20 +370,28 @@ fn wsfx_rm(path: str) void = {
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
 	// Index one fake entry.
-	analysis::index_file(&s.workspace_index, "/x/foo.ha",
-		strings::toutf8("export fn hello() void = void;\n"));
+	analysis::index_file(
+		&s.workspace_index, "/x/foo.ha",
+		strings::toutf8("export fn hello() void = void;\n"),
+	);
 
 	const r = lsp::request {
 		id = 90.0,
 		method = strings::dup("workspace/symbol")!,
 		params = json::loadstr(`{"query":""}`)!,
 	};
-	defer { free(r.method); json::finish(r.params as json::value); };
+	defer {
+		free(r.method);
+		json::finish(r.params as json::value);
+	};
 	handle_workspace_symbol(&s, r);
 
 	// Find the response in the output stream.
@@ -356,7 +412,10 @@ fn wsfx_rm(path: str) void = {
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
@@ -365,8 +424,9 @@ fn wsfx_rm(path: str) void = {
 	// should return null AND remove the index entry.
 	const path = ".tmp/lspstale.ha";
 	wsfx_write(path, "export fn ghost() void = void;\n");
-	analysis::index_file(&s.workspace_index, path,
-		strings::toutf8("export fn ghost() void = void;\n"));
+	analysis::index_file(
+		&s.workspace_index, path, strings::toutf8("export fn ghost() void = void;\n"),
+	);
 	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "ghost")) == 1);
 
 	wsfx_rm(path);
@@ -382,7 +442,10 @@ fn wsfx_rm(path: str) void = {
 	let in_buf = alloc(memio::fixed([]))!;
 	defer free(in_buf);
 	let scan = alloc(bufio::newscanner(in_buf))!;
-	defer { bufio::finish(scan); free(scan); };
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
 	let s = new(scan, &out);
 	defer finish(&s);
 
@@ -408,7 +471,10 @@ fn wsfx_rm(path: str) void = {
 		method = strings::dup("workspace/symbol")!,
 		params = json::loadstr(`{"query":""}`)!,
 	};
-	defer { free(r.method); json::finish(r.params as json::value); };
+	defer {
+		free(r.method);
+		json::finish(r.params as json::value);
+	};
 	handle_workspace_symbol(&s, r);
 
 	const data = memio::buffer(&out);

@@ -14,8 +14,7 @@ use strings;
 export fn lookup_builtin(name: str) ((str, str) | void) = {
 	for (let i = 0z; i < len(builtins); i += 1) {
 		if (builtins[i].name == name) {
-			return (strings::dup(builtins[i].sig)!,
-				strings::dup(builtins[i].docs)!);
+			return (strings::dup(builtins[i].sig)!, strings::dup(builtins[i].docs)!);
 		};
 	};
 	return void;
@@ -161,9 +160,6 @@ const builtins: [_]builtin_entry = [
 			"code path that returns from a variadic function "
 			"after `vastart`.",
 	},
-
-	// --- declaration keywords -----------------------------------
-
 	builtin_entry {
 		name = "let",
 		sig = "let name: type = value;\n"
@@ -279,9 +275,6 @@ const builtins: [_]builtin_entry = [
 			"alias form rebinds the name; the member form pulls "
 			"selected items into the current namespace.",
 	},
-
-	// --- control flow keywords ---------------------------------
-
 	builtin_entry {
 		name = "if",
 		sig = "if (condition) then-expr\n"
@@ -394,9 +387,6 @@ const builtins: [_]builtin_entry = [
 			"normal completion. As a type, `done` is a "
 			"zero-sized error variant.",
 	},
-
-	// --- type-related operators --------------------------------
-
 	builtin_entry {
 		name = "as",
 		sig = "value as type",
@@ -459,9 +449,6 @@ const builtins: [_]builtin_entry = [
 			"`vaend`. Hare-style variadics (`type...`) use a "
 			"regular slice instead.",
 	},
-
-	// --- constants ---------------------------------------------
-
 	builtin_entry {
 		name = "true",
 		sig = "true: bool",
@@ -479,9 +466,6 @@ const builtins: [_]builtin_entry = [
 			"assigned to or compared with `nullable` pointer "
 			"types.",
 	},
-
-	// --- primitive types ---------------------------------------
-
 	builtin_entry {
 		name = "bool",
 		sig = "bool",
@@ -608,9 +592,6 @@ const builtins: [_]builtin_entry = [
 			"every other type, so a `never`-typed expression may "
 			"appear wherever any value is expected.",
 	},
-
-	// --- attributes --------------------------------------------
-
 	builtin_entry {
 		name = "@test",
 		sig = "@test fn name() void = body;",
@@ -674,3 +655,9 @@ const builtins: [_]builtin_entry = [
 			"provably writes before reading.",
 	},
 ];
+// --- declaration keywords -----------------------------------
+// --- control flow keywords ---------------------------------
+// --- type-related operators --------------------------------
+// --- constants ---------------------------------------------
+// --- primitive types ---------------------------------------
+// --- attributes --------------------------------------------

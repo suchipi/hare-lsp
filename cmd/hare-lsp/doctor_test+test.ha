@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
-
 @test fn parse_harepath_empty() void = {
 	const entries = parse_harepath("");
 	defer free(entries);
@@ -15,8 +14,7 @@
 };
 
 @test fn parse_harepath_multiple() void = {
-	const entries = parse_harepath(
-		"/a:/b/c:/usr/local/src/hare/stdlib");
+	const entries = parse_harepath("/a:/b/c:/usr/local/src/hare/stdlib");
 	defer free(entries);
 	assert(len(entries) == 3);
 	assert(entries[0] == "/a");

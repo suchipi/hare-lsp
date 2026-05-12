@@ -19,7 +19,8 @@ use strings;
 	open_doc(&s, "file:///th.ha", sample);
 
 	// Cursor on `my_int` (line 0, char 7).
-	const req = `{"jsonrpc":"2.0","id":1700,"method":"textDocument/prepareTypeHierarchy","params":{"textDocument":{"uri":"file:///th.ha"},"position":{"line":0,"character":7}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":1700,"method":"textDocument/prepareTypeHierarchy","params":{"textDocument":{"uri":"file:///th.ha"},"position":{"line":0,"character":7}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 1700.0);
@@ -28,14 +29,14 @@ use strings;
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	const arr = *(json::get(&obj, "result") as *json::value)
-		as []json::value;
-	assert(len(arr) == 1,
-		"prepareTypeHierarchy should return one item for a type decl");
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
+	assert(
+		len(arr) == 1,
+		"prepareTypeHierarchy should return one item for a type decl"
+	);
 	const item = arr[0] as json::object;
 	const name = *(json::get(&item, "name") as *json::value) as str;
-	assert(name == "my_int",
-		"item name should match the type under the cursor");
+	assert(name == "my_int", "item name should match the type under the cursor");
 };
 
 @test fn e2e_type_hierarchy_supertypes_returns_array() void = {
@@ -47,7 +48,8 @@ use strings;
 `;
 	open_doc(&s, "file:///ths.ha", sample);
 
-	const req = `{"jsonrpc":"2.0","id":1701,"method":"typeHierarchy/supertypes","params":{"item":{"name":"my_int","kind":23,"uri":"file:///ths.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":5},"end":{"line":0,"character":11}}}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":1701,"method":"typeHierarchy/supertypes","params":{"item":{"name":"my_int","kind":23,"uri":"file:///ths.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":5},"end":{"line":0,"character":11}}}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 1701.0);
@@ -58,9 +60,10 @@ use strings;
 	const obj = v as json::object;
 	// Result must be an array (possibly empty if workspace index isn't
 	// populated for the open doc -- that's a known limitation).
-	assert(*(json::get(&obj, "result") as *json::value)
-		is []json::value,
-		"supertypes must return an array");
+	assert(
+		*(json::get(&obj, "result") as *json::value) is []json::value,
+		"supertypes must return an array"
+	);
 };
 
 // Two TYPE decls with the same short name in different modules must
@@ -79,9 +82,13 @@ use strings;
 	defer free(uri_a);
 
 	// Supertypes of mod_a's `T`: should yield mod_a's `X`, not mod_b's.
-	const tmpl = `{"jsonrpc":"2.0","id":1720,"method":"typeHierarchy/supertypes","params":{"item":{"name":"T","kind":23,"uri":"`;
-	const req = strings::concat(tmpl, uri_a,
-		`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":5},"end":{"line":0,"character":6}}}}}`)!;
+	const tmpl =
+		`{"jsonrpc":"2.0","id":1720,"method":"typeHierarchy/supertypes","params":{"item":{"name":"T","kind":23,"uri":"`;
+	const req =
+		strings::concat(
+			tmpl, uri_a,
+			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":5},"end":{"line":0,"character":6}}}}}`,
+		)!;
 	defer free(req);
 	send(&s, strings::toutf8(req));
 
@@ -90,21 +97,28 @@ use strings;
 	const v = json::loadstr(strings::fromutf8(body)!)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	const arr = *(json::get(&obj, "result") as *json::value)
-		as []json::value;
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
 	for (let i = 0z; i < len(arr); i += 1) {
 		const item = arr[i] as json::object;
 		const u = *(json::get(&item, "uri") as *json::value) as str;
-		assert(strings::contains(u, "/mod_a/"),
-			"supertypes must come from the cursor's module");
-		assert(!strings::contains(u, "/mod_b/"),
-			"supertypes must not leak into the unrelated module");
+		assert(
+			strings::contains(u, "/mod_a/"),
+			"supertypes must come from the cursor's module"
+		);
+		assert(
+			!strings::contains(u, "/mod_b/"),
+			"supertypes must not leak into the unrelated module"
+		);
 	};
 
 	// Symmetric subtypes check.
-	const tmpl2 = `{"jsonrpc":"2.0","id":1721,"method":"typeHierarchy/subtypes","params":{"item":{"name":"X","kind":23,"uri":"`;
-	const req2 = strings::concat(tmpl2, uri_a,
-		`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}},"selectionRange":{"start":{"line":1,"character":5},"end":{"line":1,"character":6}}}}}`)!;
+	const tmpl2 =
+		`{"jsonrpc":"2.0","id":1721,"method":"typeHierarchy/subtypes","params":{"item":{"name":"X","kind":23,"uri":"`;
+	const req2 =
+		strings::concat(
+			tmpl2, uri_a,
+			`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}},"selectionRange":{"start":{"line":1,"character":5},"end":{"line":1,"character":6}}}}}`,
+		)!;
 	defer free(req2);
 	send(&s, strings::toutf8(req2));
 
@@ -112,15 +126,21 @@ use strings;
 	defer free(body2);
 	const v2 = json::loadstr(strings::fromutf8(body2)!)!;
 	defer json::finish(v2);
-	const arr2 = *(json::get(&(v2 as json::object), "result")
-		as *json::value) as []json::value;
+	const arr2 =
+		*(json::get(
+			&(v2 as json::object), "result",
+		) as *json::value) as []json::value;
 	for (let i = 0z; i < len(arr2); i += 1) {
 		const item = arr2[i] as json::object;
 		const u = *(json::get(&item, "uri") as *json::value) as str;
-		assert(strings::contains(u, "/mod_a/"),
-			"subtypes must come from the cursor's module");
-		assert(!strings::contains(u, "/mod_b/"),
-			"subtypes must not leak into the unrelated module");
+		assert(
+			strings::contains(u, "/mod_a/"),
+			"subtypes must come from the cursor's module"
+		);
+		assert(
+			!strings::contains(u, "/mod_b/"),
+			"subtypes must not leak into the unrelated module"
+		);
 	};
 };
 
@@ -130,8 +150,7 @@ use strings;
 // matching would lump mod_b's X into mod_a's supertype set.
 fn setup_crossmod_typehier_workspace() str = {
 	const cwd = os::getcwd();
-	const root = strings::concat(cwd,
-		"/.tmp/e2e-crossmod-typehier")!;
+	const root = strings::concat(cwd, "/.tmp/e2e-crossmod-typehier")!;
 	cleanup_crossmod_workspace(root);
 	const mod_a = strings::concat(root, "/mod_a")!;
 	defer free(mod_a);
@@ -165,7 +184,8 @@ fn setup_crossmod_typehier_workspace() str = {
 `;
 	open_doc(&s, "file:///thsub.ha", sample);
 
-	const req = `{"jsonrpc":"2.0","id":1702,"method":"typeHierarchy/subtypes","params":{"item":{"name":"int","kind":23,"uri":"file:///thsub.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":14},"end":{"line":0,"character":17}}}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":1702,"method":"typeHierarchy/subtypes","params":{"item":{"name":"int","kind":23,"uri":"file:///thsub.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":14},"end":{"line":0,"character":17}}}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 1702.0);
@@ -174,7 +194,8 @@ fn setup_crossmod_typehier_workspace() str = {
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	assert(*(json::get(&obj, "result") as *json::value)
-		is []json::value,
-		"subtypes must return an array");
+	assert(
+		*(json::get(&obj, "result") as *json::value) is []json::value,
+		"subtypes must return an array"
+	);
 };

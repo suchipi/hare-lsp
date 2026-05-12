@@ -55,7 +55,8 @@ export fn run_doctor() int = {
 	// 1. hare on $PATH.
 	const hare_bin = find_on_path("hare");
 	defer match (hare_bin) {
-	case let s: str => free(s);
+	case let s: str =>
+		free(s);
 	case void => void;
 	};
 	match (hare_bin) {
@@ -73,16 +74,20 @@ export fn run_doctor() int = {
 	// PATH resolution.
 	const lsp_bin = find_on_path("hare-lsp");
 	defer match (lsp_bin) {
-	case let s: str => free(s);
+	case let s: str =>
+		free(s);
 	case void => void;
 	};
 	match (lsp_bin) {
 	case let p: str =>
 		fmt::printfln("[OK] hare-lsp found at {}", p)!;
 	case void =>
-		fmt::println("[WARN] hare-lsp not on $PATH "
+		fmt::println(
+
+			"[WARN] hare-lsp not on $PATH "
 			"(editors usually need this; "
-			"run `sudo make install` from the repo)")!;
+			"run `sudo make install` from the repo)",
+		)!;
 	};
 
 	// 3. Build the list of search roots. Prefer $HAREPATH; otherwise
@@ -90,8 +95,10 @@ export fn run_doctor() int = {
 	// the doctor describes what the server would actually see at
 	// runtime.
 	const harepath_env = match (os::getenv("HAREPATH")) {
-	case let s: str => yield s;
-	case void => yield "";
+	case let s: str =>
+		yield s;
+	case void =>
+		yield "";
 	};
 	const from_env = parse_harepath(harepath_env);
 	defer free(from_env);
@@ -103,8 +110,10 @@ export fn run_doctor() int = {
 		fmt::printfln("[..] HAREPATH = {}", harepath_env)!;
 		append(entries, from_env...)!;
 	} else {
-		fmt::println("[WARN] HAREPATH not set; "
-			"falling back to compiled-in defaults")!;
+		fmt::println(
+			"[WARN] HAREPATH not set; "
+			"falling back to compiled-in defaults",
+		)!;
 		using_defaults = true;
 		for (let i = 0z; i < len(STDLIB_DEFAULTS); i += 1) {
 			append(entries, STDLIB_DEFAULTS[i])!;
@@ -126,8 +135,7 @@ export fn run_doctor() int = {
 		if (stdlib_root is void && looks_like_stdlib(entry)) {
 			stdlib_root = entry;
 		};
-		if (hare_json_root is void
-				&& has_file(entry, HARE_JSON_MARKER)) {
+		if (hare_json_root is void && has_file(entry, HARE_JSON_MARKER)) {
 			hare_json_root = entry;
 		};
 	};
@@ -137,9 +145,12 @@ export fn run_doctor() int = {
 	case let p: str =>
 		fmt::printfln("[OK] stdlib found in {}", p)!;
 	case void =>
-		fmt::println("[FAIL] no stdlib found on HAREPATH "
+		fmt::println(
+
+			"[FAIL] no stdlib found on HAREPATH "
 			"(no entry contains core stdlib modules); "
-			"point HAREPATH at your Hare stdlib root")!;
+			"point HAREPATH at your Hare stdlib root",
+		)!;
 		failed = true;
 	};
 
@@ -148,14 +159,20 @@ export fn run_doctor() int = {
 	// requirement.
 	match (hare_json_root) {
 	case let p: str =>
-		fmt::printfln("[OK] hare-json found in {} (contains {})", p,
-			HARE_JSON_MARKER)!;
+		fmt::printfln(
+			"[OK] hare-json found in {} (contains {})", p, HARE_JSON_MARKER,
+		)!;
 	case void =>
-		fmt::printfln("[FAIL] hare-json not reachable from HAREPATH "
-			"(no entry contains {})", HARE_JSON_MARKER)!;
+		fmt::printfln(
+			"[FAIL] hare-json not reachable from HAREPATH "
+			"(no entry contains {})", HARE_JSON_MARKER,
+		)!;
 		fmt::println("       install with:")!;
-		fmt::println("         d=$(mktemp -d) && git clone "
-			"https://git.sr.ht/~sircmpwn/hare-json \"$d/hare-json\"")!;
+		fmt::println(
+
+			"         d=$(mktemp -d) && git clone "
+			"https://git.sr.ht/~sircmpwn/hare-json \"$d/hare-json\"",
+		)!;
 		fmt::println("         sudo make -C \"$d/hare-json\" install")!;
 		failed = true;
 	};
@@ -166,12 +183,18 @@ export fn run_doctor() int = {
 	match (os::getenv("HARE_LSP_LOG_DIR")) {
 	case let s: str =>
 		if (len(s) == 0) {
-			fmt::println("[WARN] HARE_LSP_LOG_DIR is set but empty; "
-				"wire-protocol logging disabled")!;
+			fmt::println(
+
+				"[WARN] HARE_LSP_LOG_DIR is set but empty; "
+				"wire-protocol logging disabled",
+			)!;
 		} else if (!path_is_absolute(s)) {
-			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not absolute; "
+			fmt::printfln(
+
+				"[FAIL] HARE_LSP_LOG_DIR={} is not absolute; "
 				"editors run hare-lsp with cwd=/ and relative "
-				"paths will fail", s)!;
+				"paths will fail", s,
+			)!;
 			failed = true;
 		} else if (!is_directory(s)) {
 			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not a "
@@ -182,12 +205,16 @@ export fn run_doctor() int = {
 				"writable", s)!;
 			failed = true;
 		} else {
-			fmt::printfln("[OK] HARE_LSP_LOG_DIR={} is absolute "
-				"and writable", s)!;
+			fmt::printfln(
+				"[OK] HARE_LSP_LOG_DIR={} is absolute "
+				"and writable", s,
+			)!;
 		};
 	case void =>
-		fmt::println("[OK] HARE_LSP_LOG_DIR not set "
-			"(wire-protocol logging disabled)")!;
+		fmt::println(
+			"[OK] HARE_LSP_LOG_DIR not set "
+			"(wire-protocol logging disabled)",
+		)!;
 	};
 
 	fmt::println()!;
@@ -240,8 +267,10 @@ fn looks_like_stdlib(dir: str) bool = {
 // allocated string; caller frees.
 fn find_on_path(name: str) (str | void) = {
 	const path_env = match (os::getenv("PATH")) {
-	case let s: str => yield s;
-	case void => return;
+	case let s: str =>
+		yield s;
+	case void =>
+		return;
 	};
 	let tok = strings::tokenize(path_env, ":");
 	for (let item => strings::next_token(&tok)) {
@@ -269,8 +298,10 @@ fn is_directory(p: str) bool = {
 // True when the user has write access to `p`.
 fn is_writable_dir(p: str) bool = {
 	match (os::access(p, os::amode::W_OK)) {
-	case let ok: bool => return ok;
-	case fs::error => return false;
+	case let ok: bool =>
+		return ok;
+	case fs::error =>
+		return false;
 	};
 };
 
@@ -278,13 +309,16 @@ fn is_writable_dir(p: str) bool = {
 // Best-effort - failures degrade silently so the doctor keeps going.
 fn report_hare_version() void = {
 	const pipe_pair = match (unix::pipe()) {
-	case let p: (io::file, io::file) => yield p;
-	case => return;
+	case let p: (io::file, io::file) =>
+		yield p;
+	case =>
+		return;
 	};
 	const (read_fd, write_fd) = pipe_pair;
 
 	let cmd = match (exec::cmd("hare", "version")) {
-	case let c: exec::command => yield c;
+	case let c: exec::command =>
+		yield c;
 	case =>
 		safe_close(read_fd);
 		safe_close(write_fd);
@@ -315,7 +349,8 @@ fn report_hare_version() void = {
 		return;
 	};
 	const proc = match (exec::start(&cmd)) {
-	case let p: exec::process => yield p;
+	case let p: exec::process =>
+		yield p;
 	case =>
 		safe_close(read_fd);
 		safe_close(write_fd);
@@ -342,8 +377,10 @@ fn report_hare_version() void = {
 	};
 
 	const text = match (strings::fromutf8(buf)) {
-	case let s: str => yield s;
-	case => return;
+	case let s: str =>
+		yield s;
+	case =>
+		return;
 	};
 	const trimmed = strings::trim(text);
 	if (len(trimmed) == 0) return;
@@ -352,8 +389,10 @@ fn report_hare_version() void = {
 
 fn first_line(s: str) str = {
 	match (strings::index(s, '\n')) {
-	case let i: size => return strings::sub(s, 0, i);
-	case void => return s;
+	case let i: size =>
+		return strings::sub(s, 0, i);
+	case void =>
+		return s;
 	};
 };
 

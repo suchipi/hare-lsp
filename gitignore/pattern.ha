@@ -61,8 +61,10 @@ export type pattern = struct {
 // [[pattern_finish]].
 export fn parse_pattern(line: str) (pattern | void) = {
 	const body = match (preprocess_line(line)) {
-	case let s: str => yield s;
-	case void => return;
+	case let s: str =>
+		yield s;
+	case void =>
+		return;
 	};
 	defer free(body);
 
@@ -79,7 +81,8 @@ export fn parse_pattern(line: str) (pattern | void) = {
 	// Escape: at the start of the pattern body (after the optional `!`)
 	// a backslash before `#` or `!` is a literal-marker only; drop it.
 	if (i + 1 < len(raw) && raw[i] == '\\': u8 &&
-			(raw[i + 1] == '#': u8 || raw[i + 1] == '!': u8)) {
+	(raw[i + 1] == '#': u8 ||
+	raw[i + 1] == '!': u8)) {
 		i += 1;
 	};
 
@@ -111,7 +114,7 @@ export fn parse_pattern(line: str) (pattern | void) = {
 	let it = strings::tokenize(core_str, "/");
 	for (let part => strings::next_token(&it)) {
 		if (len(part) == 0) continue;
-		const is_dstar = (part == "**");
+		const is_dstar = part == "**";
 		append(segs, pattern_segment {
 			text = if (is_dstar) "" else strings::dup(part)!,
 			double_star = is_dstar,
@@ -221,4 +224,3 @@ fn preprocess_line(line: str) (str | void) = {
 	free(buf);
 	return result;
 };
-

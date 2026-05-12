@@ -79,8 +79,10 @@ export fn build_scope_graph(su: *ast::subunit) scope_graph = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
 		const f = match (d.decl) {
-		case let f: ast::decl_func => yield f;
-		case => continue;
+		case let f: ast::decl_func =>
+			yield f;
+		case =>
+			continue;
 		};
 		walk_func(&g, g.root, d, f);
 	};
@@ -105,13 +107,19 @@ export fn finish_scope_graph(g: *scope_graph) void = {
 // Resolves the cursor at `off` to the innermost scope binding for `name`.
 // Walks the innermost scope outward through parents. Returns void when no
 // binding is in scope.
-export fn resolve_binding_at_byte(g: *scope_graph, name: str, off: u32) (scope_binding | void) = {
+export fn resolve_binding_at_byte(
+	g: *scope_graph,
+	name: str,
+	off: u32,
+) (scope_binding | void) = {
 	const node = find_innermost_scope(g.root, off);
 	let cur: nullable *scope_node = node;
 	for (true) {
 		const n = match (cur) {
-		case let p: *scope_node => yield p;
-		case null => break;
+		case let p: *scope_node =>
+			yield p;
+		case null =>
+			break;
 		};
 		// Inner-most binding within this node wins; iterate the
 		// list in declaration order and keep the last match whose
@@ -125,7 +133,8 @@ export fn resolve_binding_at_byte(g: *scope_graph, name: str, off: u32) (scope_b
 			best = *b;
 		};
 		match (best) {
-		case let b: scope_binding => return b;
+		case let b: scope_binding =>
+			return b;
 		case void => void;
 		};
 		cur = n.parent;
@@ -143,7 +152,11 @@ fn find_innermost_scope(node: *scope_node, off: u32) *scope_node = {
 	return node;
 };
 
-fn alloc_scope_node(parent: nullable *scope_node, start: u32, end: u32) *scope_node = {
+fn alloc_scope_node(
+	parent: nullable *scope_node,
+	start: u32,
+	end: u32,
+) *scope_node = {
 	return alloc(scope_node {
 		parent = parent,
 		bindings = [],
@@ -153,15 +166,26 @@ fn alloc_scope_node(parent: nullable *scope_node, start: u32, end: u32) *scope_n
 	})!;
 };
 
-fn push_scope(g: *scope_graph, parent: *scope_node, start: u32, end: u32) *scope_node = {
+fn push_scope(
+	g: *scope_graph,
+	parent: *scope_node,
+	start: u32,
+	end: u32,
+) *scope_node = {
 	const n = alloc_scope_node(parent, start, end);
 	append(g.nodes, n)!;
 	append(parent.children, n)!;
 	return n;
 };
 
-fn add_binding(scope: *scope_node, name: str, kind: binding_kind,
-		name_span: ast::location, scope_start: u32, scope_end: u32) void = {
+fn add_binding(
+	scope: *scope_node,
+	name: str,
+	kind: binding_kind,
+	name_span: ast::location,
+	scope_start: u32,
+	scope_end: u32,
+) void = {
 	if (len(name) == 0) return;
 	append(scope.bindings, scope_binding {
 		name = strings::dup(name)!,
@@ -174,21 +198,33 @@ fn add_binding(scope: *scope_node, name: str, kind: binding_kind,
 
 fn add_toplevel_binding(root: *scope_node, d: *ast::decl) void = {
 	const (id, name_loc) = match (d.decl) {
-	case let f: ast::decl_func => yield (f.ident, d.loc);
-	case let t: ast::decl_type => yield (t.ident, d.loc);
-	case let g: ast::decl_global => yield (g.ident, d.loc);
-	case let c: ast::decl_const => yield (c.ident, d.loc);
-	case ast::assert_expr => return;
+	case let f: ast::decl_func =>
+		yield (f.ident, d.loc);
+	case let t: ast::decl_type =>
+		yield (t.ident, d.loc);
+	case let g: ast::decl_global =>
+		yield (g.ident, d.loc);
+	case let c: ast::decl_const =>
+		yield (c.ident, d.loc);
+	case ast::assert_expr =>
+		return;
 	};
 	if (len(id) == 0) return;
 	const name = id[len(id) - 1];
 	add_binding(root, name, binding_kind::TOPLEVEL_DECL, name_loc, 0, ~0u32);
 };
 
-fn walk_func(g: *scope_graph, parent: *scope_node, d: *ast::decl, f: ast::decl_func) void = {
+fn walk_func(
+	g: *scope_graph,
+	parent: *scope_node,
+	d: *ast::decl,
+	f: ast::decl_func,
+) void = {
 	const body = match (f.body) {
-	case let e: *ast::expr => yield e;
-	case null => return;
+	case let e: *ast::expr =>
+		yield e;
+	case null =>
+		return;
 	};
 	const body_start = body.loc.start.off: u32;
 	const body_end = body.loc.end.off: u32;
@@ -199,8 +235,9 @@ fn walk_func(g: *scope_graph, parent: *scope_node, d: *ast::decl, f: ast::decl_f
 		for (let i = 0z; i < len(proto.params); i += 1) {
 			const p = &proto.params[i];
 			if (len(p.name) == 0) continue;
-			add_binding(fn_scope, p.name, binding_kind::FUNC_PARAM,
-				p.loc, body_start, body_end);
+			add_binding(
+				fn_scope, p.name, binding_kind::FUNC_PARAM, p.loc, body_start, body_end,
+			);
 		};
 	case => void;
 	};
@@ -211,9 +248,12 @@ fn walk_expr(g: *scope_graph, scope: *scope_node, e: *ast::expr) void = {
 	match (e.expr) {
 	case let b: ast::binding_expr =>
 		const kind = switch (b.kind) {
-		case ast::binding_kind::LET => yield binding_kind::LET;
-		case ast::binding_kind::CONST => yield binding_kind::CONST;
-		case ast::binding_kind::DEF => yield binding_kind::DEF;
+		case ast::binding_kind::LET =>
+			yield binding_kind::LET;
+		case ast::binding_kind::CONST =>
+			yield binding_kind::CONST;
+		case ast::binding_kind::DEF =>
+			yield binding_kind::DEF;
 		};
 		// Each binding becomes visible from its declaration site
 		// (so a rename hits the `let foo` text itself) through the
@@ -234,14 +274,13 @@ fn walk_expr(g: *scope_graph, scope: *scope_node, e: *ast::expr) void = {
 			walk_expr(g, scope, bd.init);
 		};
 	case let c: ast::compound_expr =>
-		const child = push_scope(g, scope, e.loc.start.off: u32,
-			e.loc.end.off: u32);
+		const child = push_scope(g, scope, e.loc.start.off: u32, e.loc.end.off: u32);
 		for (let i = 0z; i < len(c.exprs); i += 1) {
 			walk_expr(g, child, c.exprs[i]);
 		};
 	case let f: ast::for_expr =>
-		const for_scope = push_scope(g, scope, e.loc.start.off: u32,
-			e.loc.end.off: u32);
+		const for_scope =
+			push_scope(g, scope, e.loc.start.off: u32, e.loc.end.off: u32);
 		match (f.bindings) {
 		case let p: *ast::expr =>
 			walk_expr(g, for_scope, p);
@@ -391,7 +430,11 @@ fn walk_expr(g: *scope_graph, scope: *scope_node, e: *ast::expr) void = {
 	};
 };
 
-fn walk_match_case(g: *scope_graph, scope: *scope_node, mc: *ast::match_case) void = {
+fn walk_match_case(
+	g: *scope_graph,
+	scope: *scope_node,
+	mc: *ast::match_case,
+) void = {
 	const (cstart, cend) = case_expr_range(mc.exprs);
 	const cscope = push_scope(g, scope, cstart, cend);
 	if (len(mc.name) > 0) {
@@ -401,8 +444,7 @@ fn walk_match_case(g: *scope_graph, scope: *scope_node, mc: *ast::match_case) vo
 			start = lex_loc_at(cstart),
 			end = lex_loc_at(cstart),
 		};
-		add_binding(cscope, mc.name, binding_kind::MATCH_BINDING,
-			nloc, cstart, cend);
+		add_binding(cscope, mc.name, binding_kind::MATCH_BINDING, nloc, cstart, cend);
 	};
 	for (let j = 0z; j < len(mc.exprs); j += 1) {
 		walk_expr(g, cscope, mc.exprs[j]);

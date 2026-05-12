@@ -13,7 +13,9 @@ use os;
 use strconv;
 use strings;
 
-fn th_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn th_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -21,7 +23,12 @@ fn th_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = 
 	return (s, scan, in_buf, out);
 };
 
-fn th_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn th_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -31,15 +38,21 @@ fn th_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 };
 
 fn th_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(
+			`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
+		)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -95,7 +108,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	// Also index it so subtypes can find it.
 	th_index(&s, "/repo/x.ha", "type A = B;\ntype B = int;\n");
 
-	const params = `{"item":{"name":"A","kind":23,"uri":"file:///repo/x.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}}}}`;
+	const params =
+		`{"item":{"name":"A","kind":23,"uri":"file:///repo/x.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}}}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -107,7 +121,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	handle_supertypes(&s, r);
 	const v = th_skip_to_response(out, 1.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// Expect at least one item (B).
 	assert(len(result) >= 1);
 	let found_b = false;
@@ -128,7 +143,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const path = ".tmp/hare-lsp-th-subtypes-test.ha";
 	const text = "type Wrapper = Inner;\ntype Inner = int;\n";
 	let f = match (writefile(path, text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer rmfile(path);
@@ -136,8 +152,11 @@ fn th_index(s: *server, path: str, text: str) void = {
 	th_index(&s, path, text);
 
 	// Ask: what are Inner's subtypes? Expect Wrapper.
-	const params_str = strings::concat(`{"item":{"name":"Inner","kind":23,"uri":"file://`, path,
-		`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":17}},"selectionRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":17}}}}`)!;
+	const params_str =
+		strings::concat(
+			`{"item":{"name":"Inner","kind":23,"uri":"file://`, path,
+			`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":17}},"selectionRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":17}}}}`,
+		)!;
 	defer free(params_str);
 	let pv = json::loadstr(params_str)!;
 	defer json::finish(pv);
@@ -150,7 +169,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	handle_subtypes(&s, r);
 	const v = th_skip_to_response(out, 2.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	let found_wrapper = false;
 	for (let i = 0z; i < len(result); i += 1) {
 		const item = result[i] as json::object;
@@ -168,16 +188,23 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const path = ".tmp/hare-lsp-th-tagged-test.ha";
 	const text = "type T = (A | B);\ntype A = int;\ntype B = str;\n";
 	let _ = match (writefile(path, text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer rmfile(path);
 
 	th_index(&s, path, text);
-	th_open(&s, "file://.tmp/hare-lsp-th-tagged-test.ha", "type T = (A | B);\\ntype A = int;\\ntype B = str;\\n");
+	th_open(
+		&s, "file://.tmp/hare-lsp-th-tagged-test.ha",
+		"type T = (A | B);\\ntype A = int;\\ntype B = str;\\n",
+	);
 
-	const params_str = strings::concat(`{"item":{"name":"T","kind":23,"uri":"file://`, path,
-		`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}}}}`)!;
+	const params_str =
+		strings::concat(
+			`{"item":{"name":"T","kind":23,"uri":"file://`, path,
+			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}}}}`,
+		)!;
 	defer free(params_str);
 	let pv = json::loadstr(params_str)!;
 	defer json::finish(pv);
@@ -190,7 +217,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	handle_supertypes(&s, r);
 	const v = th_skip_to_response(out, 3.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	let found_a = false, found_b = false;
 	for (let i = 0z; i < len(result); i += 1) {
 		const item = result[i] as json::object;
@@ -213,7 +241,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	th_open(&s, "file:///repo/self.ha", text);
 	th_index(&s, "/repo/self.ha", "type Node = struct { next: *Node };\n");
 
-	const params = `{"item":{"name":"Node","kind":23,"uri":"file:///repo/self.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}}}}`;
+	const params =
+		`{"item":{"name":"Node","kind":23,"uri":"file:///repo/self.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}}}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -225,7 +254,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	handle_supertypes(&s, r);
 	const v = th_skip_to_response(out, 10.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// The only ident referenced by Node's underlying is Node itself,
 	// which we filter out. Result should be empty.
 	for (let i = 0z; i < len(result); i += 1) {
@@ -245,15 +275,19 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const path = ".tmp/hare-lsp-th-self-ref-subtypes.ha";
 	const text = "type Node = struct { next: *Node };\n";
 	let _ = match (writefile(path, text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer rmfile(path);
 
 	th_index(&s, path, text);
 
-	const params_str = strings::concat(`{"item":{"name":"Node","kind":23,"uri":"file://`, path,
-		`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}}}}`)!;
+	const params_str =
+		strings::concat(
+			`{"item":{"name":"Node","kind":23,"uri":"file://`, path,
+			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}}}}`,
+		)!;
 	defer free(params_str);
 	let pv = json::loadstr(params_str)!;
 	defer json::finish(pv);
@@ -266,7 +300,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	handle_subtypes(&s, r);
 	const v = th_skip_to_response(out, 11.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// Node refs itself; expect no items returned (filtered as self).
 	assert(len(result) == 0);
 };
@@ -285,7 +320,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	th_open(&s, "file:///repo/dup.ha", text);
 	th_index(&s, "/repo/dup.ha", "type T = (B | B);\ntype B = int;\n");
 
-	const params = `{"item":{"name":"T","kind":23,"uri":"file:///repo/dup.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}}}}`;
+	const params =
+		`{"item":{"name":"T","kind":23,"uri":"file:///repo/dup.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}}}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -297,7 +333,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	handle_supertypes(&s, r);
 	const v = th_skip_to_response(out, 12.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	let count_b = 0;
 	for (let i = 0z; i < len(result); i += 1) {
 		const item = result[i] as json::object;
@@ -324,19 +361,25 @@ fn th_index(s: *server, path: str, text: str) void = {
 	// "mod_a". Use directories so module_from_path returns distinct values.
 	const a_dir = ".tmp/hare-lsp-th-crossmod-st-mod_a";
 	const b_dir = ".tmp/hare-lsp-th-crossmod-st-mod_b";
-	match (os::mkdirs(a_dir, 0o755)) { case => void; };
-	match (os::mkdirs(b_dir, 0o755)) { case => void; };
+	match (os::mkdirs(a_dir, 0o755)) {
+	case => void;
+	};
+	match (os::mkdirs(b_dir, 0o755)) {
+	case => void;
+	};
 	const a_real = strings::concat(a_dir, "/x.ha")!;
 	defer free(a_real);
 	const b_real = strings::concat(b_dir, "/x.ha")!;
 	defer free(b_real);
 	let _ = match (writefile(a_real, a_text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer rmfile(a_real);
 	let _ = match (writefile(b_real, b_text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer rmfile(b_real);
@@ -345,9 +388,11 @@ fn th_index(s: *server, path: str, text: str) void = {
 
 	const a_uri = strings::concat("file://", a_real)!;
 	defer free(a_uri);
-	const params = strings::concat(`{"item":{"name":"T","kind":23,"uri":"`,
-		a_uri,
-		`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}}}}`)!;
+	const params =
+		strings::concat(
+			`{"item":{"name":"T","kind":23,"uri":"`, a_uri,
+			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}}}}`,
+		)!;
 	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
@@ -360,15 +405,19 @@ fn th_index(s: *server, path: str, text: str) void = {
 	handle_supertypes(&s, r);
 	const v = th_skip_to_response(out, 20.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result")
-		as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// Exactly one supertype: X from mod_a's file. mod_b's X must not appear.
-	assert(len(result) == 1,
-		"supertypes should return exactly the in-module match");
+	assert(
+		len(result) == 1,
+		"supertypes should return exactly the in-module match"
+	);
 	const item = result[0] as json::object;
 	const item_uri = *(json::get(&item, "uri") as *json::value) as str;
-	assert(strings::contains(item_uri, "mod_a"),
-		"supertype must be from the cursor's module, not the unrelated same-named one");
+	assert(
+		strings::contains(item_uri, "mod_a"),
+		"supertype must be from the cursor's module, not the unrelated same-named one"
+	);
 };
 
 // Same fixture for subtypes: asking for subtypes of mod_a's `X` returns
@@ -380,8 +429,12 @@ fn th_index(s: *server, path: str, text: str) void = {
 
 	const a_dir = ".tmp/hare-lsp-th-crossmod-sb-mod_a";
 	const b_dir = ".tmp/hare-lsp-th-crossmod-sb-mod_b";
-	match (os::mkdirs(a_dir, 0o755)) { case => void; };
-	match (os::mkdirs(b_dir, 0o755)) { case => void; };
+	match (os::mkdirs(a_dir, 0o755)) {
+	case => void;
+	};
+	match (os::mkdirs(b_dir, 0o755)) {
+	case => void;
+	};
 	const a_real = strings::concat(a_dir, "/x.ha")!;
 	defer free(a_real);
 	const b_real = strings::concat(b_dir, "/x.ha")!;
@@ -392,12 +445,14 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const a_text = "type T = X;\ntype X = int;\n";
 	const b_text = "type U = X;\ntype X = str;\n";
 	let _ = match (writefile(a_real, a_text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer rmfile(a_real);
 	let _ = match (writefile(b_real, b_text)) {
-	case bool => yield true;
+	case bool =>
+		yield true;
 	case => abort("cannot write fixture");
 	};
 	defer rmfile(b_real);
@@ -407,9 +462,11 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const a_uri = strings::concat("file://", a_real)!;
 	defer free(a_uri);
 	// Cursor on mod_a's X (line 1).
-	const params = strings::concat(`{"item":{"name":"X","kind":23,"uri":"`,
-		a_uri,
-		`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}},"selectionRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}}}}`)!;
+	const params =
+		strings::concat(
+			`{"item":{"name":"X","kind":23,"uri":"`, a_uri,
+			`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}},"selectionRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}}}}`,
+		)!;
 	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
@@ -422,24 +479,23 @@ fn th_index(s: *server, path: str, text: str) void = {
 	handle_subtypes(&s, r);
 	const v = th_skip_to_response(out, 21.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result")
-		as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// Only mod_a's `T` should appear.
 	for (let i = 0z; i < len(result); i += 1) {
 		const item = result[i] as json::object;
 		const item_uri = *(json::get(&item, "uri") as *json::value) as str;
 		const item_name = *(json::get(&item, "name") as *json::value) as str;
-		assert(strings::contains(item_uri, "mod_a"),
-			"subtypes must not include candidates from the unrelated same-named module");
-		assert(item_name == "T",
-			"subtype must be `T`, not `U` from mod_b");
+		assert(
+			strings::contains(item_uri, "mod_a"),
+			"subtypes must not include candidates from the unrelated same-named module"
+		);
+		assert(item_name == "T", "subtype must be `T`, not `U` from mod_b");
 	};
-	assert(len(result) == 1,
-		"subtypes should return exactly the in-module match");
+	assert(len(result) == 1, "subtypes should return exactly the in-module match");
 };
 
 // --- file fixture helpers ---
-
 fn writefile(path: str, text: str) (bool | fs::error) = {
 	const f = os::create(path, 0o644)?;
 	defer io::close(f)!;

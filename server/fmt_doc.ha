@@ -106,11 +106,13 @@ export fn nest(
 
 export fn concat(items: []doc) doc = doc_concat { items = items };
 
-export fn comment(text: str) doc =
-	doc_comment { text = strings::dup(text)!, trailing = false };
+export fn comment(
+	text: str,
+) doc = doc_comment { text = strings::dup(text)!, trailing = false };
 
-export fn trailing_comment(text: str) doc =
-	doc_comment { text = strings::dup(text)!, trailing = true };
+export fn trailing_comment(
+	text: str,
+) doc = doc_comment { text = strings::dup(text)!, trailing = true };
 
 export fn if_broken(s: str) doc = doc_if_broken { text = strings::dup(s)! };
 
@@ -281,12 +283,10 @@ fn render(
 	case let g: doc_group =>
 		const remaining = if (*cur_col >= max_col) 0z else max_col - *cur_col;
 		const w = sum_flat_width(g.items);
-		const total = if (w ==
-		WIDTH_INFINITY)
-		WIDTH_INFINITY
-		else if (tail_width ==
-		WIDTH_INFINITY)
-		WIDTH_INFINITY
+		const total = if (w == WIDTH_INFINITY)
+			WIDTH_INFINITY
+		else if (tail_width == WIDTH_INFINITY)
+			WIDTH_INFINITY
 		else if (w > WIDTH_INFINITY - tail_width) WIDTH_INFINITY else w + tail_width;
 		const child_mode = if (total <= remaining &&
 		fits_all(g.items)) render_mode::FLAT else render_mode::BROKEN;
@@ -331,10 +331,8 @@ fn render(
 		// statement break) to move off the line - emitting a break
 		// here would double up and produce a blank line.
 		if (!cm.trailing) {
-			emit_break(out, indent,
-				cur_col, written, pending_tabs)?;
+			emit_break(out, indent, cur_col, written, pending_tabs)?;
 		};
-
 	case let ib: doc_if_broken =>
 		switch (mode) {
 		case render_mode::FLAT => void;
@@ -511,8 +509,10 @@ fn line_lead_width(d: *doc, mode: render_mode) (size, bool) = {
 		};
 	case let g: doc_group =>
 		const w = sum_flat_width(g.items);
-		const inner_mode = if (w ==
-		WIDTH_INFINITY) render_mode::BROKEN else render_mode::FLAT;
+		const inner_mode = if (w == WIDTH_INFINITY)
+			render_mode::BROKEN
+		else
+			render_mode::FLAT;
 		return line_lead_items(g.items, inner_mode);
 	case let n: doc_nest =>
 		return line_lead_width(n.inner, mode);

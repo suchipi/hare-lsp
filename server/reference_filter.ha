@@ -52,8 +52,9 @@ export fn expected_entry_for_cursor(
 	defer free(doc_path);
 	const file_module = analysis::module_from_path(doc_path);
 	defer free(file_module);
-	return analysis::workspace_lookup_for_subunit(&s.workspace_index,
-		&cache.pr.subunit, file_module, qualifier, ident_str);
+	return analysis::workspace_lookup_for_subunit(
+		&s.workspace_index, &cache.pr.subunit, file_module, qualifier, ident_str,
+	);
 };
 
 // Returns true if the ident at `(text, off)` in `path` resolves (via the
@@ -70,26 +71,30 @@ export fn hit_resolves_to(
 	expected: *analysis::workspace_entry,
 ) bool = {
 	const ident_range = match (analysis::ident_at(text, off)) {
-	case let r: (size, size) => yield r;
-	case void => return false;
+	case let r: (size, size) =>
+		yield r;
+	case void =>
+		return false;
 	};
 	const ident_str = strings::fromutf8(text[ident_range.0..ident_range.1])!;
 	const qualifier = analysis::qualifier_prefix_at(text, ident_range.0);
 	defer free(qualifier);
 
 	const su = match (subunit_for_path(s, path)) {
-	case let p: *ast::subunit => yield p;
-	case void => return false;
+	case let p: *ast::subunit =>
+		yield p;
+	case void =>
+		return false;
 	};
 
 	const file_module = analysis::module_from_path(path);
 	defer free(file_module);
-	match (analysis::workspace_lookup_for_subunit(&s.workspace_index,
-			su, file_module, qualifier, ident_str)) {
+	match (analysis::workspace_lookup_for_subunit(
+		&s.workspace_index, su, file_module, qualifier, ident_str,
+	)) {
 	case let e: *analysis::workspace_entry =>
-		return e.path == expected.path &&
-			e.short_name == expected.short_name &&
-			e.kind == expected.kind;
+		return e.path == expected.path && e.short_name == expected.short_name &&
+		e.kind == expected.kind;
 	case void =>
 		return false;
 	};

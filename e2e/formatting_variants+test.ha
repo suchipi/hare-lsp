@@ -19,7 +19,8 @@ export fn two()    int = 2;
 `;
 	open_doc(&s, "file:///rfmt.ha", sample);
 
-	const req = `{"jsonrpc":"2.0","id":2000,"method":"textDocument/rangeFormatting","params":{"textDocument":{"uri":"file:///rfmt.ha"},"range":{"start":{"line":0,"character":0},"end":{"line":2,"character":0}},"options":{"tabSize":8,"insertSpaces":false}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":2000,"method":"textDocument/rangeFormatting","params":{"textDocument":{"uri":"file:///rfmt.ha"},"range":{"start":{"line":0,"character":0},"end":{"line":2,"character":0}},"options":{"tabSize":8,"insertSpaces":false}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 2000.0);
@@ -28,16 +29,16 @@ export fn two()    int = 2;
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	const arr = *(json::get(&obj, "result") as *json::value)
-		as []json::value;
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
 	// We expect one edit covering the run.
-	assert(len(arr) == 1,
-		"range format over both decls should produce one edit");
+	assert(len(arr) == 1, "range format over both decls should produce one edit");
 	const edit = arr[0] as json::object;
 	const new_text = *(json::get(&edit, "newText") as *json::value) as str;
 	// Pretty printer collapses runs of spaces in fn signatures.
-	assert(!strings::contains(new_text, "fn one()    int"),
-		"range format should collapse the extra spaces");
+	assert(
+		!strings::contains(new_text, "fn one()    int"),
+		"range format should collapse the extra spaces"
+	);
 };
 
 @test fn e2e_range_formatting_outside_decls_returns_empty() void = {
@@ -51,7 +52,8 @@ export fn two()    int = 2;
 
 	// A range entirely past the end of the file -> no overlap with any
 	// decl -> empty result.
-	const req = `{"jsonrpc":"2.0","id":2001,"method":"textDocument/rangeFormatting","params":{"textDocument":{"uri":"file:///rfmt2.ha"},"range":{"start":{"line":10,"character":0},"end":{"line":11,"character":0}},"options":{"tabSize":8,"insertSpaces":false}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":2001,"method":"textDocument/rangeFormatting","params":{"textDocument":{"uri":"file:///rfmt2.ha"},"range":{"start":{"line":10,"character":0},"end":{"line":11,"character":0}},"options":{"tabSize":8,"insertSpaces":false}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 2001.0);
@@ -60,10 +62,11 @@ export fn two()    int = 2;
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	const arr = *(json::get(&obj, "result") as *json::value)
-		as []json::value;
-	assert(len(arr) == 0,
-		"a range with no overlap to any decl should return no edits");
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
+	assert(
+		len(arr) == 0,
+		"a range with no overlap to any decl should return no edits"
+	);
 };
 
 @test fn e2e_on_type_formatting_for_brace_reindents() void = {
@@ -81,7 +84,8 @@ export fn two()    int = 2;
 	open_doc(&s, "file:///otf.ha", sample);
 
 	// Cursor right after the `}` on line 2: position { line: 2, character: 1 }.
-	const req = `{"jsonrpc":"2.0","id":2002,"method":"textDocument/onTypeFormatting","params":{"textDocument":{"uri":"file:///otf.ha"},"position":{"line":2,"character":1},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":2002,"method":"textDocument/onTypeFormatting","params":{"textDocument":{"uri":"file:///otf.ha"},"position":{"line":2,"character":1},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 2002.0);
@@ -91,9 +95,10 @@ export fn two()    int = 2;
 	defer json::finish(v);
 	const obj = v as json::object;
 	// Result is an array (possibly empty if already indented correctly).
-	assert(*(json::get(&obj, "result") as *json::value)
-		is []json::value,
-		"onTypeFormatting must return an array");
+	assert(
+		*(json::get(&obj, "result") as *json::value) is []json::value,
+		"onTypeFormatting must return an array"
+	);
 };
 
 @test fn e2e_on_type_formatting_ignores_semicolon_trigger() void = {
@@ -105,7 +110,8 @@ export fn two()    int = 2;
 `;
 	open_doc(&s, "file:///otf2.ha", sample);
 
-	const req = `{"jsonrpc":"2.0","id":2003,"method":"textDocument/onTypeFormatting","params":{"textDocument":{"uri":"file:///otf2.ha"},"position":{"line":0,"character":29},"ch":";","options":{"tabSize":8,"insertSpaces":false}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":2003,"method":"textDocument/onTypeFormatting","params":{"textDocument":{"uri":"file:///otf2.ha"},"position":{"line":0,"character":29},"ch":";","options":{"tabSize":8,"insertSpaces":false}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 2003.0);
@@ -114,8 +120,9 @@ export fn two()    int = 2;
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	const arr = *(json::get(&obj, "result") as *json::value)
-		as []json::value;
-	assert(len(arr) == 0,
-		"onTypeFormatting must not return edits for `;` in Hare");
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
+	assert(
+		len(arr) == 0,
+		"onTypeFormatting must not return edits for `;` in Hare"
+	);
 };

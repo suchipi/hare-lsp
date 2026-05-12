@@ -20,72 +20,54 @@ export type server = struct {
 	//   SHUTTING_DOWN -> shutdown received; only `exit` allowed
 	//   EXITED    -> exit received, loop should terminate
 	state: server_state,
-
 	// Trace level last requested by client via $/setTrace or initialize params.
 	trace: lsp::trace_value,
-
 	// Reader for incoming framed LSP messages.
 	reader: lsp::reader,
-
 	// Output handle for outgoing messages (typically os::stdout).
 	out: io::handle,
-
 	// Process id reported by the client during initialize, if any. Used to
 	// auto-shut-down when the parent dies (per LSP spec).
 	client_pid: (i32 | void),
-
 	// Next id we will use for server-initiated requests.
 	next_request_id: i64,
-
 	// Counter for progress tokens (the strings rendered into $/progress
 	// `token` fields).
 	next_progress_token: u64,
-
 	// Counter for semantic-token result ids handed back to clients.
 	next_semantic_result_id: u64,
-
 	// Pending server-initiated requests awaiting a response from the client.
 	// Keyed by request id; carries the method name so handlers can route
 	// responses appropriately.
 	pending_requests: []pending_request,
-
 	// Active progress tokens that have received a workDoneProgress/cancel
 	// notification from the client. Handlers should poll this set.
 	cancelled_progress: []str,
-
 	// Set of in-flight client request ids that have been issued $/cancelRequest
 	// — handlers should consult this and abort early. Stored as a slice for
 	// simplicity; LSP rarely cancels more than a handful at once.
 	cancelled_ids: []lsp::id,
-
 	// Active workspace folders, populated from initialize and updated via
 	// workspace/didChangeWorkspaceFolders.
 	workspace_folders: []workspace_folder,
-
 	// Dynamic capability registrations issued via client/registerCapability.
 	registrations: []registration,
 	// Counter for synthesizing unique registration ids.
 	next_registration_seq: u64,
-
 	// Capabilities advertised by the client during initialize, kept in raw
 	// json form so feature handlers can consult them without depending on a
 	// parsed struct that grows with the spec.
 	client_capabilities: (json::value | void),
-
 	// User-configured server settings.
 	config: config,
-
 	// Position encoding negotiated at initialize. LSP defaults to
 	// UTF-16; we'll pick UTF-8 if the client supports it (better for
 	// non-ASCII files) or fall back to UTF-16 otherwise.
 	negotiated_encoding: analysis::encoding,
-
 	// Open documents, keyed by URI.
 	documents: []document,
-
 	// Workspace-wide symbol index.
 	workspace_index: analysis::workspace_index,
-
 	// Symbol index for Hare's stdlib and third-party modules, populated
 	// lazily on first reference. Lookups consult this after
 	// `workspace_index` so user code can shadow stdlib symbols if needed.
@@ -93,26 +75,22 @@ export type server = struct {
 	// Module identifiers (joined with "::") that have already been
 	// scanned into stdlib_index, so we don't re-index on every hover.
 	indexed_stdlib_modules: []str,
-
 	// LRU cache of disk-file parses, used by cross-file features
 	// (workspace_hover, type-hierarchy subtypes, references workspace
 	// scan, rename workspace scan) so a cursor that triggers repeated
 	// cross-file work doesn't re-read and re-parse the same files on
 	// each keystroke.
 	file_parse_cache: file_parse_cache,
-
 	// FIFO queue of in-flight indexing jobs. The head is drained one
 	// batch at a time between dispatch ticks in [[run]]. New jobs are
 	// appended via [[start_index_job]]. Both workspace and full-stdlib
 	// indexing flow through this queue so they don't trample each
 	// other.
 	pending_index_jobs: []*workspace_index_job,
-
 	// True after [[ensure_full_stdlib_indexed]] has enqueued a job
 	// (whether or not it has finished). Used to make
 	// `workspace/symbol` invoke stdlib indexing once per session.
 	stdlib_fully_indexed: bool,
-
 	// Minimum severity of stderr log lines emitted via `slog_*`. See
 	// `log.ha`. Defaults to INFO; can be overridden by setting the
 	// HARE_LSP_LOG_LEVEL env var before launching the binary.
@@ -135,6 +113,7 @@ export type server_state = enum {
 
 // Process exit codes per LSP spec.
 export def EXIT_OK: int = 0;
+
 export def EXIT_ERROR: int = 1;
 
 // Constructs a new server bound to the given input scanner and output handle.
@@ -149,10 +128,11 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = {
 // reader directly with the custom limit rather than allocating a
 // default reader and immediately replacing it.
 export fn new_with_max_body(
-	reader_src: *bufio::scanner, out: io::handle, max_body: size,
+	reader_src: *bufio::scanner,
+	out: io::handle,
+	max_body: size,
 ) server = {
-	return new_with_reader(
-		lsp::new_reader_with_limit(reader_src, max_body), out);
+	return new_with_reader(lsp::new_reader_with_limit(reader_src, max_body), out);
 };
 
 fn new_with_reader(reader: lsp::reader, out: io::handle) server = server {
@@ -308,7 +288,8 @@ fn dispatch(s: *server, msg: lsp::message) void = {
 
 fn handle_response(s: *server, r: lsp::response) void = {
 	const id_num = match (r.id) {
-	case let f: f64 => yield f: i64;
+	case let f: f64 =>
+		yield f: i64;
 	case str =>
 		// We never issue string ids ourselves.
 		log_stderr(s, "unexpected string-id response from client; ignoring");
@@ -327,12 +308,12 @@ fn handle_response(s: *server, r: lsp::response) void = {
 			apply_configuration_response(s, v);
 		case "workspace/workspaceFolders" =>
 			apply_workspace_folders_response(s, v);
-		case =>
-			// Other server-initiated requests (showMessageRequest,
-			// showDocument, registerCapability,
-			// workDoneProgress/create) don't currently need
-			// further processing on success.
-			void;
+		// Other server-initiated requests (showMessageRequest,
+		// showDocument, registerCapability,
+		// workDoneProgress/create) don't currently need
+		// further processing on success.
+
+		case => void;
 		};
 	case let e: lsp::response_error =>
 		slog_error(s, "response error for", method, ":", e.message);
@@ -382,17 +363,16 @@ fn handle_request(s: *server, r: lsp::request) void = {
 	switch (s.state) {
 	case server_state::PRE_INIT =>
 		if (r.method != "initialize") {
-			send_error(s, r.id, lsp::SERVER_NOT_INITIALIZED,
-				"server has not been initialized");
+			send_error(
+				s, r.id, lsp::SERVER_NOT_INITIALIZED, "server has not been initialized",
+			);
 			return;
 		};
 	case server_state::SHUTTING_DOWN =>
-		send_error(s, r.id, lsp::INVALID_REQUEST,
-			"server is shutting down");
+		send_error(s, r.id, lsp::INVALID_REQUEST, "server is shutting down");
 		return;
 	case server_state::EXITED =>
-		send_error(s, r.id, lsp::INVALID_REQUEST,
-			"server has exited");
+		send_error(s, r.id, lsp::INVALID_REQUEST, "server has exited");
 		return;
 	case => void;
 	};
@@ -491,8 +471,10 @@ fn handle_request(s: *server, r: lsp::request) void = {
 	case "workspace/executeCommand" =>
 		handle_execute_command(s, r);
 	case =>
-		send_error(s, r.id, lsp::METHOD_NOT_FOUND,
-			fmt::asprintf("method not found: {}", r.method)!);
+		send_error(
+			s, r.id, lsp::METHOD_NOT_FOUND,
+			fmt::asprintf("method not found: {}", r.method)!,
+		);
 	};
 };
 
@@ -538,36 +520,43 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 		handle_did_rename_files(s, n);
 	case "workspace/didDeleteFiles" =>
 		handle_did_delete_files(s, n);
-	case =>
-		// Per LSP, unknown notifications are silently ignored.
-		void;
+	// Per LSP, unknown notifications are silently ignored.
+
+	case => void;
 	};
 };
 
 fn handle_progress_cancel(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
-	case let v: json::value => yield v;
-	case void => return;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return;
 	};
 	const obj = match (params) {
-	case let o: json::object => yield o;
-	case => return;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return;
 	};
 	const v = match (json::get(&obj, "token")) {
-	case let v: *json::value => yield *v;
-	case => return;
+	case let v: *json::value =>
+		yield *v;
+	case =>
+		return;
 	};
 	const token = match (v) {
-	case let s: str => yield s;
-	case => return;
+	case let s: str =>
+		yield s;
+	case =>
+		return;
 	};
 	append(s.cancelled_progress, strings::dup(token)!)!;
 };
 
 fn handle_initialize(s: *server, r: lsp::request) void = {
 	if (s.state != server_state::PRE_INIT) {
-		send_error(s, r.id, lsp::INVALID_REQUEST,
-			"initialize received twice");
+		send_error(s, r.id, lsp::INVALID_REQUEST, "initialize received twice");
 		return;
 	};
 
@@ -577,10 +566,13 @@ fn handle_initialize(s: *server, r: lsp::request) void = {
 	const params_obj = match (r.params) {
 	case let v: json::value =>
 		yield match (v) {
-		case let o: json::object => yield o: (json::object | void);
-		case => yield void;
+		case let o: json::object =>
+			yield o: (json::object | void);
+		case =>
+			yield void;
 		};
-	case void => yield void;
+	case void =>
+		yield void;
 	};
 	match (params_obj) {
 	case void => void;
@@ -593,7 +585,8 @@ fn handle_initialize(s: *server, r: lsp::request) void = {
 	};
 
 	const result = match (build_initialize_result(s)) {
-	case let v: json::value => yield v;
+	case let v: json::value =>
+		yield v;
 	case nomem =>
 		send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
 		return;
@@ -619,9 +612,12 @@ fn build_initialize_result(s: *server) (json::value | nomem) = {
 
 	// Echo the negotiated position encoding back to the client.
 	const enc_str = switch (s.negotiated_encoding) {
-	case analysis::encoding::UTF8 => yield "utf-8";
-	case analysis::encoding::UTF16 => yield "utf-16";
-	case analysis::encoding::UTF32 => yield "utf-32";
+	case analysis::encoding::UTF8 =>
+		yield "utf-8";
+	case analysis::encoding::UTF16 =>
+		yield "utf-16";
+	case analysis::encoding::UTF32 =>
+		yield "utf-32";
 	};
 	json::set(&caps, "positionEncoding", enc_str: json::value)?;
 
@@ -800,14 +796,18 @@ fn extract_init_param_trace(s: *server, o: *json::object) void = {
 
 fn extract_init_param_capabilities(s: *server, o: *json::object) void = {
 	const caps = match (json::get(o, "capabilities")) {
-	case let p: *json::value => yield *p;
-	case => return;
+	case let p: *json::value =>
+		yield *p;
+	case =>
+		return;
 	};
 	// Deep-copy via json::dup so we own the result independently of the
 	// request's lifetime.
 	const dup = match (json::dup(caps)) {
-	case let v: json::value => yield v;
-	case nomem => return;
+	case let v: json::value =>
+		yield v;
+	case nomem =>
+		return;
 	};
 	s.client_capabilities = dup;
 };
@@ -825,10 +825,13 @@ fn extract_init_param_workspace_folders(s: *server, o: *json::object) void = {
 	const root_uri = match (json::get(o, "rootUri")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
-		case => return;
+		case let s: str =>
+			yield s;
+		case =>
+			return;
 		};
-	case => return;
+	case =>
+		return;
 	};
 	let folders: []workspace_folder = alloc([], 1)!;
 	append(folders, workspace_folder {
@@ -846,26 +849,35 @@ fn extract_init_param_position_encodings(s: *server, o: *json::object) void = {
 	const caps = match (json::get(o, "capabilities")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return;
 		};
-	case => return;
+	case =>
+		return;
 	};
 	const general = match (json::get(&caps, "general")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return;
 		};
-	case => return;
+	case =>
+		return;
 	};
 	const arr = match (json::get(&general, "positionEncodings")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let a: []json::value => yield a;
-		case => return;
+		case let a: []json::value =>
+			yield a;
+		case =>
+			return;
 		};
-	case => return;
+	case =>
+		return;
 	};
 	let saw_utf8 = false;
 	let saw_utf16 = false;
@@ -883,6 +895,7 @@ fn extract_init_param_position_encodings(s: *server, o: *json::object) void = {
 		s.negotiated_encoding = analysis::encoding::UTF16;
 	};
 	// Neither offered? Stick with the LSP default (UTF-16).
+
 };
 
 fn handle_shutdown(s: *server, r: lsp::request) void = {
@@ -897,32 +910,35 @@ fn handle_shutdown(s: *server, r: lsp::request) void = {
 
 fn handle_cancel_request(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
-	case let v: json::value => yield v;
+	case let v: json::value =>
+		yield v;
 	case void =>
-		warn_invalid_notification(s, "$/cancelRequest",
-			"missing params");
+		warn_invalid_notification(s, "$/cancelRequest", "missing params");
 		return;
 	};
 	const obj = match (params) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case =>
-		warn_invalid_notification(s, "$/cancelRequest",
-			"params is not an object");
+		warn_invalid_notification(s, "$/cancelRequest", "params is not an object");
 		return;
 	};
 	const id_v = match (json::get(&obj, "id")) {
-	case let v: *json::value => yield *v;
+	case let v: *json::value =>
+		yield *v;
 	case =>
-		warn_invalid_notification(s, "$/cancelRequest",
-			"missing 'id' field");
+		warn_invalid_notification(s, "$/cancelRequest", "missing 'id' field");
 		return;
 	};
 	const id: lsp::id = match (id_v) {
-	case let f: f64 => yield f;
-	case let s: str => yield strings::dup(s)!;
+	case let f: f64 =>
+		yield f;
+	case let s: str =>
+		yield strings::dup(s)!;
 	case =>
-		warn_invalid_notification(s, "$/cancelRequest",
-			"'id' must be a number or string");
+		warn_invalid_notification(
+			s, "$/cancelRequest", "'id' must be a number or string",
+		);
 		return;
 	};
 	record_cancellation(s, id);
@@ -930,34 +946,51 @@ fn handle_cancel_request(s: *server, n: lsp::notification) void = {
 
 fn handle_set_trace(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
-	case let v: json::value => yield v;
-	case void => return;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return;
 	};
 	const obj = match (params) {
-	case let o: json::object => yield o;
-	case => return;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return;
 	};
 	const v = match (json::get(&obj, "value")) {
-	case let v: *json::value => yield *v;
-	case => return;
+	case let v: *json::value =>
+		yield *v;
+	case =>
+		return;
 	};
 	const str_val = match (v) {
-	case let s: str => yield s;
-	case => return;
+	case let s: str =>
+		yield s;
+	case =>
+		return;
 	};
 	s.trace = parse_trace(str_val);
 };
 
 fn parse_trace(v: str) lsp::trace_value = {
 	switch (v) {
-	case "off" => return lsp::trace_value::OFF;
-	case "messages" => return lsp::trace_value::MESSAGES;
-	case "verbose" => return lsp::trace_value::VERBOSE;
-	case => return lsp::trace_value::OFF;
+	case "off" =>
+		return lsp::trace_value::OFF;
+	case "messages" =>
+		return lsp::trace_value::MESSAGES;
+	case "verbose" =>
+		return lsp::trace_value::VERBOSE;
+	case =>
+		return lsp::trace_value::OFF;
 	};
 };
 
-fn send_error(s: *server, id: (lsp::id | void), code: lsp::error_code, msg: str) void = {
+fn send_error(
+	s: *server,
+	id: (lsp::id | void),
+	code: lsp::error_code,
+	msg: str,
+) void = {
 	const err = lsp::response_error {
 		code = code,
 		message = msg,
@@ -1004,8 +1037,7 @@ fn log_transport_context(s: *server) void = {
 	const quoted = quote_bytes_for_log(view);
 	defer free(quoted);
 	const suffix = if (len(ctx) > DIAG_HEADER_CAP) " (truncated)" else "";
-	slog_error(s, "transport context", len(ctx): uint, "bytes:",
-		quoted, suffix);
+	slog_error(s, "transport context", len(ctx): uint, "bytes:", quoted, suffix);
 };
 
 // Renders bytes as a printable string, escaping CR, LF, tab, backslash,
@@ -1013,9 +1045,24 @@ fn log_transport_context(s: *server) void = {
 // wrapped in double quotes. Caller frees.
 fn quote_bytes_for_log(data: []u8) str = {
 	let out: []u8 = [];
-	const hex: [16]u8 = ['0': u8, '1': u8, '2': u8, '3': u8, '4': u8,
-		'5': u8, '6': u8, '7': u8, '8': u8, '9': u8, 'a': u8, 'b': u8,
-		'c': u8, 'd': u8, 'e': u8, 'f': u8];
+	const hex: [16]u8 = [
+		'0': u8,
+		'1': u8,
+		'2': u8,
+		'3': u8,
+		'4': u8,
+		'5': u8,
+		'6': u8,
+		'7': u8,
+		'8': u8,
+		'9': u8,
+		'a': u8,
+		'b': u8,
+		'c': u8,
+		'd': u8,
+		'e': u8,
+		'f': u8,
+	];
 	append(out, '"': u8)!;
 	for (let i = 0z; i < len(data); i += 1) {
 		const b = data[i];
@@ -1032,8 +1079,7 @@ fn quote_bytes_for_log(data: []u8) str = {
 		} else if (b >= 0x20 && b < 0x7f) {
 			append(out, b)!;
 		} else {
-			append(out, ['\\': u8, 'x': u8,
-				hex[b >> 4], hex[b & 0xf]]...)!;
+			append(out, ['\\': u8, 'x': u8, hex[b >> 4], hex[b & 0xf]]...)!;
 		};
 	};
 	append(out, '"': u8)!;

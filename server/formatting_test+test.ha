@@ -10,7 +10,9 @@ use memio;
 use strconv;
 use strings;
 
-fn fmt_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn fmt_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -18,7 +20,12 @@ fn fmt_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) =
 	return (s, scan, in_buf, out);
 };
 
-fn fmt_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn fmt_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -28,15 +35,21 @@ fn fmt_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, o
 };
 
 fn fmt_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(
+			`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
+		)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -86,10 +99,12 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// fmt_open splices `src` into a JSON string literal; newlines and
 	// tabs must be JSON-escaped (\\n / \\t) so the JSON parser decodes
 	// them, not raw characters which would terminate the literal.
-	const src = "// SPDX-License-Identifier: MPL-2.0\\n// (c) test authors\\n\\nuse io;\\n\\nexport fn main() void = {\\n\\t// note one\\n\\tlet x = 1;\\n\\tlet y = 2;\\n\\t// note two\\n\\tlet z = x + y;\\n};\\n";
+	const src =
+		"// SPDX-License-Identifier: MPL-2.0\\n// (c) test authors\\n\\nuse io;\\n\\nexport fn main() void = {\\n\\t// note one\\n\\tlet x = 1;\\n\\tlet y = 2;\\n\\t// note two\\n\\tlet z = x + y;\\n};\\n";
 	fmt_open(&s, "file:///cmt.ha", src);
 
-	const params = `{"textDocument":{"uri":"file:///cmt.ha"},"options":{"tabSize":8,"insertSpaces":false}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///cmt.ha"},"options":{"tabSize":8,"insertSpaces":false}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -101,7 +116,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_formatting(&s, r);
 	const v = fmt_skip_to_response(out, 2.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// No edit = source is already canonical, which trivially preserves
 	// every comment. The regression target is an edit that drops a
 	// comment, not the absence of an edit.
@@ -119,11 +135,14 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	let (s, scan, in_buf, out) = fmt_test_server();
 	defer fmt_test_cleanup(&s, scan, in_buf, out);
 	// Three decls: a, b, c. We'll request range formatting on b only.
-	fmt_open(&s, "file:///x.ha",
-		"fn a() void = void;\\n\\nfn b() void = void;\\n\\nfn c() void = void;\\n");
+	fmt_open(
+		&s, "file:///x.ha",
+		"fn a() void = void;\\n\\nfn b() void = void;\\n\\nfn c() void = void;\\n",
+	);
 
 	// b spans line 2 (0-based) approximately.
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"range":{"start":{"line":2,"character":0},"end":{"line":2,"character":19}},"options":{"tabSize":8,"insertSpaces":false}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"range":{"start":{"line":2,"character":0},"end":{"line":2,"character":19}},"options":{"tabSize":8,"insertSpaces":false}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -135,7 +154,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_range_formatting(&s, r);
 	const v = fmt_skip_to_response(out, 1.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	if (len(result) > 0) {
 		// The edit must start on line 2 (where decl b lives) and must
 		// not start on line 0 (decl a) or line 4 (decl c). Hare's
@@ -157,7 +177,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	fmt_open(&s, "file:///x.ha", "fn a() void = void;\\n\\n\\n\\n\\n");
 
 	// Range on line 4 (a blank line below the decl).
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"range":{"start":{"line":4,"character":0},"end":{"line":4,"character":0}},"options":{"tabSize":8,"insertSpaces":false}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"range":{"start":{"line":4,"character":0},"end":{"line":4,"character":0}},"options":{"tabSize":8,"insertSpaces":false}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -169,7 +190,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_range_formatting(&s, r);
 	const v = fmt_skip_to_response(out, 2.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) == 0);
 };
 
@@ -208,7 +230,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// `}` on line 1 with 4 leading spaces; expected indent (depth 0) is empty.
 	fmt_open(&s, "file:///x.ha", "fn x() void = {\\n    }\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":5},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":5},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -220,7 +243,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_on_type_formatting(&s, r);
 	const v = fmt_skip_to_response(out, 50.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) == 1);
 	const e0 = result[0] as json::object;
 	const new_text = *(json::get(&e0, "newText") as *json::value) as str;
@@ -232,7 +256,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer fmt_test_cleanup(&s, scan, in_buf, out);
 	fmt_open(&s, "file:///x.ha", "fn x() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":19},"ch":";","options":{"tabSize":8,"insertSpaces":false}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":19},"ch":";","options":{"tabSize":8,"insertSpaces":false}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -244,7 +269,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_on_type_formatting(&s, r);
 	const v = fmt_skip_to_response(out, 51.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) == 0);
 };
 
@@ -254,7 +280,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// Already correctly indented: `}` at column 0 in depth-0 context.
 	fmt_open(&s, "file:///x.ha", "fn x() void = {\\n}\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":1},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":1},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -266,7 +293,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_on_type_formatting(&s, r);
 	const v = fmt_skip_to_response(out, 52.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) == 0);
 };
 
@@ -277,11 +305,14 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	s.config.format_indent_width = 2;
 	// Nested block where the inner `}` should land at depth 1 = 2 spaces.
 	// (Hare requires `;` after each compound expression.)
-	fmt_open(&s, "file:///x.ha",
-		"fn x() void = {\\n\\tif (true) {\\n\\t\\treturn;\\n};\\n};\\n");
+	fmt_open(
+		&s, "file:///x.ha",
+		"fn x() void = {\\n\\tif (true) {\\n\\t\\treturn;\\n};\\n};\\n",
+	);
 
 	// Cursor is right after the inner `}` on line 3, char position 1.
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":3,"character":1},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":3,"character":1},"ch":"}","options":{"tabSize":8,"insertSpaces":false}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -293,7 +324,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_on_type_formatting(&s, r);
 	const v = fmt_skip_to_response(out, 53.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) == 1);
 	const e0 = result[0] as json::object;
 	const new_text = *(json::get(&e0, "newText") as *json::value) as str;

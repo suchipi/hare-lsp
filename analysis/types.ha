@@ -18,7 +18,11 @@ use strings;
 
 // Returns a best-effort type label for the expression at the given byte
 // offset within the file, or void if unknown.
-export fn type_of_expr_at(text: []u8, su: *ast::subunit, off: size) (str | void) = {
+export fn type_of_expr_at(
+	text: []u8,
+	su: *ast::subunit,
+	off: size,
+) (str | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
 		if (off < d.loc.start.off: size || off > d.loc.end.off: size) continue;
@@ -49,10 +53,13 @@ export fn type_of_expr_at(text: []u8, su: *ast::subunit, off: size) (str | void)
 
 fn render_type(t: *ast::_type) str = {
 	let buf = memio::dynamic();
-	defer match (io::close(&buf)) { case => void; };
+	defer match (io::close(&buf)) {
+	case => void;
+	};
 	match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
 	case size => void;
-	case => return strings::dup("?")!;
+	case =>
+		return strings::dup("?")!;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };
@@ -70,6 +77,7 @@ fn type_of_literal(e: *ast::expr) (str | void) = {
 		case ast::tuple_literal =>
 			return strings::dup("(...)")!;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 };

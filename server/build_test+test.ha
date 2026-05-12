@@ -4,7 +4,8 @@
 use encoding::json;
 
 @test fn parse_compiler_output_single_error() void = {
-	const out = "main.ha:2:35: error: Unknown object 'undefined_function'\n\n2 |\tlet x = undefined_function();\n  |                                  ^\n";
+	const out =
+		"main.ha:2:35: error: Unknown object 'undefined_function'\n\n2 |\tlet x = undefined_function();\n  |                                  ^\n";
 	let diags = parse_compiler_output(out, "/work");
 	defer finish_build_diagnostics(diags);
 	assert(len(diags) == 1);
@@ -15,7 +16,8 @@ use encoding::json;
 };
 
 @test fn parse_compiler_output_syntax_error() void = {
-	const out = "main.ha:1:16: syntax error: expected name, '_', '...', ')', found '='\n";
+	const out =
+		"main.ha:1:16: syntax error: expected name, '_', '...', ')', found '='\n";
 	let diags = parse_compiler_output(out, "/x");
 	defer finish_build_diagnostics(diags);
 	assert(len(diags) == 1);
@@ -33,14 +35,16 @@ use encoding::json;
 };
 
 @test fn parse_compiler_output_ignores_caret_lines() void = {
-	const out = "main.ha:2:35: error: Unknown thing\n\n2 |\tlet x = undefined_function();\n  |                                  ^\n";
+	const out =
+		"main.ha:2:35: error: Unknown thing\n\n2 |\tlet x = undefined_function();\n  |                                  ^\n";
 	let diags = parse_compiler_output(out, "/work");
 	defer finish_build_diagnostics(diags);
 	assert(len(diags) == 1);
 };
 
 @test fn parse_compiler_output_multiple_diagnostics() void = {
-	const out = "a.ha:1:1: error: first\nb.ha:2:2: syntax error: second\nc.ha:3:3: warning: third\n";
+	const out =
+		"a.ha:1:1: error: first\nb.ha:2:2: syntax error: second\nc.ha:3:3: warning: third\n";
 	let diags = parse_compiler_output(out, "/w");
 	defer finish_build_diagnostics(diags);
 	assert(len(diags) == 3);

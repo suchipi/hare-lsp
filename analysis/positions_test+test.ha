@@ -87,7 +87,7 @@ use strings;
 	// Walk every byte that is at a rune boundary.
 	for (let off = 0z; off <= len(text); off += 1) {
 		// Skip continuation bytes by checking the high bits.
-		if (off < len(text) && (text[off] & 0xC0) == 0x80) continue;
+		if (off < len(text) && text[off] & 0xC0 == 0x80) continue;
 		const p = byte_to_position(text, idx, encoding::UTF16, off);
 		const back = position_to_byte(text, idx, encoding::UTF16, p);
 		assert(back == off);
@@ -140,7 +140,9 @@ use strings;
 	const idx = build_line_index(text);
 	defer free(idx);
 	// Line 1 starts at offset 4. character 2 → offset 6 (the '\r').
-	const off = position_to_byte(text, idx, encoding::UTF8,
-		position { line = 1, character = 2 });
+	const off =
+		position_to_byte(
+			text, idx, encoding::UTF8, position { line = 1, character = 2 },
+		);
 	assert(off == 6);
 };

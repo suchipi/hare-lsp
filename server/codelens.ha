@@ -19,13 +19,15 @@ use strings;
 
 export fn handle_code_lens(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_cl(r.params)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_array_cl(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_array_cl(s, r.id, []);
 		return;
@@ -41,10 +43,14 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 		const sym = &cache.idx.symbols[i];
 		if (!sym.exported) continue;
 		let lens = json::newobject();
-		const sp = analysis::byte_to_position(data, doc.buf.line_index,
-			enc, sym.span.start.off: size);
-		const ep = analysis::byte_to_position(data, doc.buf.line_index,
-			enc, sym.span.end.off: size);
+		const sp =
+			analysis::byte_to_position(
+				data, doc.buf.line_index, enc, sym.span.start.off: size,
+			);
+		const ep =
+			analysis::byte_to_position(
+				data, doc.buf.line_index, enc, sym.span.end.off: size,
+			);
 		json::put(&lens, "range", encode_range_cl(sp, ep))!;
 		// Carry a `data` blob so resolve knows what to fill in.
 		// We also stash the identifier's own position so the resolve
@@ -54,12 +60,12 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 		// occurrence instead of the symbol. The analysis index's
 		// `name_span` is currently a stub (loc.start..loc.start), so we
 		// search the decl's source text for the identifier ourselves.
-		const ident_off = find_ident_within(data,
-			sym.span.start.off: size,
-			sym.span.end.off: size,
-			sym.short_name);
-		const name_pos = analysis::byte_to_position(data, doc.buf.line_index,
-			enc, ident_off);
+		const ident_off =
+			find_ident_within(
+				data, sym.span.start.off: size, sym.span.end.off: size, sym.short_name,
+			);
+		const name_pos =
+			analysis::byte_to_position(data, doc.buf.line_index, enc, ident_off);
 		let lens_data = json::newobject();
 		json::set(&lens_data, "kind", "references": json::value)!;
 		json::set(&lens_data, "uri", uri: json::value)!;
@@ -122,7 +128,8 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 	// For "references" lenses, count occurrences and fill in command.
 	const obj = match (params_obj_cl(r.params)) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case void =>
 		echo_back(s, r);
 		return;
@@ -130,7 +137,8 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 	const data_field = match (json::get(&obj, "data")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
+		case let o: json::object =>
+			yield o;
 		case =>
 			echo_back(s, r);
 			return;
@@ -142,7 +150,8 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 	const kind = match (json::get(&data_field, "kind")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
+		case let s: str =>
+			yield s;
 		case =>
 			echo_back(s, r);
 			return;
@@ -158,7 +167,8 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 	const name = match (json::get(&data_field, "name")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
+		case let s: str =>
+			yield s;
 		case =>
 			echo_back(s, r);
 			return;
@@ -170,7 +180,8 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 	const lens_uri = match (json::get(&data_field, "uri")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
+		case let s: str =>
+			yield s;
 		case =>
 			echo_back(s, r);
 			return;
@@ -197,7 +208,8 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 
 	// Echo back the lens with `command` filled in.
 	let result_obj = match (json::dup(r.params as json::value)) {
-	case let v: json::value => yield v as json::object;
+	case let v: json::value =>
+		yield v as json::object;
 	case nomem =>
 		send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
 		return;
@@ -285,8 +297,10 @@ fn find_tests(data: []u8) []test_marker = {
 	let pending: (size | void) = void;
 	for (true) {
 		const tok = match (lex::lex(&lexer)) {
-		case let t: lex::token => yield t;
-		case lex::error => break;
+		case let t: lex::token =>
+			yield t;
+		case lex::error =>
+			break;
 		};
 		if (tok.0 == ltok::EOF) break;
 		if (tok.0 == ltok::ATTR_TEST) {
@@ -299,8 +313,10 @@ fn find_tests(data: []u8) []test_marker = {
 		case let off: size =>
 			if (tok.0 == ltok::NAME) {
 				const n = match (tok.1) {
-				case let s: str => yield strings::dup(s)!;
-				case => yield strings::dup("")!;
+				case let s: str =>
+					yield strings::dup(s)!;
+				case =>
+					yield strings::dup("")!;
 				};
 				append(out, test_marker {
 					off = off,
@@ -327,12 +343,14 @@ fn echo_back(s: *server, r: lsp::request) void = {
 	const v: json::value = match (r.params) {
 	case let v: json::value =>
 		yield match (json::dup(v)) {
-		case let copy: json::value => yield copy;
+		case let copy: json::value =>
+			yield copy;
 		case nomem =>
 			send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
 			return;
 		};
-	case void => yield json::_null: json::value;
+	case void =>
+		yield json::_null: json::value;
 	};
 	defer json::finish(v);
 	match (lsp::encode_response_result(s.out, r.id, v)) {
@@ -348,12 +366,15 @@ fn fmt_size_cl(n: size) str = {
 	let v = n;
 	for (v > 0; v /= 10) {
 		i -= 1;
-		buf[i] = ('0': u8) + (v % 10): u8;
+		buf[i] = '0': u8 + (v % 10): u8;
 	};
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
-fn encode_range_cl(start: analysis::position, end: analysis::position) json::value = {
+fn encode_range_cl(
+	start: analysis::position,
+	end: analysis::position,
+) json::value = {
 	let r = json::newobject();
 	let s_obj = json::newobject();
 	json::put(&s_obj, "line", start.line: f64)!;
@@ -368,33 +389,44 @@ fn encode_range_cl(start: analysis::position, end: analysis::position) json::val
 
 fn uri_from_cl(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const td = match (json::get(&obj, "textDocument")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	match (json::get(&td, "uri")) {
 	case let p: *json::value =>
 		match (*p) {
-		case let s: str => return s;
-		case => return void;
+		case let s: str =>
+			return s;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 };
 
-fn params_obj_cl(p: (json::value | void)) (json::object | void) =
-	lsp::params_object(p);
+fn params_obj_cl(
+	p: (json::value | void),
+) (json::object | void) = lsp::params_object(p);
 
 fn send_array_cl(s: *server, id: lsp::id, arr: []json::value) void = {
 	const v: json::value = arr;
@@ -408,8 +440,12 @@ fn send_array_cl(s: *server, id: lsp::id, arr: []json::value) void = {
 // Returns the byte offset of `name` within data[span_start..span_end],
 // matched as a whole word. Falls back to `span_start` if not found (an
 // invariant violation that shouldn't happen for well-formed decls).
-fn find_ident_within(data: []u8, span_start: size, span_end: size,
-		name: str) size = {
+fn find_ident_within(
+	data: []u8,
+	span_start: size,
+	span_end: size,
+	name: str,
+) size = {
 	const target = strings::toutf8(name);
 	if (len(target) == 0) return span_start;
 	const end = if (span_end > len(data)) len(data) else span_end;
@@ -424,8 +460,7 @@ fn find_ident_within(data: []u8, span_start: size, span_end: size,
 		};
 		if (!ok) continue;
 		if (i > span_start && is_word_byte_cl(data[i - 1])) continue;
-		if (i + len(target) < end &&
-				is_word_byte_cl(data[i + len(target)])) continue;
+		if (i + len(target) < end && is_word_byte_cl(data[i + len(target)])) continue;
 		return i;
 	};
 	return span_start;

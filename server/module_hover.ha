@@ -47,8 +47,12 @@ fn finish_module_hover_target(t: module_hover_target) void = {
 //     segment, regardless of which `::` it is.
 //   - Otherwise: the segment under the cursor caps the resolved path
 //     (segments[0..=cursor_seg]).
-fn detect_module_hover(s: *server, doc: *document, data: []u8,
-		off: size) (module_hover_target | void) = {
+fn detect_module_hover(
+	s: *server,
+	doc: *document,
+	data: []u8,
+	off: size,
+) (module_hover_target | void) = {
 	const cache = parse_of(doc);
 
 	// Use-statement path: walk imports for one whose loc encloses off.
@@ -60,16 +64,20 @@ fn detect_module_hover(s: *server, doc: *document, data: []u8,
 		// Determine which segment (or `::`) is under the cursor.
 		const seg_idx = segment_index_at(data, imp.ident, start, off);
 		const ident_end = match (seg_idx) {
-		case let i: size => yield i + 1;
-		case void => yield len(imp.ident);
+		case let i: size =>
+			yield i + 1;
+		case void =>
+			yield len(imp.ident);
 		};
 		return build_target(imp.ident, ident_end);
 	};
 
 	// Code-position path: scan for an `ident(::ident)+` run around off.
 	const (run_start, run_end) = match (path_run_at(data, off)) {
-	case let r: (size, size) => yield r;
-	case void => return void;
+	case let r: (size, size) =>
+		yield r;
+	case void =>
+		return void;
 	};
 	const segments = parse_path_segments(data, run_start, run_end);
 	defer free_str_slice(segments);
@@ -81,11 +89,13 @@ fn detect_module_hover(s: *server, doc: *document, data: []u8,
 		return void;
 	};
 	// Find which segment encloses off; on a `::`, anchor to segment 0.
-	const seg_under = segment_index_in_run(data, run_start, run_end,
-		segments, off);
+	const seg_under =
+		segment_index_in_run(data, run_start, run_end, segments, off);
 	const ident_end = match (seg_under) {
-	case let i: size => yield i + 1;
-	case void => yield len(segments);
+	case let i: size =>
+		yield i + 1;
+	case void =>
+		yield len(segments);
 	};
 	const ident = strs_to_ident(segments[..ident_end]);
 	defer free_str_slice(ident);
@@ -97,7 +107,8 @@ fn detect_module_hover(s: *server, doc: *document, data: []u8,
 		const (_, sset) = pair;
 		let owned_set = sset;
 		module::finish_srcset(&owned_set);
-	case void => return void;
+	case void =>
+		return void;
 	};
 	return build_target(ident, len(ident));
 };
@@ -120,8 +131,12 @@ fn build_target(ident: []str, take: size) module_hover_target = {
 // `::` anchor to the first segment. If `off` is before the first segment
 // (e.g. on the `use ` keyword), returns void so the caller falls back to
 // the full ident.
-fn segment_index_at(data: []u8, ident: []str, start: size,
-		off: size) (size | void) = {
+fn segment_index_at(
+	data: []u8,
+	ident: []str,
+	start: size,
+	off: size,
+) (size | void) = {
 	if (len(ident) == 0) return void;
 	// Find the segments by scanning from `start` forward, locating
 	// each segment's [byte_start..byte_end] in the source.
@@ -134,11 +149,12 @@ fn segment_index_at(data: []u8, ident: []str, start: size,
 		// character. The lex preserves "use" keyword + whitespace
 		// before the path.
 		for (cursor < len(data)) {
-			if (cursor + len(name) <= len(data)
-					&& bytes_equal(data[cursor..cursor + len(name)], name)
-					&& (cursor + len(name) == len(data)
-						|| !is_ident_byte_local(data[cursor + len(name)]))
-					&& (cursor == 0 || !is_ident_byte_local(data[cursor - 1]))) {
+			if (cursor + len(name) <= len(data) &&
+			bytes_equal(data[cursor..cursor + len(name)], name) &&
+			(cursor + len(name) == len(data) ||
+			!is_ident_byte_local(data[cursor + len(name)])) &&
+			(cursor == 0 ||
+			!is_ident_byte_local(data[cursor - 1]))) {
 				break;
 			};
 			cursor += 1;
@@ -161,8 +177,13 @@ fn segment_index_at(data: []u8, ident: []str, start: size,
 // Like segment_index_at but for a code-position path run: segments are
 // already extracted, and we know they cover [run_start..run_end] tightly
 // with `::` separators between.
-fn segment_index_in_run(data: []u8, run_start: size, run_end: size,
-		segments: []str, off: size) (size | void) = {
+fn segment_index_in_run(
+	data: []u8,
+	run_start: size,
+	run_end: size,
+	segments: []str,
+	off: size,
+) (size | void) = {
 	let cursor = run_start;
 	for (let i = 0z; i < len(segments); i += 1) {
 		const seg_len = len(strings::toutf8(segments[i]));
@@ -206,8 +227,7 @@ export fn path_run_at(data: []u8, off: size) ((size, size) | void) = {
 			e += 1;
 			continue;
 		};
-		if (e + 1 < len(data) && b == ':': u8
-				&& data[e + 1] == ':': u8) {
+		if (e + 1 < len(data) && b == ':': u8 && data[e + 1] == ':': u8) {
 			e += 2;
 			continue;
 		};
@@ -234,11 +254,9 @@ fn parse_path_segments(data: []u8, start: size, end: size) []str = {
 	let i = start;
 	let seg_start = i;
 	for (i < end) {
-		if (i + 1 < end && data[i] == ':': u8
-				&& data[i + 1] == ':': u8) {
+		if (i + 1 < end && data[i] == ':': u8 && data[i + 1] == ':': u8) {
 			if (i > seg_start) {
-				append(out, strings::dup(strings::fromutf8(
-					data[seg_start..i])!)!)!;
+				append(out, strings::dup(strings::fromutf8(data[seg_start..i])!)!)!;
 			};
 			i += 2;
 			seg_start = i;
@@ -247,8 +265,7 @@ fn parse_path_segments(data: []u8, start: size, end: size) []str = {
 		i += 1;
 	};
 	if (seg_start < end) {
-		append(out, strings::dup(strings::fromutf8(
-			data[seg_start..end])!)!)!;
+		append(out, strings::dup(strings::fromutf8(data[seg_start..end])!)!)!;
 	};
 	return out;
 };
@@ -282,8 +299,10 @@ fn read_module_readme(dir: str) (str | void) = {
 	const path = strings::concat(dir, "/README")!;
 	defer free(path);
 	const f = match (os::open(path)) {
-	case let h: io::file => yield h;
-	case fs::error => return void;
+	case let h: io::file =>
+		yield h;
+	case fs::error =>
+		return void;
 	};
 	defer lsp::safe_close(f);
 	let buf: []u8 = [];
@@ -292,14 +311,16 @@ fn read_module_readme(dir: str) (str | void) = {
 		match (io::read(f, chunk[..])) {
 		case let n: size =>
 			append(buf, chunk[..n]...)!;
-		case io::EOF => break;
+		case io::EOF =>
+			break;
 		case io::error =>
 			free(buf);
 			return void;
 		};
 	};
 	const s = match (strings::fromutf8(buf)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case =>
 		free(buf);
 		return void;
@@ -311,24 +332,34 @@ fn read_module_readme(dir: str) (str | void) = {
 // hover markdown for that module (signature line "module foo::bar"
 // followed by the README, with [[refs]] linkified). Caller frees. Returns
 // void if `off` isn't on a module path or the module has no README.
-export fn try_module_hover(s: *server, doc: *document, data: []u8,
-		off: size) (str | void) = {
+export fn try_module_hover(
+	s: *server,
+	doc: *document,
+	data: []u8,
+	off: size,
+) (str | void) = {
 	const target = match (detect_module_hover(s, doc, data, off)) {
-	case let t: module_hover_target => yield t;
-	case void => return void;
+	case let t: module_hover_target =>
+		yield t;
+	case void =>
+		return void;
 	};
 	defer finish_module_hover_target(target);
 	const found = match (find_module(s, target.segments)) {
-	case let pair: (str, module::srcset) => yield pair;
-	case void => return void;
+	case let pair: (str, module::srcset) =>
+		yield pair;
+	case void =>
+		return void;
 	};
 	const (dir, sset) = found;
 	// `dir` is borrowed from module::find's static buffer; don't free.
 	let owned_set = sset;
 	defer module::finish_srcset(&owned_set);
 	const readme = match (read_module_readme(dir)) {
-	case let s: str => yield s;
-	case void => return void;
+	case let s: str =>
+		yield s;
+	case void =>
+		return void;
 	};
 	defer free(readme);
 	const sig = strings::concat("module ", target.display)!;

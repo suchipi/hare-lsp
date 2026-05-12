@@ -11,7 +11,9 @@ use memio;
 use strconv;
 use strings;
 
-fn ch_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn ch_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -19,7 +21,12 @@ fn ch_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = 
 	return (s, scan, in_buf, out);
 };
 
-fn ch_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn ch_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -29,15 +36,21 @@ fn ch_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 };
 
 fn ch_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(
+			`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
+		)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -82,7 +95,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer ch_test_cleanup(&s, scan, in_buf, out);
 	ch_open(&s, "file:///x.ha", "fn target() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -94,7 +108,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_prepare_call_hierarchy(&s, r);
 	const v = ch_skip_to_response(out, 1.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) == 1);
 	const item = result[0] as json::object;
 	assert(*(json::get(&item, "name") as *json::value) as str == "target");
@@ -104,10 +119,13 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn incoming_calls_returns_call_sites() void = {
 	let (s, scan, in_buf, out) = ch_test_server();
 	defer ch_test_cleanup(&s, scan, in_buf, out);
-	ch_open(&s, "file:///x.ha",
-		"fn target() void = void;\\nfn caller() void = target();\\n");
+	ch_open(
+		&s, "file:///x.ha",
+		"fn target() void = void;\\nfn caller() void = target();\\n",
+	);
 
-	const params = `{"item":{"name":"target","kind":12,"uri":"file:///x.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":24}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":24}}}}`;
+	const params =
+		`{"item":{"name":"target","kind":12,"uri":"file:///x.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":24}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":24}}}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -119,11 +137,13 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_incoming_calls(&s, r);
 	const v = ch_skip_to_response(out, 2.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// Exactly one calling URI (file:///x.ha) with at least one fromRange.
 	assert(len(result) == 1);
 	const entry = result[0] as json::object;
-	const from_ranges = *(json::get(&entry, "fromRanges") as *json::value) as []json::value;
+	const from_ranges =
+		*(json::get(&entry, "fromRanges") as *json::value) as []json::value;
 	assert(len(from_ranges) >= 1);
 };
 
@@ -134,8 +154,10 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn outgoing_calls_dedupes_duplicate_workspace_entries() void = {
 	let (s, scan, in_buf, out) = ch_test_server();
 	defer ch_test_cleanup(&s, scan, in_buf, out);
-	ch_open(&s, "file:///dup.ha",
-		"fn caller() void = target();\\nfn target() void = void;\\n");
+	ch_open(
+		&s, "file:///dup.ha",
+		"fn caller() void = target();\\nfn target() void = void;\\n",
+	);
 
 	// Index the same path twice on purpose: simulates a re-index that
 	// failed to drop the prior entries before re-adding them.
@@ -143,7 +165,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	analysis::index_file(&s.workspace_index, "/dup.ha", strings::toutf8(text));
 	analysis::index_file(&s.workspace_index, "/dup.ha", strings::toutf8(text));
 
-	const params = `{"item":{"name":"caller","kind":12,"uri":"file:///dup.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":28}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":28}}}}`;
+	const params =
+		`{"item":{"name":"caller","kind":12,"uri":"file:///dup.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":28}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":28}}}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -155,7 +178,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_outgoing_calls(&s, r);
 	const v = ch_skip_to_response(out, 3.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	let count_target = 0;
 	for (let i = 0z; i < len(result); i += 1) {
 		const entry = result[i] as json::object;
@@ -172,12 +196,12 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn outgoing_calls_skip_self_for_recursion() void = {
 	let (s, scan, in_buf, out) = ch_test_server();
 	defer ch_test_cleanup(&s, scan, in_buf, out);
-	ch_open(&s, "file:///rec.ha",
-		"fn rec() void = rec();\\n");
+	ch_open(&s, "file:///rec.ha", "fn rec() void = rec();\\n");
 	const text = "fn rec() void = rec();\n";
 	analysis::index_file(&s.workspace_index, "/rec.ha", strings::toutf8(text));
 
-	const params = `{"item":{"name":"rec","kind":12,"uri":"file:///rec.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":22}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":22}}}}`;
+	const params =
+		`{"item":{"name":"rec","kind":12,"uri":"file:///rec.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":22}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":22}}}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -189,7 +213,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_outgoing_calls(&s, r);
 	const v = ch_skip_to_response(out, 4.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	for (let i = 0z; i < len(result); i += 1) {
 		const entry = result[i] as json::object;
 		const to = *(json::get(&entry, "to") as *json::value) as json::object;

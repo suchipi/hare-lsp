@@ -10,7 +10,9 @@ use memio;
 use strconv;
 use strings;
 
-fn cl_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn cl_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -18,7 +20,12 @@ fn cl_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = 
 	return (s, scan, in_buf, out);
 };
 
-fn cl_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn cl_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -28,15 +35,21 @@ fn cl_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 };
 
 fn cl_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(
+			`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
+		)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -94,14 +107,17 @@ fn cl_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = cl_skip_to_response(out, 70.0);
 	defer json::finish(v);
-	const arr = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const arr =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// At least one lens — the run-test one.
 	let found = false;
 	for (let i = 0z; i < len(arr); i += 1) {
 		const lens = arr[i] as json::object;
 		const cmd_v = match (json::get(&lens, "command")) {
-		case let p: *json::value => yield *p;
-		case void => continue;
+		case let p: *json::value =>
+			yield *p;
+		case void =>
+			continue;
 		};
 		const cmd = cmd_v as json::object;
 		const cmd_str = *(json::get(&cmd, "command") as *json::value) as str;

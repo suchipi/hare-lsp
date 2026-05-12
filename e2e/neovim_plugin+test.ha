@@ -29,8 +29,11 @@ use unix::tty;
 // Paths under .tmp/ are unique to this test so concurrent runs of
 // other tests don't collide.
 def NVIM_INIT_PATH: str = ".tmp/hare-lsp-nvim-pty-init.lua";
+
 def NVIM_BUFFER_PATH: str = ".tmp/hare-lsp-nvim-pty-buffer.ha";
+
 def NVIM_SENTINEL_PATH: str = ".tmp/hare-lsp-nvim-pty-sentinel.txt";
+
 def NVIM_SENTINEL_TMP: str = ".tmp/hare-lsp-nvim-pty-sentinel.tmp";
 
 // The init.lua loaded inside neovim. It:
@@ -45,7 +48,8 @@ def NVIM_SENTINEL_TMP: str = ".tmp/hare-lsp-nvim-pty-sentinel.tmp";
 //
 // The sentinel is written to a temp path and renamed into place so
 // the test never observes a partial file.
-const NVIM_INIT_LUA: str = `-- hare-lsp e2e pty harness init.lua.
+const NVIM_INIT_LUA: str =
+	`-- hare-lsp e2e pty harness init.lua.
 local cwd = vim.fn.getcwd()
 vim.opt.runtimepath:prepend(cwd .. "/editors/nvim")
 
@@ -108,24 +112,38 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 	const _ = os::remove(NVIM_SENTINEL_TMP);
 
 	write_file(NVIM_INIT_PATH, NVIM_INIT_LUA);
-	defer { const _ = os::remove(NVIM_INIT_PATH); };
+	defer {
+		const _ = os::remove(NVIM_INIT_PATH);
+	};
 	write_file(NVIM_BUFFER_PATH, NVIM_BUFFER_HA);
-	defer { const _ = os::remove(NVIM_BUFFER_PATH); };
+	defer {
+		const _ = os::remove(NVIM_BUFFER_PATH);
+	};
 
 	const (master, slave) = match (tty::openpty()) {
-	case let p: (io::file, io::file) => yield p;
+	case let p: (io::file, io::file) =>
+		yield p;
 	case let e: fs::error =>
 		fmt::fatalf("e2e: openpty failed: {}", fs::strerror(e));
 	};
-	defer { const _ = io::close(master); };
+	defer {
+		const _ = io::close(master);
+	};
 
-	const _ = tty::set_winsize(slave, tty::ttysize {
-		rows = 24, columns = 80,
-	});
+	const _ =
+		tty::set_winsize(
+			slave,
+			tty::ttysize {
+				rows = 24,
+				columns = 80,
+			},
+		);
 
-	let cmd = match (exec::cmd("nvim", "--clean", "-u", NVIM_INIT_PATH,
-			NVIM_BUFFER_PATH)) {
-	case let c: exec::command => yield c;
+	let cmd = match (exec::cmd(
+		"nvim", "--clean", "-u", NVIM_INIT_PATH, NVIM_BUFFER_PATH,
+	)) {
+	case let c: exec::command =>
+		yield c;
 	case let e: exec::error =>
 		io::close(slave)!;
 		fmt::fatalf("e2e: cannot prepare nvim: {}", exec::strerror(e));
@@ -142,7 +160,8 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 	exec::addfile(&cmd, os::stderr_file, slave)!;
 
 	const proc = match (exec::start(&cmd)) {
-	case let p: exec::process => yield p;
+	case let p: exec::process =>
+		yield p;
 	case let e: exec::error =>
 		io::close(slave)!;
 		fmt::fatalf("e2e: cannot start nvim: {}", exec::strerror(e));
@@ -151,8 +170,7 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 	// nvim owns the slave now.
 	io::close(slave)!;
 
-	const sentinel = wait_for_sentinel(master,
-		20 * time::SECOND);
+	const sentinel = wait_for_sentinel(master, 20 * time::SECOND);
 
 	// Best-effort cleanup. nvim should have exited via `qa!`; if
 	// it hasn't, SIGTERM it.
@@ -176,8 +194,7 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 	};
 	// The attached client must be the one our plugin registers.
 	const name = strings::sub(sentinel, len("ATTACHED:"), strings::end);
-	assert(name == "hare-lsp",
-		"e2e: LspAttach fired for an unexpected client");
+	assert(name == "hare-lsp", "e2e: LspAttach fired for an unexpected client");
 
 	free(sentinel);
 };
@@ -188,29 +205,32 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 // so the loop can re-check the sentinel even if neovim emits no
 // terminal output. Fails the test on timeout.
 fn wait_for_sentinel(master: io::file, total: time::duration) str = {
-	const deadline = time::add(time::now(time::clock::MONOTONIC),
-		total);
+	const deadline = time::add(time::now(time::clock::MONOTONIC), total);
 	let chunk: [4096]u8 = [0...];
 
 	for (true) {
 		const now = time::now(time::clock::MONOTONIC);
 		if (time::compare(now, deadline) >= 0) {
-			fmt::fatalf("e2e: timed out waiting for nvim sentinel at {}",
-				NVIM_SENTINEL_PATH);
+			fmt::fatalf(
+				"e2e: timed out waiting for nvim sentinel at {}", NVIM_SENTINEL_PATH,
+			);
 		};
 
 		// Drain whatever bytes are queued on the master so neovim
 		// keeps making progress. 100ms poll timeout doubles as our
 		// sentinel-poll cadence.
-		let pfd: [_]poll::pollfd = [poll::pollfd {
-			fd = master,
-			events = poll::event::POLLIN,
-			revents = 0,
-		}];
-		const ready = match (poll::poll(pfd,
-				100 * time::MILLISECOND)) {
-		case let n: uint => yield n;
-		case poll::error => yield 0u;
+		let pfd: [_]poll::pollfd = [
+			poll::pollfd {
+				fd = master,
+				events = poll::event::POLLIN,
+				revents = 0,
+			},
+		];
+		const ready = match (poll::poll(pfd, 100 * time::MILLISECOND)) {
+		case let n: uint =>
+			yield n;
+		case poll::error =>
+			yield 0u;
 		};
 		if (ready > 0) {
 			match (io::read(master, chunk[..])) {
@@ -221,7 +241,8 @@ fn wait_for_sentinel(master: io::file, total: time::duration) str = {
 		};
 
 		match (read_sentinel()) {
-		case let s: str => return s;
+		case let s: str =>
+			return s;
 		case void => void;
 		};
 	};
@@ -232,19 +253,26 @@ fn wait_for_sentinel(master: io::file, total: time::duration) str = {
 // we never observe partial content).
 fn read_sentinel() (str | void) = {
 	const f = match (os::open(NVIM_SENTINEL_PATH)) {
-	case let f: io::file => yield f;
-	case fs::error => return;
+	case let f: io::file =>
+		yield f;
+	case fs::error =>
+		return;
 	};
 	defer io::close(f)!;
 	let buf: [256]u8 = [0...];
 	const n = match (io::read(f, buf[..])) {
-	case let n: size => yield n;
-	case io::EOF => yield 0z;
-	case io::error => return;
+	case let n: size =>
+		yield n;
+	case io::EOF =>
+		yield 0z;
+	case io::error =>
+		return;
 	};
 	const s = match (strings::fromutf8(buf[..n])) {
-	case let s: str => yield s;
-	case => return;
+	case let s: str =>
+		yield s;
+	case =>
+		return;
 	};
 	const trimmed = strings::trim(s);
 	if (len(trimmed) == 0) return;
@@ -253,8 +281,10 @@ fn read_sentinel() (str | void) = {
 
 fn have_executable(name: str) bool = {
 	match (exec::lookup(name)) {
-	case str => return true;
-	case fs::error => return false;
+	case str =>
+		return true;
+	case fs::error =>
+		return false;
 	};
 };
 
@@ -267,7 +297,8 @@ fn ensure_tmp_dir() void = {
 
 fn write_file(path: str, body: str) void = {
 	const f = match (os::create(path, 0o644: fs::mode)) {
-	case let f: io::file => yield f;
+	case let f: io::file =>
+		yield f;
 	case let e: fs::error =>
 		fmt::fatalf("e2e: cannot create {}: {}", path, fs::strerror(e));
 	};

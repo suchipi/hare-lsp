@@ -19,26 +19,29 @@ use strings;
 // signature (rendered via hare::unparse) and its doc comment, when known.
 export fn handle_hover(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position(r.params)) {
-	case let v: (str, lsp::position) => yield v;
+	case let v: (str, lsp::position) =>
+		yield v;
 	case void =>
 		send_null(s, r.id);
 		return;
 	};
 
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_null(s, r.id);
 		return;
 	};
 
-	const off = analysis::position_to_byte(
-		analysis::bytes(&doc.buf), doc.buf.line_index,
-		position_encoding(s),
-		analysis::position {
-			line = pos.line,
-			character = pos.character,
-		});
+	const off =
+		analysis::position_to_byte(
+			analysis::bytes(&doc.buf), doc.buf.line_index, position_encoding(s),
+			analysis::position {
+				line = pos.line,
+				character = pos.character,
+			},
+		);
 
 	const data = analysis::bytes(&doc.buf);
 
@@ -60,13 +63,15 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	};
 
 	let ident_range = match (analysis::ident_at(data, off)) {
-	case let r: (size, size) => yield r;
+	case let r: (size, size) =>
+		yield r;
 	case void =>
 		// Cursor may be sitting on the leading '@' of an attribute
 		// like `@test`; in that case ident_at fails (since '@' isn't
 		// an ident byte). Peek one byte forward.
 		yield match (attr_at(data, off)) {
-		case let r: (size, size) => yield r;
+		case let r: (size, size) =>
+			yield r;
 		case void =>
 			send_null(s, r.id);
 			return;
@@ -103,8 +108,9 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		};
 	};
 	if (!found_local && len(qualifier_peek) == 0) {
-		match (find_local_binding(s, doc, &cache.pr.subunit, data,
-				ident_str, ident_range.0)) {
+		match (find_local_binding(
+			s, doc, &cache.pr.subunit, data, ident_str, ident_range.0,
+		)) {
 		case let rendered: str =>
 			sig = rendered;
 			docs = strings::dup("")!;
@@ -147,8 +153,10 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	json::put(&result, "contents", contents)!;
 	// Range: the identifier itself.
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, ident_range.0);
-	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, ident_range.1);
+	const start_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, ident_range.0);
+	const end_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, ident_range.1);
 	let range = json::newobject();
 	let s_obj = json::newobject();
 	json::put(&s_obj, "line", start_pos.line: f64)!;
@@ -167,8 +175,14 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 // best textual range we can compute around `off`. We don't have the
 // module-path span pre-computed, so widen to the surrounding `ident::ident`
 // run; if that fails, fall back to the single ident at `off`.
-fn send_module_hover_response(s: *server, doc: *document, data: []u8,
-		off: size, id: lsp::id, md: str) void = {
+fn send_module_hover_response(
+	s: *server,
+	doc: *document,
+	data: []u8,
+	off: size,
+	id: lsp::id,
+	md: str,
+) void = {
 	const enc = position_encoding(s);
 	let start_off = off;
 	let end_off = off;
@@ -184,10 +198,10 @@ fn send_module_hover_response(s: *server, doc: *document, data: []u8,
 		case void => void;
 		};
 	};
-	const start_pos = analysis::byte_to_position(data, doc.buf.line_index,
-		enc, start_off);
-	const end_pos = analysis::byte_to_position(data, doc.buf.line_index,
-		enc, end_off);
+	const start_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, start_off);
+	const end_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, end_off);
 	let result = json::newobject();
 	let contents = json::newobject();
 	json::set(&contents, "kind", "markdown": json::value)!;
@@ -227,24 +241,28 @@ export fn handle_implementation(s: *server, r: lsp::request) void = {
 // workspace index for types defined in other files.
 export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position(r.params)) {
-	case let v: (str, lsp::position) => yield v;
+	case let v: (str, lsp::position) =>
+		yield v;
 	case void =>
 		send_null(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_null(s, r.id);
 		return;
 	};
-	const off = analysis::position_to_byte(
-		analysis::bytes(&doc.buf), doc.buf.line_index,
-		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+	const off =
+		analysis::position_to_byte(
+			analysis::bytes(&doc.buf), doc.buf.line_index, position_encoding(s),
+			analysis::position { line = pos.line, character = pos.character },
+		);
 	const data = analysis::bytes(&doc.buf);
 	const ident_range = match (analysis::ident_at(data, off)) {
-	case let r: (size, size) => yield r;
+	case let r: (size, size) =>
+		yield r;
 	case void =>
 		send_null(s, r.id);
 		return;
@@ -280,25 +298,29 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 
 fn send_location_for_ident(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position(r.params)) {
-	case let v: (str, lsp::position) => yield v;
+	case let v: (str, lsp::position) =>
+		yield v;
 	case void =>
 		send_null(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_null(s, r.id);
 		return;
 	};
-	const off = analysis::position_to_byte(
-		analysis::bytes(&doc.buf), doc.buf.line_index,
-		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+	const off =
+		analysis::position_to_byte(
+			analysis::bytes(&doc.buf), doc.buf.line_index, position_encoding(s),
+			analysis::position { line = pos.line, character = pos.character },
+		);
 	const data = analysis::bytes(&doc.buf);
 	if (try_send_struct_member_definition(s, r, doc, data, off)) return;
 	const ident_range = match (analysis::ident_at(data, off)) {
-	case let r: (size, size) => yield r;
+	case let r: (size, size) =>
+		yield r;
 	case void =>
 		send_null(s, r.id);
 		return;
@@ -330,9 +352,14 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 // Emits a Location response for a workspace_entry without needing the file
 // open. We fetch the file via the shared parse cache so repeated jumps to
 // the same file don't keep re-reading it from disk.
-fn send_location_for_entry(s: *server, id: lsp::id, e: *analysis::workspace_entry) void = {
+fn send_location_for_entry(
+	s: *server,
+	id: lsp::id,
+	e: *analysis::workspace_entry,
+) void = {
 	const fpe = match (cached_parse_or_drop_stale(s, e.path)) {
-	case let p: *file_parse_entry => yield p;
+	case let p: *file_parse_entry =>
+		yield p;
 	case null =>
 		send_null(s, id);
 		return;
@@ -341,10 +368,10 @@ fn send_location_for_entry(s: *server, id: lsp::id, e: *analysis::workspace_entr
 	const line_index = analysis::build_line_index(text);
 	defer free(line_index);
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(text, line_index, enc,
-		e.start_off: size);
-	const end_pos = analysis::byte_to_position(text, line_index, enc,
-		e.end_off: size);
+	const start_pos =
+		analysis::byte_to_position(text, line_index, enc, e.start_off: size);
+	const end_pos =
+		analysis::byte_to_position(text, line_index, enc, e.end_off: size);
 
 	let result = json::newobject();
 	json::set(&result, "uri", e.uri: json::value)!;
@@ -372,32 +399,53 @@ fn send_location_for_entry(s: *server, id: lsp::id, e: *analysis::workspace_entr
 // file), locates the matching decl, and returns (sig, docs) — both
 // freshly allocated.
 // Returns void if no workspace entry matches or the file can't be read.
-fn workspace_hover(s: *server, doc: *document, data: []u8,
-		ident_start: size, ident_str: str) ((str, str) | void) = {
-	const entry = match (workspace_lookup_aware(s, doc, data, ident_start, ident_str)) {
-	case let e: *analysis::workspace_entry => yield e;
-	case void => return void;
+fn workspace_hover(
+	s: *server,
+	doc: *document,
+	data: []u8,
+	ident_start: size,
+	ident_str: str,
+) ((str, str) | void) = {
+	const entry = match (workspace_lookup_aware(
+		s, doc, data, ident_start, ident_str,
+	)) {
+	case let e: *analysis::workspace_entry =>
+		yield e;
+	case void =>
+		return void;
 	};
 	const fpe = match (cached_parse_or_drop_stale(s, entry.path)) {
-	case let p: *file_parse_entry => yield p;
-	case null => return void;
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
 	};
 	const decl_idx = match (find_decl_by_name(&fpe.pr.subunit, ident_str)) {
-	case let i: size => yield i;
-	case void => return void;
+	case let i: size =>
+		yield i;
+	case void =>
+		return void;
 	};
 	const sig = render_decl_signature(&fpe.pr.subunit.decls[decl_idx]);
 	const docs = strings::dup(fpe.pr.subunit.decls[decl_idx].docs)!;
 	return (sig, docs);
 };
 
-fn send_location(s: *server, id: lsp::id, uri: str, loc: ast::location, doc: *document) void = {
+fn send_location(
+	s: *server,
+	id: lsp::id,
+	uri: str,
+	loc: ast::location,
+	doc: *document,
+) void = {
 	const enc = position_encoding(s);
 	const data = analysis::bytes(&doc.buf);
-	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
-		loc.start.off: size);
-	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
-		loc.end.off: size);
+	const start_pos =
+		analysis::byte_to_position(
+			data, doc.buf.line_index, enc, loc.start.off: size,
+		);
+	const end_pos =
+		analysis::byte_to_position(data, doc.buf.line_index, enc, loc.end.off: size);
 
 	let result = json::newobject();
 	defer json::finish(result);
@@ -429,11 +477,16 @@ fn find_decl_by_name(su: *ast::subunit, name: str) (size | void) = {
 
 fn decl_ident(d: *ast::decl) ast::ident = {
 	match (d.decl) {
-	case let f: ast::decl_func => return f.ident;
-	case let t: ast::decl_type => return t.ident;
-	case let g: ast::decl_global => return g.ident;
-	case let c: ast::decl_const => return c.ident;
-	case ast::assert_expr => return [];
+	case let f: ast::decl_func =>
+		return f.ident;
+	case let t: ast::decl_type =>
+		return t.ident;
+	case let g: ast::decl_global =>
+		return g.ident;
+	case let c: ast::decl_const =>
+		return c.ident;
+	case ast::assert_expr =>
+		return [];
 	};
 };
 
@@ -454,16 +507,19 @@ fn render_decl_signature(d: *ast::decl) str = {
 		if (d.exported) {
 			match (memio::concat(&buf, "export ")) {
 			case size => void;
-			case => return strings::dup("<unparse error>")!;
+			case =>
+				return strings::dup("<unparse error>")!;
 			};
 		};
 		match (memio::concat(&buf, "def ")) {
 		case size => void;
-		case => return strings::dup("<unparse error>")!;
+		case =>
+			return strings::dup("<unparse error>")!;
 		};
 		match (unparse::ident(&buf, c.ident)) {
 		case size => void;
-		case => return strings::dup("<unparse error>")!;
+		case =>
+			return strings::dup("<unparse error>")!;
 		};
 		match (c._type) {
 		case let t: *ast::_type =>
@@ -494,7 +550,8 @@ fn render_decl_signature(d: *ast::decl) str = {
 		};
 		match (unparse::decl(&buf, &unparse::syn_nowrap, &copy)) {
 		case size => void;
-		case => return strings::dup("<unparse error>")!;
+		case =>
+			return strings::dup("<unparse error>")!;
 		};
 	case let g: ast::decl_global =>
 		let copy = *d;
@@ -509,16 +566,19 @@ fn render_decl_signature(d: *ast::decl) str = {
 		};
 		match (unparse::decl(&buf, &unparse::syn_nowrap, &copy)) {
 		case size => void;
-		case => return strings::dup("<unparse error>")!;
+		case =>
+			return strings::dup("<unparse error>")!;
 		};
+	// Type alias / assert — keep as-is. For a type alias, the
+	// RHS *is* the type definition, so we want to show it.
+
 	case =>
-		// Type alias / assert — keep as-is. For a type alias, the
-		// RHS *is* the type definition, so we want to show it.
 		let copy = *d;
 		copy.docs = "";
 		match (unparse::decl(&buf, &unparse::syn_nowrap, &copy)) {
 		case size => void;
-		case => return strings::dup("<unparse error>")!;
+		case =>
+			return strings::dup("<unparse error>")!;
 		};
 	};
 	return strings::dup(memio::string(&buf)!)!;
@@ -533,8 +593,12 @@ fn build_hover_markdown(s: *server, doc: *document, sig: str, docs: str) str = {
 // Same as build_hover_markdown but assumes `body` is already clean
 // markdown (no doc-comment leading-space stripping). Used for README
 // hovers where the source is raw markdown.
-export fn build_hover_markdown_raw(s: *server, doc: *document,
-		sig: str, body: str) str = {
+export fn build_hover_markdown_raw(
+	s: *server,
+	doc: *document,
+	sig: str,
+	body: str,
+) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
 	memio::concat(&buf, "```hare\n")!;
@@ -567,38 +631,53 @@ fn clean_doc_comment(docs: str) str = {
 	return strings::join("\n", cleaned...)!;
 };
 
-fn parse_text_document_position(p: (json::value | void)) ((str, lsp::position) | void) = {
+fn parse_text_document_position(
+	p: (json::value | void),
+) ((str, lsp::position) | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const td = match (json::get(&obj, "textDocument")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const uri = match (json::get(&td, "uri")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
-		case => return void;
+		case let s: str =>
+			yield s;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const pos = match (json::get(&obj, "position")) {
 	case let p: *json::value =>
 		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position => yield pos;
-		case lsp::bad_message => return void;
+		case let pos: lsp::position =>
+			yield pos;
+		case lsp::bad_message =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	return (uri, pos);
 };
@@ -633,8 +712,11 @@ fn attr_at(data: []u8, off: size) ((size, size) | void) = {
 // `analysis::workspace_lookup_for_subunit`; stdlib resolution layers on
 // top here because it needs `*server` to drive lazy indexing.
 fn workspace_lookup_aware(
-	s: *server, doc: *document, data: []u8,
-	ident_start: size, ident_str: str,
+	s: *server,
+	doc: *document,
+	data: []u8,
+	ident_start: size,
+	ident_str: str,
 ) (*analysis::workspace_entry | void) = {
 	const qualifier = analysis::qualifier_prefix_at(data, ident_start);
 	defer free(qualifier);
@@ -644,9 +726,11 @@ fn workspace_lookup_aware(
 	const file_module = analysis::module_from_path(doc_path);
 	defer free(file_module);
 	if (len(qualifier) > 0) {
-		match (analysis::workspace_lookup_for_subunit(&s.workspace_index,
-				&cache.pr.subunit, file_module, qualifier, ident_str)) {
-		case let e: *analysis::workspace_entry => return e;
+		match (analysis::workspace_lookup_for_subunit(
+			&s.workspace_index, &cache.pr.subunit, file_module, qualifier, ident_str,
+		)) {
+		case let e: *analysis::workspace_entry =>
+			return e;
 		case void => void;
 		};
 		// Workspace miss — try resolving against stdlib/third-party,
@@ -655,12 +739,14 @@ fn workspace_lookup_aware(
 		// (e.g. "poll" for `use unix::poll;`), so we also try the
 		// fully-qualified module identifier when the open file's
 		// imports point to a multi-segment path ending in `qualifier`.
-		const full = analysis::full_module_for_qualifier(&cache.pr.subunit, qualifier);
+		const full =
+			analysis::full_module_for_qualifier(&cache.pr.subunit, qualifier);
 		defer free(full);
 		const lookup_module = if (len(full) > 0) full else qualifier;
 		if (ensure_stdlib_module_indexed(s, lookup_module)) {
 			match (analysis::find_in_module(&s.stdlib_index, qualifier, ident_str)) {
-			case let e: *analysis::workspace_entry => return e;
+			case let e: *analysis::workspace_entry =>
+				return e;
 			case void => void;
 			};
 		};
@@ -670,31 +756,35 @@ fn workspace_lookup_aware(
 	// reference is the most common case), then rank by the open file's
 	// imports.
 	if (len(file_module) > 0) {
-		match (analysis::find_in_module(&s.workspace_index,
-				file_module, ident_str)) {
-		case let e: *analysis::workspace_entry => return e;
+		match (analysis::find_in_module(&s.workspace_index, file_module, ident_str)) {
+		case let e: *analysis::workspace_entry =>
+			return e;
 		case void => void;
 		};
 	};
 	const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
 	defer analysis::free_str_slice(imports);
 	match (analysis::find_in_imports(&s.workspace_index, imports, ident_str)) {
-	case let e: *analysis::workspace_entry => return e;
+	case let e: *analysis::workspace_entry =>
+		return e;
 	case void => void;
 	};
 	// Ensure each import is indexed in stdlib, then try matching.
-	const full_imports = analysis::collect_imported_module_paths(&cache.pr.subunit);
+	const full_imports =
+		analysis::collect_imported_module_paths(&cache.pr.subunit);
 	defer analysis::free_str_slice(full_imports);
 	for (let i = 0z; i < len(full_imports); i += 1) {
 		const _ = ensure_stdlib_module_indexed(s, full_imports[i]);
 	};
 	match (analysis::find_in_imports(&s.stdlib_index, imports, ident_str)) {
-	case let e: *analysis::workspace_entry => return e;
+	case let e: *analysis::workspace_entry =>
+		return e;
 	case void => void;
 	};
 	// Last-resort: any match in the workspace, then stdlib.
 	match (analysis::find_first_by_short_name(&s.workspace_index, ident_str)) {
-	case let e: *analysis::workspace_entry => return e;
+	case let e: *analysis::workspace_entry =>
+		return e;
 	case void => void;
 	};
 	return analysis::find_first_by_short_name(&s.stdlib_index, ident_str);
@@ -720,15 +810,23 @@ fn send_with_finish(s: *server, id: lsp::id, v: json::value) void = {
 // local `let` / `const` / function-parameter binding. Walks the body of the
 // containing function decl. Returns void if no matching binding is in
 // scope at `off`. Caller frees the result.
-fn find_local_binding(srv: *server, doc: *document, su: *ast::subunit,
-		data: []u8, name: str, off: size) (str | void) = {
+fn find_local_binding(
+	srv: *server,
+	doc: *document,
+	su: *ast::subunit,
+	data: []u8,
+	name: str,
+	off: size,
+) (str | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
 		if (off < d.loc.start.off: size) continue;
 		if (off > d.loc.end.off: size) continue;
 		const f = match (d.decl) {
-		case let f: ast::decl_func => yield f;
-		case => continue;
+		case let f: ast::decl_func =>
+			yield f;
+		case =>
+			continue;
 		};
 		// Function parameter?
 		match (f.prototype.repr) {
@@ -740,14 +838,18 @@ fn find_local_binding(srv: *server, doc: *document, su: *ast::subunit,
 		case => void;
 		};
 		const body = match (f.body) {
-		case let e: *ast::expr => yield e;
-		case null => return void;
+		case let e: *ast::expr =>
+			yield e;
+		case null =>
+			return void;
 		};
 		// Innermost wins: walk recursively, tracking the best (deepest
 		// containing) hit.
 		match (walk_for_local(srv, doc, data, body, name, off)) {
-		case let r: str => return r;
-		case void => return void;
+		case let r: str =>
+			return r;
+		case void =>
+			return void;
 		};
 	};
 	return void;
@@ -756,8 +858,14 @@ fn find_local_binding(srv: *server, doc: *document, su: *ast::subunit,
 // Recurses through the common expression forms looking for a `let`/`const`
 // binding of `name` whose textual range encloses `off`. Returns the
 // rendered signature or void.
-fn walk_for_local(srv: *server, doc: *document, data: []u8,
-		e: *ast::expr, name: str, off: size) (str | void) = {
+fn walk_for_local(
+	srv: *server,
+	doc: *document,
+	data: []u8,
+	e: *ast::expr,
+	name: str,
+	off: size,
+) (str | void) = {
 	// We never early-return on range mismatch: for compound bodies,
 	// preceding sibling bindings are still in scope at `off`.
 	match (e.expr) {
@@ -784,7 +892,8 @@ fn walk_for_local(srv: *server, doc: *document, data: []u8,
 			match (walk_for_local(srv, doc, data, child, name, off)) {
 			case let r: str =>
 				match (hit) {
-				case let prev: str => free(prev);
+				case let prev: str =>
+					free(prev);
 				case void => void;
 				};
 				hit = r;
@@ -794,19 +903,22 @@ fn walk_for_local(srv: *server, doc: *document, data: []u8,
 		return hit;
 	case let i: ast::if_expr =>
 		match (walk_for_local(srv, doc, data, i.tbranch, name, off)) {
-		case let r: str => return r;
+		case let r: str =>
+			return r;
 		case void => void;
 		};
 		match (i.fbranch) {
 		case let e2: *ast::expr =>
 			return walk_for_local(srv, doc, data, e2, name, off);
-		case null => return void;
+		case null =>
+			return void;
 		};
 	case let fr: ast::for_expr =>
 		match (fr.bindings) {
 		case let b: *ast::expr =>
 			match (walk_for_local(srv, doc, data, b, name, off)) {
-			case let r: str => return r;
+			case let r: str =>
+				return r;
 			case void => void;
 			};
 		case null => void;
@@ -825,7 +937,8 @@ fn walk_for_local(srv: *server, doc: *document, data: []u8,
 			};
 			if (!in_case) continue;
 			match (walk_case_exprs(srv, doc, data, mc.exprs, name, off)) {
-			case let r: str => return r;
+			case let r: str =>
+				return r;
 			case void => void;
 			};
 		};
@@ -835,7 +948,8 @@ fn walk_for_local(srv: *server, doc: *document, data: []u8,
 			const sc = &sw.cases[i];
 			if (!case_contains(sc.exprs, off)) continue;
 			match (walk_case_exprs(srv, doc, data, sc.exprs, name, off)) {
-			case let r: str => return r;
+			case let r: str =>
+				return r;
 			case void => void;
 			};
 		};
@@ -846,13 +960,15 @@ fn walk_for_local(srv: *server, doc: *document, data: []u8,
 		match (r) {
 		case let inner: *ast::expr =>
 			return walk_for_local(srv, doc, data, inner, name, off);
-		case null => return void;
+		case null =>
+			return void;
 		};
 	case let y: ast::yield_expr =>
 		match (y.value) {
 		case let inner: *ast::expr =>
 			return walk_for_local(srv, doc, data, inner, name, off);
-		case null => return void;
+		case null =>
+			return void;
 		};
 	case let p: ast::propagate_expr =>
 		return walk_for_local(srv, doc, data, p: *ast::expr, name, off);
@@ -862,12 +978,14 @@ fn walk_for_local(srv: *server, doc: *document, data: []u8,
 		// Walks the callee and arguments. Rarely useful for bindings
 		// but covers nested expression bodies.
 		match (walk_for_local(srv, doc, data, c.lvalue, name, off)) {
-		case let r: str => return r;
+		case let r: str =>
+			return r;
 		case void => void;
 		};
 		for (let i = 0z; i < len(c.args); i += 1) {
 			match (walk_for_local(srv, doc, data, c.args[i], name, off)) {
-			case let r: str => return r;
+			case let r: str =>
+				return r;
 			case void => void;
 			};
 		};
@@ -876,28 +994,39 @@ fn walk_for_local(srv: *server, doc: *document, data: []u8,
 		match (a.object) {
 		case let lhs: *ast::expr =>
 			match (walk_for_local(srv, doc, data, lhs, name, off)) {
-			case let r: str => return r;
+			case let r: str =>
+				return r;
 			case void => void;
 			};
 		case null => void;
 		};
 		return walk_for_local(srv, doc, data, a.value, name, off);
-	case => return void;
+	case =>
+		return void;
 	};
 };
 
-fn render_local_binding(srv: *server, doc: *document, data: []u8,
-		kind: ast::binding_kind, b: *ast::binding) str = {
+fn render_local_binding(
+	srv: *server,
+	doc: *document,
+	data: []u8,
+	kind: ast::binding_kind,
+	b: *ast::binding,
+) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
 	const kw = switch (kind) {
-	case ast::binding_kind::LET => yield "let ";
-	case ast::binding_kind::CONST => yield "const ";
-	case ast::binding_kind::DEF => yield "def ";
+	case ast::binding_kind::LET =>
+		yield "let ";
+	case ast::binding_kind::CONST =>
+		yield "const ";
+	case ast::binding_kind::DEF =>
+		yield "def ";
 	};
 	match (memio::concat(&buf, kw)) {
 	case size => void;
-	case => return strings::dup("<binding>")!;
+	case =>
+		return strings::dup("<binding>")!;
 	};
 	for (let i = 0z; i < len(b.names); i += 1) {
 		if (i > 0) {
@@ -936,10 +1065,8 @@ fn render_local_binding(srv: *server, doc: *document, data: []u8,
 			// `let scan` with no information.
 			const init_off_start = b.init.loc.start.off: size;
 			const init_off_end = b.init.loc.end.off: size;
-			if (init_off_end <= len(data) &&
-					init_off_start <= init_off_end) {
-				const init_src = strings::fromutf8(
-					data[init_off_start..init_off_end])!;
+			if (init_off_end <= len(data) && init_off_start <= init_off_end) {
+				const init_src = strings::fromutf8(data[init_off_start..init_off_end])!;
 				match (memio::concat(&buf, " = ", init_src)) {
 				case size => void;
 				case => void;
@@ -959,8 +1086,11 @@ fn render_local_binding(srv: *server, doc: *document, data: []u8,
 //     stripping any error-flagged variants from the resulting type
 //     (matching Hare's actual semantics for propagate / error-assert).
 // Other forms return void; the caller falls back to echoing the source.
-fn infer_type_from_init(srv: *server, doc: *document,
-		init: *ast::expr) (str | void) = {
+fn infer_type_from_init(
+	srv: *server,
+	doc: *document,
+	init: *ast::expr,
+) (str | void) = {
 	match (init.expr) {
 	case let l: ast::literal_expr =>
 		return type_label_for_literal(l);
@@ -971,7 +1101,8 @@ fn infer_type_from_init(srv: *server, doc: *document,
 		defer lsp::safe_close(&buf);
 		match (unparse::_type(&buf, &unparse::syn_nowrap, c._type)) {
 		case size => void;
-		case => return void;
+		case =>
+			return void;
 		};
 		return strings::dup(memio::string(&buf)!)!;
 	case let p: ast::propagate_expr =>
@@ -980,7 +1111,8 @@ fn infer_type_from_init(srv: *server, doc: *document,
 		return infer_unwrapped_init(srv, doc, p: *ast::expr);
 	case let m: ast::match_expr =>
 		return infer_match_expr_type(srv, doc, &m);
-	case => return void;
+	case =>
+		return void;
 	};
 };
 
@@ -988,8 +1120,11 @@ fn infer_type_from_init(srv: *server, doc: *document,
 // contributed value type, deduplicated. Cases whose body always diverges
 // (return / abort) contribute nothing. Returns void if no case yields a
 // usable type, in which case the caller falls back to echoing the source.
-fn infer_match_expr_type(srv: *server, doc: *document,
-		m: *ast::match_expr) (str | void) = {
+fn infer_match_expr_type(
+	srv: *server,
+	doc: *document,
+	m: *ast::match_expr,
+) (str | void) = {
 	let parts: []str = [];
 	defer analysis::free_str_slice(parts);
 	for (let i = 0z; i < len(m.cases); i += 1) {
@@ -1014,8 +1149,11 @@ fn infer_match_expr_type(srv: *server, doc: *document,
 // Returns the value type a single match case contributes back to the
 // surrounding match expression, or void if the case always diverges
 // (e.g. `return foo;`). Caller frees.
-fn infer_case_value_type(srv: *server, doc: *document,
-		mc: *ast::match_case) (str | void) = {
+fn infer_case_value_type(
+	srv: *server,
+	doc: *document,
+	mc: *ast::match_case,
+) (str | void) = {
 	if (len(mc.exprs) == 0) return void;
 	// Walk the body. An explicit `yield` short-circuits the case's
 	// contribution. A `return` (anywhere we can see it at the top
@@ -1036,11 +1174,17 @@ fn infer_case_value_type(srv: *server, doc: *document,
 
 // Type of a `yield <value>`'s value, or void for bare `yield` (which
 // contributes void in Hare's type rules).
-fn type_of_yield_value(srv: *server, doc: *document,
-		mc: *ast::match_case, y: ast::yield_expr) (str | void) = {
+fn type_of_yield_value(
+	srv: *server,
+	doc: *document,
+	mc: *ast::match_case,
+	y: ast::yield_expr,
+) (str | void) = {
 	const v = match (y.value) {
-	case let v: *ast::expr => yield v;
-	case null => return strings::dup("void")!;
+	case let v: *ast::expr =>
+		yield v;
+	case null =>
+		return strings::dup("void")!;
 	};
 	return type_of_case_value_expr(srv, doc, mc, v);
 };
@@ -1049,14 +1193,17 @@ fn type_of_yield_value(srv: *server, doc: *document,
 // Recognises references to the case's own binding (`yield i` where the
 // case is `case let i: T`) and otherwise reuses infer_type_from_init for
 // literals / calls / casts.
-fn type_of_case_value_expr(srv: *server, doc: *document,
-		mc: *ast::match_case, e: *ast::expr) (str | void) = {
+fn type_of_case_value_expr(
+	srv: *server,
+	doc: *document,
+	mc: *ast::match_case,
+	e: *ast::expr,
+) (str | void) = {
 	match (e.expr) {
 	case let a: ast::access_expr =>
 		match (a) {
 		case let id: ast::access_identifier =>
-			if (len(id) == 1 && len(mc.name) > 0
-					&& id[0] == mc.name) {
+			if (len(id) == 1 && len(mc.name) > 0 && id[0] == mc.name) {
 				return render_case_binding_type(mc);
 			};
 		case => void;
@@ -1070,14 +1217,17 @@ fn type_of_case_value_expr(srv: *server, doc: *document,
 // case or a case without an explicit type, returns void.
 fn render_case_binding_type(mc: *ast::match_case) (str | void) = {
 	const t = match (mc._type) {
-	case let t: *ast::_type => yield t;
-	case null => return void;
+	case let t: *ast::_type =>
+		yield t;
+	case null =>
+		return void;
 	};
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
 	match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
 	case size => void;
-	case => return void;
+	case =>
+		return void;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };
@@ -1092,18 +1242,23 @@ fn contains_str(haystack: []str, needle: str) bool = {
 // Infers the type of an init expression after stripping any error-flagged
 // variants from its resulting type. Used for the inner expression of `?` and
 // `!`, which both yield the non-error component of the inner type.
-fn infer_unwrapped_init(srv: *server, doc: *document,
-		inner: *ast::expr) (str | void) = {
+fn infer_unwrapped_init(
+	srv: *server,
+	doc: *document,
+	inner: *ast::expr,
+) (str | void) = {
 	const result_t = match (inner.expr) {
 	case let c: ast::call_expr =>
 		yield match (infer_call_return_type_node(srv, doc, &c)) {
-		case let t: *ast::_type => yield t;
+		case let t: *ast::_type =>
+			yield t;
 		case void =>
 			// Fall back to the un-stripped string form so the user
 			// at least sees something useful.
 			return infer_type_from_init(srv, doc, inner);
 		};
-	case => return infer_type_from_init(srv, doc, inner);
+	case =>
+		return infer_type_from_init(srv, doc, inner);
 	};
 	return render_type_without_errors(srv, doc, result_t);
 };
@@ -1136,30 +1291,42 @@ fn type_label_for_literal(l: ast::literal_expr) (str | void) = {
 // Resolves the callee of a direct call expression and renders its return
 // type, e.g. `bufio::newscanner(...)` -> `bufio::scanner`. Returns void if
 // the callee isn't a direct access_identifier or can't be resolved.
-fn infer_call_return_type(srv: *server, doc: *document,
-		c: *ast::call_expr) (str | void) = {
+fn infer_call_return_type(
+	srv: *server,
+	doc: *document,
+	c: *ast::call_expr,
+) (str | void) = {
 	const callee_ident = match (c.lvalue.expr) {
 	case let a: ast::access_expr =>
 		yield match (a) {
-		case let id: ast::access_identifier => yield id;
-		case => return void;
+		case let id: ast::access_identifier =>
+			yield id;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	if (len(callee_ident) == 0) return void;
 	const callee_name = callee_ident[len(callee_ident) - 1];
 
 	const entry = match (lookup_callee(srv, doc, callee_ident)) {
-	case let e: *analysis::workspace_entry => yield e;
-	case void => return void;
+	case let e: *analysis::workspace_entry =>
+		yield e;
+	case void =>
+		return void;
 	};
 	const fpe = match (cached_parse_or_drop_stale(srv, entry.path)) {
-	case let p: *file_parse_entry => yield p;
-	case null => return void;
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
 	};
 	const idx = match (find_decl_by_name(&fpe.pr.subunit, callee_name)) {
-	case let i: size => yield i;
-	case void => return void;
+	case let i: size =>
+		yield i;
+	case void =>
+		return void;
 	};
 	return render_func_result(&fpe.pr.subunit.decls[idx]);
 };
@@ -1168,24 +1335,27 @@ fn infer_call_return_type(srv: *server, doc: *document,
 // ["bufio", "newscanner"] or ["foo"]. Mirrors workspace_lookup_aware but
 // works from the AST identifier rather than a byte offset + qualifier
 // scan.
-fn lookup_callee(srv: *server, doc: *document,
-		callee_ident: []str) (*analysis::workspace_entry | void) = {
+fn lookup_callee(
+	srv: *server,
+	doc: *document,
+	callee_ident: []str,
+) (*analysis::workspace_entry | void) = {
 	if (len(callee_ident) == 0) return void;
 	const name = callee_ident[len(callee_ident) - 1];
 	if (len(callee_ident) >= 2) {
 		const qualifier = callee_ident[len(callee_ident) - 2];
-		match (analysis::find_in_module(&srv.workspace_index,
-				qualifier, name)) {
-		case let e: *analysis::workspace_entry => return e;
+		match (analysis::find_in_module(&srv.workspace_index, qualifier, name)) {
+		case let e: *analysis::workspace_entry =>
+			return e;
 		case void => void;
 		};
 		const cache = parse_of(doc);
-		const full = analysis::full_module_for_qualifier(&cache.pr.subunit, qualifier);
+		const full =
+			analysis::full_module_for_qualifier(&cache.pr.subunit, qualifier);
 		defer free(full);
 		const mod_to_index = if (len(full) > 0) full else qualifier;
 		if (ensure_stdlib_module_indexed(srv, mod_to_index)) {
-			return analysis::find_in_module(&srv.stdlib_index,
-				qualifier, name);
+			return analysis::find_in_module(&srv.stdlib_index, qualifier, name);
 		};
 		return void;
 	};
@@ -1193,7 +1363,8 @@ fn lookup_callee(srv: *server, doc: *document,
 	const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
 	defer analysis::free_str_slice(imports);
 	match (analysis::find_in_imports(&srv.workspace_index, imports, name)) {
-	case let e: *analysis::workspace_entry => return e;
+	case let e: *analysis::workspace_entry =>
+		return e;
 	case void => void;
 	};
 	return analysis::find_first_by_short_name(&srv.workspace_index, name);
@@ -1201,55 +1372,76 @@ fn lookup_callee(srv: *server, doc: *document,
 
 fn render_func_result(d: *ast::decl) (str | void) = {
 	const f = match (d.decl) {
-	case let f: ast::decl_func => yield f;
-	case => return void;
+	case let f: ast::decl_func =>
+		yield f;
+	case =>
+		return void;
 	};
 	const ft = match (f.prototype.repr) {
-	case let proto: ast::func_type => yield proto;
-	case => return void;
+	case let proto: ast::func_type =>
+		yield proto;
+	case =>
+		return void;
 	};
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
 	match (unparse::_type(&buf, &unparse::syn_nowrap, ft.result)) {
 	case size => void;
-	case => return void;
+	case =>
+		return void;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };
 
 // Like [[infer_call_return_type]] but returns the result type's AST node so
 // callers can post-process it (e.g. strip error variants for `?` / `!`).
-fn infer_call_return_type_node(srv: *server, doc: *document,
-		c: *ast::call_expr) (*ast::_type | void) = {
+fn infer_call_return_type_node(
+	srv: *server,
+	doc: *document,
+	c: *ast::call_expr,
+) (*ast::_type | void) = {
 	const callee_ident = match (c.lvalue.expr) {
 	case let a: ast::access_expr =>
 		yield match (a) {
-		case let id: ast::access_identifier => yield id;
-		case => return void;
+		case let id: ast::access_identifier =>
+			yield id;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	if (len(callee_ident) == 0) return void;
 	const callee_name = callee_ident[len(callee_ident) - 1];
 	const entry = match (lookup_callee(srv, doc, callee_ident)) {
-	case let e: *analysis::workspace_entry => yield e;
-	case void => return void;
+	case let e: *analysis::workspace_entry =>
+		yield e;
+	case void =>
+		return void;
 	};
 	const fpe = match (cached_parse_or_drop_stale(srv, entry.path)) {
-	case let p: *file_parse_entry => yield p;
-	case null => return void;
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
 	};
 	const idx = match (find_decl_by_name(&fpe.pr.subunit, callee_name)) {
-	case let i: size => yield i;
-	case void => return void;
+	case let i: size =>
+		yield i;
+	case void =>
+		return void;
 	};
 	const f = match (fpe.pr.subunit.decls[idx].decl) {
-	case let f: ast::decl_func => yield f;
-	case => return void;
+	case let f: ast::decl_func =>
+		yield f;
+	case =>
+		return void;
 	};
 	const ft = match (f.prototype.repr) {
-	case let proto: ast::func_type => yield proto;
-	case => return void;
+	case let proto: ast::func_type =>
+		yield proto;
+	case =>
+		return void;
 	};
 	return ft.result;
 };
@@ -1257,8 +1449,11 @@ fn infer_call_return_type_node(srv: *server, doc: *document,
 // Renders `t` with all error-flagged variants stripped — the result of `?`
 // or `!` applied to an expression of type `t`. Returns void if every
 // component of `t` was an error (nothing meaningful to show).
-fn render_type_without_errors(srv: *server, doc: *document,
-		t: *ast::_type) (str | void) = {
+fn render_type_without_errors(
+	srv: *server,
+	doc: *document,
+	t: *ast::_type,
+) (str | void) = {
 	match (t.repr) {
 	case ast::error_type =>
 		return void;
@@ -1275,23 +1470,27 @@ fn render_type_without_errors(srv: *server, doc: *document,
 		defer lsp::safe_close(&buf);
 		match (memio::concat(&buf, "(")) {
 		case size => void;
-		case => return void;
+		case =>
+			return void;
 		};
 		for (let i = 0z; i < len(kept); i += 1) {
 			if (i > 0) {
 				match (memio::concat(&buf, " | ")) {
 				case size => void;
-				case => return void;
+				case =>
+					return void;
 				};
 			};
 			match (unparse::_type(&buf, &unparse::syn_nowrap, kept[i])) {
 			case size => void;
-			case => return void;
+			case =>
+				return void;
 			};
 		};
 		match (memio::concat(&buf, ")")) {
 		case size => void;
-		case => return void;
+		case =>
+			return void;
 		};
 		return strings::dup(memio::string(&buf)!)!;
 	case =>
@@ -1304,7 +1503,8 @@ fn render_type_plain(t: *ast::_type) (str | void) = {
 	defer lsp::safe_close(&buf);
 	match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
 	case size => void;
-	case => return void;
+	case =>
+		return void;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };
@@ -1312,58 +1512,71 @@ fn render_type_plain(t: *ast::_type) (str | void) = {
 // True when `t` is an error type, either directly (`!T`) or through alias
 // resolution (`type myerr = !T`, possibly chained). `depth` guards against
 // pathological alias cycles.
-fn type_is_error(srv: *server, doc: *document,
-		t: *ast::_type, depth: int) bool = {
+fn type_is_error(
+	srv: *server,
+	doc: *document,
+	t: *ast::_type,
+	depth: int,
+) bool = {
 	if (depth >= 8) return false;
 	match (t.repr) {
 	case ast::error_type =>
 		return true;
 	case let a: ast::alias_type =>
 		const d = match (lookup_decl_by_ident(srv, doc, a)) {
-		case let d: *ast::decl => yield d;
-		case void => return false;
+		case let d: *ast::decl =>
+			yield d;
+		case void =>
+			return false;
 		};
 		const u = match (analysis::type_decl_underlying(d)) {
-		case let u: *ast::_type => yield u;
-		case void => return false;
+		case let u: *ast::_type =>
+			yield u;
+		case void =>
+			return false;
 		};
 		return type_is_error(srv, doc, u, depth + 1);
-	case => return false;
+	case =>
+		return false;
 	};
 };
 
 // Resolves an ident to its `decl` by searching the local subunit, the
 // workspace index (qualified or via imports), and the indexed stdlib.
 // Mirrors [[lookup_callee]] but returns the decl directly.
-fn lookup_decl_by_ident(srv: *server, doc: *document,
-		id: ast::ident) (*ast::decl | void) = {
+fn lookup_decl_by_ident(
+	srv: *server,
+	doc: *document,
+	id: ast::ident,
+) (*ast::decl | void) = {
 	if (len(id) == 0) return void;
 	const name = id[len(id) - 1];
 	if (len(id) >= 2) {
 		const qualifier = id[len(id) - 2];
-		match (analysis::find_in_module(&srv.workspace_index,
-				qualifier, name)) {
+		match (analysis::find_in_module(&srv.workspace_index, qualifier, name)) {
 		case let e: *analysis::workspace_entry =>
 			return decl_from_workspace_entry(srv, e, name);
 		case void => void;
 		};
 		const cache = parse_of(doc);
-		const full = analysis::full_module_for_qualifier(&cache.pr.subunit, qualifier);
+		const full =
+			analysis::full_module_for_qualifier(&cache.pr.subunit, qualifier);
 		defer free(full);
 		const mod_to_index = if (len(full) > 0) full else qualifier;
 		if (ensure_stdlib_module_indexed(srv, mod_to_index)) {
-			match (analysis::find_in_module(&srv.stdlib_index,
-					qualifier, name)) {
+			match (analysis::find_in_module(&srv.stdlib_index, qualifier, name)) {
 			case let e: *analysis::workspace_entry =>
 				return decl_from_workspace_entry(srv, e, name);
-			case void => return void;
+			case void =>
+				return void;
 			};
 		};
 		return void;
 	};
 	const cache = parse_of(doc);
 	match (find_decl_by_name(&cache.pr.subunit, name)) {
-	case let i: size => return &cache.pr.subunit.decls[i];
+	case let i: size =>
+		return &cache.pr.subunit.decls[i];
 	case void => void;
 	};
 	const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
@@ -1376,19 +1589,27 @@ fn lookup_decl_by_ident(srv: *server, doc: *document,
 	match (analysis::find_first_by_short_name(&srv.workspace_index, name)) {
 	case let e: *analysis::workspace_entry =>
 		return decl_from_workspace_entry(srv, e, name);
-	case void => return void;
+	case void =>
+		return void;
 	};
 };
 
-fn decl_from_workspace_entry(srv: *server, e: *analysis::workspace_entry,
-		name: str) (*ast::decl | void) = {
+fn decl_from_workspace_entry(
+	srv: *server,
+	e: *analysis::workspace_entry,
+	name: str,
+) (*ast::decl | void) = {
 	const fpe = match (cached_parse_or_drop_stale(srv, e.path)) {
-	case let p: *file_parse_entry => yield p;
-	case null => return void;
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
 	};
 	match (find_decl_by_name(&fpe.pr.subunit, name)) {
-	case let i: size => return &fpe.pr.subunit.decls[i];
-	case void => return void;
+	case let i: size =>
+		return &fpe.pr.subunit.decls[i];
+	case void =>
+		return void;
 	};
 };
 
@@ -1404,8 +1625,14 @@ fn case_contains(exprs: []*ast::expr, off: size) bool = {
 };
 
 // Walks each expression in a match/switch case body.
-fn walk_case_exprs(srv: *server, doc: *document, data: []u8,
-		exprs: []*ast::expr, name: str, off: size) (str | void) = {
+fn walk_case_exprs(
+	srv: *server,
+	doc: *document,
+	data: []u8,
+	exprs: []*ast::expr,
+	name: str,
+	off: size,
+) (str | void) = {
 	let hit: (str | void) = void;
 	for (let i = 0z; i < len(exprs); i += 1) {
 		const child = exprs[i];
@@ -1413,7 +1640,8 @@ fn walk_case_exprs(srv: *server, doc: *document, data: []u8,
 		match (walk_for_local(srv, doc, data, child, name, off)) {
 		case let r: str =>
 			match (hit) {
-			case let prev: str => free(prev);
+			case let prev: str =>
+				free(prev);
 			case void => void;
 			};
 			hit = r;
@@ -1428,7 +1656,8 @@ fn render_match_case_binding(mc: *ast::match_case) str = {
 	defer lsp::safe_close(&buf);
 	match (memio::concat(&buf, "(match binding) ", mc.name, ": ")) {
 	case size => void;
-	case => return strings::dup("(match binding)")!;
+	case =>
+		return strings::dup("(match binding)")!;
 	};
 	match (mc._type) {
 	case let t: *ast::_type =>
@@ -1450,7 +1679,8 @@ fn render_param_binding(p: *ast::func_param) str = {
 	defer lsp::safe_close(&buf);
 	match (memio::concat(&buf, "(parameter) ", p.name, ": ")) {
 	case size => void;
-	case => return strings::dup("(parameter)")!;
+	case =>
+		return strings::dup("(parameter)")!;
 	};
 	match (unparse::_type(&buf, &unparse::syn_nowrap, p._type)) {
 	case size => void;

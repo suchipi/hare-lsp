@@ -24,7 +24,11 @@ use strings;
 	// `text` field), enough to trip the cap even on small frames.
 	let buf: []u8 = [];
 	defer free(buf);
-	const prefix = strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{},"_pad":"`);
+	const prefix =
+		strings::toutf8(
+
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{},"_pad":"`,
+		);
 	append(buf, prefix...)!;
 	for (let i = 0z; i < 2048z; i += 1) {
 		append(buf, 'A': u8)!;
@@ -39,10 +43,12 @@ use strings;
 	const body = recv(&s);
 	defer free(body);
 	const text = strings::fromutf8(body)!;
-	assert(strings::contains(text, "too large") ||
+	assert(
+		strings::contains(text, "too large") ||
 		strings::contains(text, "PARSE_ERROR") ||
 		strings::contains(text, `"code":-32700`),
-		"oversized request must be rejected with a transport error");
+		"oversized request must be rejected with a transport error"
+	);
 };
 
 // `hare.limits.maxOpenDocuments` = 2 must reject the third didOpen
@@ -55,10 +61,13 @@ use strings;
 
 	// Initialize advertising support for `workspace/configuration` so
 	// the server pulls settings after `initialized`.
-	const init = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{"workspace":{"configuration":true}}}}`;
+	const init =
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{"workspace":{"configuration":true}}}}`;
 	send(&s, strings::toutf8(init));
 	free(wait_for_response(&s, 1.0));
-	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+	send(
+		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
+	);
 
 	// After `initialized`, the server issues workspace/configuration.
 	// Find that request and reply with the limits override.
@@ -70,16 +79,21 @@ use strings;
 		if (strings::contains(text, `"method":"workspace/configuration"`)) {
 			const id = extract_request_id(text);
 			defer free(id);
-			const reply = fmt::asprintf(
-				`{{"jsonrpc":"2.0","id":{},"result":[{{"limits":{{"maxOpenDocuments":2}}}}]}}`,
-				id)!;
+			const reply =
+				fmt::asprintf(
+
+					`{{"jsonrpc":"2.0","id":{},"result":[{{"limits":{{"maxOpenDocuments":2}}}}]}}`,
+					id,
+				)!;
 			defer free(reply);
 			send(&s, strings::toutf8(reply));
 			saw_config_request = true;
 		};
 	};
-	assert(saw_config_request,
-		"server must request workspace/configuration after initialized");
+	assert(
+		saw_config_request,
+		"server must request workspace/configuration after initialized"
+	);
 
 	// Open two documents; both should succeed.
 	open_doc(&s, "file:///a.ha", "fn a() void = void;\n");
@@ -95,13 +109,12 @@ use strings;
 		defer free(body);
 		const text = strings::fromutf8(body)!;
 		if (strings::contains(text, "refusing to open") &&
-				strings::contains(text, "file:///c.ha")) {
+		strings::contains(text, "file:///c.ha")) {
 			saw_warning = true;
 			break;
 		};
 	};
-	assert(saw_warning,
-		"third didOpen with cap=2 must produce a refusal warning");
+	assert(saw_warning, "third didOpen with cap=2 must produce a refusal warning");
 };
 
 // Spawns a session with a single extra environment variable set on the
@@ -112,12 +125,11 @@ fn spawn_session_with_env(key: str, value: str) session = {
 	const (out_r, out_w) = exec::pipe();
 
 	let cmd = match (exec::cmd("./hare-lsp")) {
-	case let c: exec::command => yield c;
+	case let c: exec::command =>
+		yield c;
 	case let e: exec::error =>
-		fmt::fatalf("e2e: cannot prepare ./hare-lsp: {}",
-			exec::strerror(e));
-	case nomem =>
-		abort("e2e: out of memory");
+		fmt::fatalf("e2e: cannot prepare ./hare-lsp: {}", exec::strerror(e));
+	case nomem => abort("e2e: out of memory");
 	};
 
 	match (exec::setenv(&cmd, key, value)) {
@@ -129,7 +141,8 @@ fn spawn_session_with_env(key: str, value: str) session = {
 	exec::addfile(&cmd, os::stdout_file, out_w)!;
 
 	const proc = match (exec::start(&cmd)) {
-	case let p: exec::process => yield p;
+	case let p: exec::process =>
+		yield p;
 	case let e: exec::error =>
 		fmt::fatalf("e2e: cannot start: {}", exec::strerror(e));
 	};
@@ -149,8 +162,10 @@ fn spawn_session_with_env(key: str, value: str) session = {
 fn extract_request_id(text: str) str = {
 	const needle = `"id":`;
 	const start = match (strings::index(text, needle)) {
-	case let i: size => yield i + len(needle);
-	case void => return strings::dup("0")!;
+	case let i: size =>
+		yield i + len(needle);
+	case void =>
+		return strings::dup("0")!;
 	};
 	const tail = strings::sub(text, start, strings::end);
 	// IDs are emitted as bare numbers; consume digits.

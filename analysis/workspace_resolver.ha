@@ -98,14 +98,16 @@ export fn workspace_lookup_for_subunit(
 	};
 	if (len(file_module) > 0) {
 		match (find_in_module(idx, file_module, name)) {
-		case let e: *workspace_entry => return e;
+		case let e: *workspace_entry =>
+			return e;
 		case void => void;
 		};
 	};
 	const imports = collect_imported_module_names(su);
 	defer free_str_slice(imports);
 	match (find_in_imports(idx, imports, name)) {
-	case let e: *workspace_entry => return e;
+	case let e: *workspace_entry =>
+		return e;
 	case void => void;
 	};
 	return find_first_by_short_name(idx, name);

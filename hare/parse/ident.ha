@@ -19,8 +19,11 @@ export fn ident_trailing(lexer: *lex::lexer) ((ast::ident, bool) | error) = {
 	let z = len(ident[0]);
 	for (true) {
 		match (try(lexer, ltok::DOUBLE_COLON)?) {
-		case void => break;
-		case => void; // Grab the next ident
+		case void =>
+			break;
+		case => void;
+		// Grab the next ident
+
 		};
 		z += 1;
 		let name = match (try(lexer, ltok::NAME)?) {

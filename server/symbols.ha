@@ -13,12 +13,19 @@ use strings;
 
 // LSP SymbolKind values used here.
 def SK_FILE: f64 = 1.0;
+
 def SK_NAMESPACE: f64 = 3.0;
+
 def SK_FUNCTION: f64 = 12.0;
+
 def SK_VARIABLE: f64 = 13.0;
+
 def SK_CONSTANT: f64 = 14.0;
+
 def SK_STRUCT: f64 = 23.0;
+
 def SK_TYPE_PARAMETER: f64 = 26.0;
+
 def SK_OBJECT: f64 = 19.0;
 
 // Handles textDocument/documentSymbol. Returns a flat list of
@@ -27,13 +34,15 @@ def SK_OBJECT: f64 = 19.0;
 // which a future revision will add).
 export fn handle_document_symbol(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_textdoc_request(r.params)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_empty_array(s, r.id);
 		return;
@@ -50,10 +59,14 @@ export fn handle_document_symbol(s: *server, r: lsp::request) void = {
 		json::set(&item, "name", sym.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_lsp(sym.kind))!;
 		// Location: file URI + full span.
-		const start_pos = analysis::byte_to_position(data, doc.buf.line_index,
-			enc, sym.span.start.off: size);
-		const end_pos = analysis::byte_to_position(data, doc.buf.line_index,
-			enc, sym.span.end.off: size);
+		const start_pos =
+			analysis::byte_to_position(
+				data, doc.buf.line_index, enc, sym.span.start.off: size,
+			);
+		const end_pos =
+			analysis::byte_to_position(
+				data, doc.buf.line_index, enc, sym.span.end.off: size,
+			);
 		let loc = json::newobject();
 		json::set(&loc, "uri", uri: json::value)!;
 		let range = encode_range_pos(start_pos, end_pos);
@@ -66,12 +79,18 @@ export fn handle_document_symbol(s: *server, r: lsp::request) void = {
 
 fn symbol_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 	switch (k) {
-	case analysis::symbol_kind::FUNCTION => return SK_FUNCTION;
-	case analysis::symbol_kind::TYPE => return SK_STRUCT;
-	case analysis::symbol_kind::CONST => return SK_CONSTANT;
-	case analysis::symbol_kind::GLOBAL => return SK_VARIABLE;
-	case analysis::symbol_kind::DEF => return SK_CONSTANT;
-	case => return SK_VARIABLE;
+	case analysis::symbol_kind::FUNCTION =>
+		return SK_FUNCTION;
+	case analysis::symbol_kind::TYPE =>
+		return SK_STRUCT;
+	case analysis::symbol_kind::CONST =>
+		return SK_CONSTANT;
+	case analysis::symbol_kind::GLOBAL =>
+		return SK_VARIABLE;
+	case analysis::symbol_kind::DEF =>
+		return SK_CONSTANT;
+	case =>
+		return SK_VARIABLE;
 	};
 };
 
@@ -81,23 +100,28 @@ fn symbol_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 // back to references for occurrence highlighting when it wants more.
 export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position_local(r.params)) {
-	case let v: (str, lsp::position) => yield v;
+	case let v: (str, lsp::position) =>
+		yield v;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_empty_array(s, r.id);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off = analysis::position_to_byte(data, doc.buf.line_index,
-		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+	const off =
+		analysis::position_to_byte(
+			data, doc.buf.line_index, position_encoding(s),
+			analysis::position { line = pos.line, character = pos.character },
+		);
 	const ident_range = match (analysis::ident_at(data, off)) {
-	case let r: (size, size) => yield r;
+	case let r: (size, size) =>
+		yield r;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
@@ -105,7 +129,8 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
 	const cache = parse_of(doc);
 	const sym = match (analysis::find_by_short_name(&cache.idx, ident_str)) {
-	case let p: *analysis::symbol => yield p;
+	case let p: *analysis::symbol =>
+		yield p;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
@@ -114,10 +139,14 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 	let arr: []json::value = [];
 	let item = json::newobject();
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(data, doc.buf.line_index,
-		enc, sym.span.start.off: size);
-	const end_pos = analysis::byte_to_position(data, doc.buf.line_index,
-		enc, sym.span.end.off: size);
+	const start_pos =
+		analysis::byte_to_position(
+			data, doc.buf.line_index, enc, sym.span.start.off: size,
+		);
+	const end_pos =
+		analysis::byte_to_position(
+			data, doc.buf.line_index, enc, sym.span.end.off: size,
+		);
 	json::put(&item, "range", encode_range_pos(start_pos, end_pos))!;
 	json::put(&item, "kind", 1: f64)!; // Text
 	append(arr, item: json::value)!;
@@ -128,13 +157,15 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 // declaration spanning multiple lines.
 export fn handle_folding_range(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_textdoc_request(r.params)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_empty_array(s, r.id);
 		return;
@@ -174,19 +205,22 @@ export fn handle_folding_range(s: *server, r: lsp::request) void = {
 // hierarchy when we pull in expression visitor support.
 export fn handle_selection_range(s: *server, r: lsp::request) void = {
 	const params_obj = match (params_object_local(r.params)) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
 	};
 	const td = match (object_field_object_local(&params_obj, "textDocument")) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
 	};
 	const uri = match (object_string_local(&td, "uri")) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
@@ -194,7 +228,8 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 	const positions = match (json::get(&params_obj, "positions")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let a: []json::value => yield a;
+		case let a: []json::value =>
+			yield a;
 		case =>
 			send_empty_array(s, r.id);
 			return;
@@ -204,7 +239,8 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_empty_array(s, r.id);
 		return;
@@ -216,14 +252,19 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 	for (let i = 0z; i < len(positions); i += 1) {
 		const pos_v = positions[i];
 		const pos = match (lsp::decode_position(pos_v)) {
-		case let p: lsp::position => yield p;
-		case lsp::bad_message => continue;
+		case let p: lsp::position =>
+			yield p;
+		case lsp::bad_message =>
+			continue;
 		};
-		const off = analysis::position_to_byte(data, doc.buf.line_index,
-			position_encoding(s),
-			analysis::position {
-				line = pos.line, character = pos.character,
-			});
+		const off =
+			analysis::position_to_byte(
+				data, doc.buf.line_index, position_encoding(s),
+				analysis::position {
+					line = pos.line,
+					character = pos.character,
+				},
+			);
 		const enc = position_encoding(s);
 		// Build the expansion chain from innermost to outermost. The
 		// LSP SelectionRange shape is recursive — each level has an
@@ -247,8 +288,7 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		// L2: containing decl (if any).
 		match (analysis::symbol_at(&cache.idx, off)) {
 		case let p: *analysis::symbol =>
-			append(levels, (p.span.start.off: size,
-				p.span.end.off: size))!;
+			append(levels, (p.span.start.off: size, p.span.end.off: size))!;
 		case void => void;
 		};
 
@@ -260,9 +300,8 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		let unique: [](size, size) = [];
 		defer free(unique);
 		for (let j = 0z; j < len(levels); j += 1) {
-			if (len(unique) > 0 &&
-				unique[len(unique) - 1].0 == levels[j].0 &&
-				unique[len(unique) - 1].1 == levels[j].1) {
+			if (len(unique) > 0 && unique[len(unique) - 1].0 == levels[j].0 &&
+			unique[len(unique) - 1].1 == levels[j].1) {
 				continue;
 			};
 			// Each outer level must strictly contain the previous one.
@@ -281,10 +320,8 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		let outer_obj: (json::value | void) = void;
 		for (let j = len(unique); j > 0; j -= 1) {
 			const rng = unique[j - 1];
-			const sp = analysis::byte_to_position(data, doc.buf.line_index,
-				enc, rng.0);
-			const ep = analysis::byte_to_position(data, doc.buf.line_index,
-				enc, rng.1);
+			const sp = analysis::byte_to_position(data, doc.buf.line_index, enc, rng.0);
+			const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, rng.1);
 			let o = json::newobject();
 			json::put(&o, "range", encode_range_pos(sp, ep))!;
 			match (outer_obj) {
@@ -320,13 +357,15 @@ fn line_range_around(data: []u8, off: size) (size, size) = {
 // hare::module::find.
 export fn handle_document_link(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_textdoc_request(r.params)) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_empty_array(s, r.id);
 		return;
@@ -337,10 +376,14 @@ export fn handle_document_link(s: *server, r: lsp::request) void = {
 	let arr: []json::value = [];
 	for (let i = 0z; i < len(cache.pr.subunit.imports); i += 1) {
 		const imp = cache.pr.subunit.imports[i];
-		const start_pos = analysis::byte_to_position(data, doc.buf.line_index,
-			enc, imp.loc.start.off: size);
-		const end_pos = analysis::byte_to_position(data, doc.buf.line_index,
-			enc, imp.loc.end.off: size);
+		const start_pos =
+			analysis::byte_to_position(
+				data, doc.buf.line_index, enc, imp.loc.start.off: size,
+			);
+		const end_pos =
+			analysis::byte_to_position(
+				data, doc.buf.line_index, enc, imp.loc.end.off: size,
+			);
 		let item = json::newobject();
 		json::put(&item, "range", encode_range_pos(start_pos, end_pos))!;
 		let parts: []str = [];
@@ -376,7 +419,8 @@ export fn handle_document_link_resolve(s: *server, r: lsp::request) void = {
 	const incoming = match (r.params) {
 	case let v: json::value =>
 		yield match (json::dup(v)) {
-		case let copy: json::value => yield copy;
+		case let copy: json::value =>
+			yield copy;
 		case nomem =>
 			send_empty_array(s, r.id);
 			return;
@@ -387,9 +431,11 @@ export fn handle_document_link_resolve(s: *server, r: lsp::request) void = {
 	};
 	defer json::finish(incoming);
 	let result = match (incoming) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
+	// Wrong shape; just send back the input.
+
 	case =>
-		// Wrong shape; just send back the input.
 		match (lsp::encode_response_result(s.out, r.id, incoming)) {
 		case size => void;
 		case => void;
@@ -400,7 +446,8 @@ export fn handle_document_link_resolve(s: *server, r: lsp::request) void = {
 	const data_obj = match (json::get(&result, "data")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
+		case let o: json::object =>
+			yield o;
 		case =>
 			send_response_obj(s, r.id, incoming);
 			return;
@@ -412,7 +459,8 @@ export fn handle_document_link_resolve(s: *server, r: lsp::request) void = {
 	const ident_arr = match (json::get(&data_obj, "ident")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let a: []json::value => yield a;
+		case let a: []json::value =>
+			yield a;
 		case =>
 			send_response_obj(s, r.id, incoming);
 			return;
@@ -437,7 +485,8 @@ export fn handle_document_link_resolve(s: *server, r: lsp::request) void = {
 	// stdlib's known location at /usr/local/src/hare/stdlib so that
 	// `use io;`-style imports resolve.
 	const target = match (resolve_module_target(s, ident)) {
-	case let t: str => yield t;
+	case let t: str =>
+		yield t;
 	case void =>
 		send_response_obj(s, r.id, incoming);
 		return;
@@ -452,8 +501,10 @@ type ast_ident_strs = []str;
 
 fn resolve_module_target(s: *server, ident: []str) (str | void) = {
 	const (dir, sset) = match (find_module(s, ident)) {
-	case let pair: (str, module::srcset) => yield pair;
-	case void => return void;
+	case let pair: (str, module::srcset) =>
+		yield pair;
+	case void =>
+		return void;
 	};
 	// `dir` is borrowed from a static buffer in module::find; do NOT
 	// free it. The srcset IS owned and must be cleaned up.
@@ -483,7 +534,10 @@ fn resolve_module_target(s: *server, ident: []str) (str | void) = {
 // (BORROWED — do not free; backed by a static buffer inside module::find
 // that is overwritten on the next call) and the module's srcset (OWNED —
 // caller must call module::finish_srcset). On miss, returns void.
-export fn find_module(s: *server, ident: []str) ((str, module::srcset) | void) = {
+export fn find_module(
+	s: *server,
+	ident: []str,
+) ((str, module::srcset) | void) = {
 	let parts: []str = [];
 	let owned_parts: []str = [];
 	defer {
@@ -516,11 +570,12 @@ export fn find_module(s: *server, ident: []str) ((str, module::srcset) | void) =
 		tags = [],
 	};
 	match (module::find(&ctx, ident: ast::ident)) {
-	case let pair: (str, module::srcset) => return pair;
-	case module::error => return void;
+	case let pair: (str, module::srcset) =>
+		return pair;
+	case module::error =>
+		return void;
 	};
 };
-
 
 fn send_response_obj(s: *server, id: lsp::id, result: json::value) void = {
 	match (lsp::encode_response_result(s.out, id, result)) {
@@ -530,51 +585,75 @@ fn send_response_obj(s: *server, id: lsp::id, result: json::value) void = {
 };
 
 // --- helpers --------------------------------------------------------
-
 fn uri_from_textdoc_request(p: (json::value | void)) (str | void) = {
 	const obj = match (params_object_local(p)) {
-	case let o: json::object => yield o;
-	case void => return void;
+	case let o: json::object =>
+		yield o;
+	case void =>
+		return void;
 	};
 	const td = match (object_field_object_local(&obj, "textDocument")) {
-	case let o: json::object => yield o;
-	case void => return void;
+	case let o: json::object =>
+		yield o;
+	case void =>
+		return void;
 	};
 	return object_string_local(&td, "uri");
 };
 
-fn parse_text_document_position_local(p: (json::value | void)) ((str, lsp::position) | void) = {
+fn parse_text_document_position_local(
+	p: (json::value | void),
+) ((str, lsp::position) | void) = {
 	const obj = match (params_object_local(p)) {
-	case let o: json::object => yield o;
-	case void => return void;
+	case let o: json::object =>
+		yield o;
+	case void =>
+		return void;
 	};
 	const td = match (object_field_object_local(&obj, "textDocument")) {
-	case let o: json::object => yield o;
-	case void => return void;
+	case let o: json::object =>
+		yield o;
+	case void =>
+		return void;
 	};
 	const uri = match (object_string_local(&td, "uri")) {
-	case let s: str => yield s;
-	case void => return void;
+	case let s: str =>
+		yield s;
+	case void =>
+		return void;
 	};
 	const pos = match (json::get(&obj, "position")) {
 	case let p: *json::value =>
 		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position => yield pos;
-		case lsp::bad_message => return void;
+		case let pos: lsp::position =>
+			yield pos;
+		case lsp::bad_message =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	return (uri, pos);
 };
 
-fn params_object_local(p: (json::value | void)) (json::object | void) =
-	lsp::params_object(p);
-fn object_field_object_local(o: *json::object, key: str) (json::object | void) =
-	lsp::json_obj(o, key);
-fn object_string_local(o: *json::object, key: str) (str | void) =
-	lsp::json_str(o, key);
+fn params_object_local(
+	p: (json::value | void),
+) (json::object | void) = lsp::params_object(p);
 
-fn encode_range_pos(start: analysis::position, end: analysis::position) json::value = {
+fn object_field_object_local(
+	o: *json::object,
+	key: str,
+) (json::object | void) = lsp::json_obj(o, key);
+
+fn object_string_local(
+	o: *json::object,
+	key: str,
+) (str | void) = lsp::json_str(o, key);
+
+fn encode_range_pos(
+	start: analysis::position,
+	end: analysis::position,
+) json::value = {
 	let r = json::newobject();
 	let s_obj = json::newobject();
 	json::put(&s_obj, "line", start.line: f64)!;

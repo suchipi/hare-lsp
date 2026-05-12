@@ -9,7 +9,12 @@ use strconv;
 use strings;
 
 // Errors returned by the LSP transport layer.
-export type transport_error = !(io::error | utf8::invalid | bad_header | content_too_large);
+export type transport_error = !(
+	io::error |
+	utf8::invalid |
+	bad_header |
+	content_too_large
+);
 
 // The peer sent a malformed Content-Length header or framing block.
 export type bad_header = !str;
@@ -46,7 +51,10 @@ export fn new_reader(src: *bufio::scanner) reader = reader {
 };
 
 // Like [[new_reader]] but with a custom maximum body size.
-export fn new_reader_with_limit(src: *bufio::scanner, max_body: size) reader = reader {
+export fn new_reader_with_limit(
+	src: *bufio::scanner,
+	max_body: size,
+) reader = reader {
 	src = src,
 	max_body = max_body,
 	body_buf = [],
@@ -125,6 +133,7 @@ export fn read(r: *reader) ([]u8 | io::EOF | transport_error) = {
 			};
 		};
 		// Other headers (Content-Type, etc.) are accepted and ignored.
+
 	};
 
 	const n = match (length) {
@@ -182,7 +191,7 @@ fn header_eq(input: str, lower: str) bool = {
 	for (let i = 0z; i < len(a); i += 1) {
 		let ca = a[i];
 		if (ca >= 'A': u8 && ca <= 'Z': u8) {
-			ca += ('a': u8 - 'A': u8);
+			ca += 'a': u8 - 'A': u8;
 		};
 		if (ca != b[i]) return false;
 	};

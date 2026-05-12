@@ -72,8 +72,9 @@ export fn position_to_byte(
 	if (line >= len(line_index)) return len(text);
 	const line_start = line_index[line];
 	const line_end = line_content_end(text, line_index, line);
-	return units_to_byte(text[line_start..line_end], enc, pos.character: size)
-		+ line_start;
+	return units_to_byte(
+		text[line_start..line_end], enc, pos.character: size,
+	) + line_start;
 };
 
 // Returns the byte offset where the content of `line` ends, excluding
@@ -86,7 +87,7 @@ fn line_content_end(text: []u8, line_index: []size, line: size) size = {
 		yield len(text);
 	};
 	if (end > 0 && end <= len(text) && end - 1 < len(text) &&
-		text[end - 1] == '\r': u8) {
+	text[end - 1] == '\r': u8) {
 		end -= 1;
 	};
 	return end;
@@ -141,7 +142,8 @@ fn count_runes(bytes: []u8) size = {
 	let i = 0z;
 	for (i < len(bytes)) {
 		const sz = match (utf8::utf8sz(bytes[i])) {
-		case let s: size => yield s;
+		case let s: size =>
+			yield s;
 		case utf8::invalid =>
 			i += 1;
 			n += 1;
@@ -158,7 +160,8 @@ fn runes_to_byte(bytes: []u8, units: size) size = {
 	let i = 0z;
 	for (i < len(bytes) && n < units) {
 		const sz = match (utf8::utf8sz(bytes[i])) {
-		case let s: size => yield s;
+		case let s: size =>
+			yield s;
 		case utf8::invalid =>
 			i += 1;
 			n += 1;

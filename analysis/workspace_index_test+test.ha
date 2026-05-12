@@ -10,7 +10,8 @@ use strings;
 	let idx = new_workspace_index();
 	defer finish_workspace_index(&idx);
 
-	const text = strings::toutf8("export fn alpha() void = void;\nfn beta() void = void;\n");
+	const text =
+		strings::toutf8("export fn alpha() void = void;\nfn beta() void = void;\n");
 	index_file(&idx, "/repo/a.ha", text);
 	assert(len(idx.entries) == 2);
 	assert(idx.entries[0].path == "/repo/a.ha");
@@ -26,7 +27,10 @@ use strings;
 	index_file(&idx, "/repo/a.ha", strings::toutf8("fn one() void = void;\n"));
 	assert(len(idx.entries) == 1);
 
-	index_file(&idx, "/repo/a.ha", strings::toutf8("fn two() void = void;\nfn three() void = void;\n"));
+	index_file(
+		&idx, "/repo/a.ha",
+		strings::toutf8("fn two() void = void;\nfn three() void = void;\n"),
+	);
 	assert(len(idx.entries) == 2);
 	assert(idx.entries[0].short_name == "two");
 };
@@ -62,15 +66,17 @@ use strings;
 	const sub = ".tmp/hare-lsp-collect-ha-files-test/sub";
 	match (os::mkdirs(sub, 0o755: fs::mode)) {
 	case void => void;
-	case fs::error => return;
+	case fs::error =>
+		return;
 	};
-	defer match (os::rmdirall(root)) { case => void; };
-	write_tmp(".tmp/hare-lsp-collect-ha-files-test/a.ha",
-		"fn x() void = void;\n");
-	write_tmp(".tmp/hare-lsp-collect-ha-files-test/sub/b.ha",
-		"fn y() void = void;\n");
-	write_tmp(".tmp/hare-lsp-collect-ha-files-test/notes.txt",
-		"ignore me");
+	defer match (os::rmdirall(root)) {
+	case => void;
+	};
+	write_tmp(".tmp/hare-lsp-collect-ha-files-test/a.ha", "fn x() void = void;\n");
+	write_tmp(
+		".tmp/hare-lsp-collect-ha-files-test/sub/b.ha", "fn y() void = void;\n",
+	);
+	write_tmp(".tmp/hare-lsp-collect-ha-files-test/notes.txt", "ignore me");
 
 	const paths = collect_ha_files(root);
 	defer free_path_slice(paths);
@@ -89,17 +95,24 @@ use strings;
 
 fn write_tmp(path: str, body: str) void = {
 	const f = match (os::create(path, 0o644: fs::mode)) {
-	case let f: io::file => yield f;
-	case fs::error => return;
+	case let f: io::file =>
+		yield f;
+	case fs::error =>
+		return;
 	};
-	defer match (io::close(f)) { case => void; };
+	defer match (io::close(f)) {
+	case => void;
+	};
 	const _ = io::writeall(f, strings::toutf8(body));
 };
 
 @test fn fuzzy_search_substring_match() void = {
 	let idx = new_workspace_index();
 	defer finish_workspace_index(&idx);
-	index_file(&idx, "/a.ha", strings::toutf8("fn parse_thing() void = void;\nfn other() void = void;\n"));
+	index_file(
+		&idx, "/a.ha",
+		strings::toutf8("fn parse_thing() void = void;\nfn other() void = void;\n"),
+	);
 	const m = fuzzy_search(&idx, "PARSE");
 	defer free(m);
 	assert(len(m) == 1);

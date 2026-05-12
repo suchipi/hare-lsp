@@ -86,12 +86,10 @@ export fn build_subunit_doc(
 		const imp_end = su.imports[i].loc.end.off: size;
 		const _ = push_comments_before(&items, c, imp_off);
 		append(items, build_import_doc(&su.imports[i]))!;
-		const next_imp_off = if (i + 1 <
-			len(su.imports)) su.imports[i + 1].loc.start.off: size
-			else if (len(su.decls) > 0) su.decls[0].loc.start.off: size
-			else data_len;
-		flush_trailing_comments_to_eol(&items, c, next_imp_off,
-			imp_end, data);
+		const next_imp_off = if (i + 1 < len(su.imports))
+			su.imports[i + 1].loc.start.off: size
+		else if (len(su.decls) > 0) su.decls[0].loc.start.off: size else data_len;
+		flush_trailing_comments_to_eol(&items, c, next_imp_off, imp_end, data);
 		append(items, hardline())!;
 		if (i + 1 < len(su.imports)) {
 			const next_off = su.imports[i + 1].loc.start.off: size;
@@ -117,19 +115,18 @@ export fn build_subunit_doc(
 		// by the next decl's leading flush and emitted with no
 		// break (since trailing-comment doc nodes intentionally
 		// don't emit one), gluing it onto the next decl.
-		const next_decl_off = if (i + 1 <
-			len(su.decls)) su.decls[i + 1].loc.start.off: size
-			else data_len;
+		const next_decl_off = if (i + 1 < len(su.decls))
+			su.decls[i + 1].loc.start.off: size
+		else
+			data_len;
 		// `decl.loc.end.off` includes any trailing-line comment
 		// (the lexer's `mkloc` peeks past comments to the next
 		// real token). Use the source-content end derived by
 		// trimming whitespace backward from `next_decl_off`
 		// instead, so the line check inside the flush picks up
 		// the actual closing `;` line.
-		const decl_src_end =
-			source_content_end(data, decl_off, next_decl_off);
-		flush_trailing_comments_to_eol(&items, c, next_decl_off,
-			decl_src_end, data);
+		const decl_src_end = source_content_end(data, decl_off, next_decl_off);
+		flush_trailing_comments_to_eol(&items, c, next_decl_off, decl_src_end, data);
 		append(items, hardline())!;
 		if (i + 1 < len(su.decls)) {
 			// Blank line between top-level decls — always emit
@@ -439,11 +436,13 @@ fn build_compound_body(
 		// line. This must happen BEFORE the next iteration's
 		// hardline; otherwise a trailing `// note` would land on
 		// its own line below the code instead of inline with it.
-		const next_stmt_off = if (i + 1 <
-			len(cmp.exprs)) cmp.exprs[i + 1].loc.start.off: size
-			else body_end;
-		flush_trailing_comments_to_eol(&inner, bc.c, next_stmt_off,
-			stmt_end, bc.data);
+		const next_stmt_off = if (i + 1 < len(cmp.exprs))
+			cmp.exprs[i + 1].loc.start.off: size
+		else
+			body_end;
+		flush_trailing_comments_to_eol(
+			&inner, bc.c, next_stmt_off, stmt_end, bc.data,
+		);
 		if (i + 1 < len(cmp.exprs)) {
 			const next_off = cmp.exprs[i + 1].loc.start.off: size;
 			if (blank_between(bc.bl, stmt_end, next_off)) {
@@ -1567,8 +1566,10 @@ fn build_match_expr(
 		// `case => abort(); // unreachable`) before moving on.
 		// Boundary is the next case's start, or - for the last
 		// case - the byte before the closing `}`.
-		const boundary = if (i + 1 <
-		len(m.cases)) case_boundary_match(&m.cases[i + 1]) else loc.end.off: size;
+		const boundary = if (i + 1 < len(m.cases))
+			case_boundary_match(&m.cases[i + 1])
+		else
+			loc.end.off: size;
 		const _ = push_comments_before(&inner, bc.c, boundary);
 	};
 
@@ -1636,8 +1637,10 @@ fn build_switch_expr(
 		// See the matching comment in `build_match_expr`. Flush
 		// trailing case-body comments (e.g. `case => abort(); //
 		// unreachable`) at each case boundary or before `}`.
-		const boundary = if (i + 1 <
-		len(s.cases)) case_boundary_switch(&s.cases[i + 1]) else loc.end.off: size;
+		const boundary = if (i + 1 < len(s.cases))
+			case_boundary_switch(&s.cases[i + 1])
+		else
+			loc.end.off: size;
 		const _ = push_comments_before(&inner, bc.c, boundary);
 	};
 
@@ -1684,18 +1687,16 @@ fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
 		// `// note` in the cursor and it would be re-emitted at
 		// the next match boundary - past the closing `}`,
 		// detached from the code it documents.
-		const _ = push_comments_before(
-			&inner,
-			bc.c,
-			exprs[i].loc.start.off: size,
-		);
+		const _ = push_comments_before(&inner, bc.c, exprs[i].loc.start.off: size);
 		append(inner, build_expr_doc(exprs[i], bc))!;
 		append(inner, text(";"))!;
-		const next_off = if (i + 1 <
-			len(exprs)) exprs[i + 1].loc.start.off: size
-			else ~0z;
-		flush_trailing_comments_to_eol(&inner, bc.c, next_off,
-			exprs[i].loc.end.off: size, bc.data);
+		const next_off = if (i + 1 < len(exprs))
+			exprs[i + 1].loc.start.off: size
+		else
+			~0z;
+		flush_trailing_comments_to_eol(
+			&inner, bc.c, next_off, exprs[i].loc.end.off: size, bc.data,
+		);
 	};
 	return nest(1, concat(inner));
 };

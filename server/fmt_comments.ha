@@ -82,8 +82,7 @@ export fn collect_comments(data: []u8) []comment_info = {
 			const start = i;
 			let end = i + 2;
 			for (end < len(data) && data[end] != '\n': u8; end += 1) void;
-			const text = strings::dup(
-				strings::fromutf8(data[start + 2..end])!)!;
+			const text = strings::dup(strings::fromutf8(data[start + 2..end])!)!;
 			// Walk back from `start` to the previous `\n`; if
 			// any byte in between is non-whitespace, this is a
 			// trailing comment (shares its line with code).
@@ -125,7 +124,7 @@ export fn finish_comments(cs: []comment_info) void = {
 export fn pop_before(c: *comment_cursor, boundary: size) []comment_info = {
 	const start = c.pos;
 	for (c.pos < len(c.comments) &&
-			c.comments[c.pos].start_off < boundary; c.pos += 1) void;
+	c.comments[c.pos].start_off < boundary; c.pos += 1) void;
 	return c.comments[start..c.pos];
 };
 
@@ -187,8 +186,7 @@ export fn collect_blank_lines(data: []u8) blank_lines = {
 				// Skip rest of line; the `\n` itself stays
 				// because we want to detect a following blank.
 				let end = i + 2;
-				for (end < len(data) && data[end] != '\n': u8;
-						end += 1) void;
+				for (end < len(data) && data[end] != '\n': u8; end += 1) void;
 				i = end - 1;
 			};
 		case '\n': u8 =>

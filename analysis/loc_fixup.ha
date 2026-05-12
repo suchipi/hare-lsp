@@ -144,7 +144,11 @@ fn fixup_type(t: *ast::_type, r2b: []size, data_len: size) void = {
 	};
 };
 
-fn fixup_struct_member(m: *ast::struct_member, r2b: []size, data_len: size) void = {
+fn fixup_struct_member(
+	m: *ast::struct_member,
+	r2b: []size,
+	data_len: size,
+) void = {
 	match (m.member) {
 	case let f: ast::struct_field =>
 		fixup_type(f._type, r2b, data_len);
@@ -368,7 +372,11 @@ fn fixup_literal(l: ast::literal_expr, r2b: []size, data_len: size) void = {
 	};
 };
 
-fn fixup_struct_literal(s: *ast::struct_literal, r2b: []size, data_len: size) void = {
+fn fixup_struct_literal(
+	s: *ast::struct_literal,
+	r2b: []size,
+	data_len: size,
+) void = {
 	for (let i = 0z; i < len(s.fields); i += 1) {
 		match (s.fields[i]) {
 		case let v: ast::struct_value =>
@@ -414,11 +422,9 @@ fn build_rune_to_byte_table(data: []u8) []size = {
 	for (i < len(data)) {
 		append(out, i)!;
 		const b = data[i];
-		const width: size = if (b < 0x80) 1z
-			else if (b < 0xc0) 1z
-			else if (b < 0xe0) 2z
-			else if (b < 0xf0) 3z
-			else 4z;
+		const width: size = if (b < 0x80)
+			1z
+		else if (b < 0xc0) 1z else if (b < 0xe0) 2z else if (b < 0xf0) 3z else 4z;
 		i += width;
 		if (i > len(data)) i = len(data);
 	};

@@ -34,8 +34,10 @@ fn collect_ha_files(root: str) []str = {
 };
 
 fn walk_dir(root: str, rel: str, out: *[]str) void = {
-	const path = if (rel ==
-	"") strings::dup(root)! else strings::concat(root, "/", rel)!;
+	const path = if (rel == "")
+		strings::dup(root)!
+	else
+		strings::concat(root, "/", rel)!;
 	defer free(path);
 	const it = match (fs::iter(os::cwd, path)) {
 	case let p: *fs::iterator =>
@@ -60,8 +62,10 @@ fn walk_dir(root: str, rel: str, out: *[]str) void = {
 		if (strings::hasprefix(ent.name, ".")) continue;
 		if (rel == "" && ent.name == "editors") continue;
 
-		const child_rel = if (rel ==
-		"") strings::dup(ent.name)! else strings::concat(rel, "/", ent.name)!;
+		const child_rel = if (rel == "")
+			strings::dup(ent.name)!
+		else
+			strings::concat(rel, "/", ent.name)!;
 		if (fs::isdir(ent.ftype)) {
 			walk_dir(root, child_rel, out);
 			free(child_rel);
@@ -251,10 +255,7 @@ fn reparse_error(formatted: str) (void | str) = {
 			const overshoot = fmax - src_max;
 			const msg =
 				fmt::asprintf(
-					"{} (max line {}, source max {}, overshoot {})",
-					files[i],
-					fmax,
-					src_max,
+					"{} (max line {}, source max {}, overshoot {})", files[i], fmax, src_max,
 					overshoot,
 				)!;
 			append(line_length_failures, msg)!;

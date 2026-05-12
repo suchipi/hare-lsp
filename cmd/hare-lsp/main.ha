@@ -31,8 +31,7 @@ export fn main() void = {
 			os::exit(0);
 		};
 		fmt::fprintfln(os::stderr, "unknown argument: {}", arg)!;
-		fmt::fprintln(os::stderr,
-			"run `hare-lsp --help` for usage")!;
+		fmt::fprintln(os::stderr, "run `hare-lsp --help` for usage")!;
 		os::exit(2);
 	};
 
@@ -53,40 +52,54 @@ export fn main() void = {
 	const log_dir = match (os::getenv("HARE_LSP_LOG_DIR")) {
 	case let s: str =>
 		yield if (len(s) == 0) "" else s;
-	case void => yield "";
+	case void =>
+		yield "";
 	};
 	const in_log = open_log_in_dir(log_dir, "hare-lsp-in.log");
 	const out_log = open_log_in_dir(log_dir, "hare-lsp-out.log");
 	const err_log = open_log_in_dir(log_dir, "hare-lsp-err.log");
 	defer match (in_log) {
-	case let f: io::file => io::close(f)!;
+	case let f: io::file =>
+		io::close(f)!;
 	case void => void;
 	};
 	defer match (out_log) {
-	case let f: io::file => io::close(f)!;
+	case let f: io::file =>
+		io::close(f)!;
 	case void => void;
 	};
 	defer match (err_log) {
-	case let f: io::file => io::close(f)!;
+	case let f: io::file =>
+		io::close(f)!;
 	case void => void;
 	};
 
 	let in_tee = match (in_log) {
-	case let f: io::file => yield io::tee(os::stdin, f);
-	case void => yield io::tee(os::stdin, io::empty);
+	case let f: io::file =>
+		yield io::tee(os::stdin, f);
+	case void =>
+		yield io::tee(os::stdin, io::empty);
 	};
 	let out_tee = match (out_log) {
-	case let f: io::file => yield io::tee(os::stdout_file, f);
-	case void => yield io::tee(os::stdout_file, io::empty);
+	case let f: io::file =>
+		yield io::tee(os::stdout_file, f);
+	case void =>
+		yield io::tee(os::stdout_file, io::empty);
 	};
 	let err_tee = match (err_log) {
-	case let f: io::file => yield io::tee(os::stderr, f);
-	case void => yield io::tee(os::stderr, io::empty);
+	case let f: io::file =>
+		yield io::tee(os::stderr, f);
+	case void =>
+		yield io::tee(os::stderr, io::empty);
 	};
 	const in_handle: io::handle = if (in_log is io::file)
-		&in_tee: io::handle else os::stdin;
+		&in_tee: io::handle
+	else
+		os::stdin;
 	const out_handle: io::handle = if (out_log is io::file)
-		&out_tee: io::handle else os::stdout_file;
+		&out_tee: io::handle
+	else
+		os::stdout_file;
 	if (err_log is io::file) {
 		// Replace the process-wide stderr so structured log lines
 		// written by `server::slog_*` (and any direct os::stderr
@@ -129,16 +142,23 @@ fn print_usage() void = {
 	fmt::println("With no arguments, runs the LSP server over stdio.")!;
 	fmt::println()!;
 	fmt::println("Options:")!;
-	fmt::println("  --doctor      Check that hare, hare-json, and "
-		"HAREPATH look healthy.")!;
+	fmt::println(
+		"  --doctor      Check that hare, hare-json, and "
+		"HAREPATH look healthy.",
+	)!;
 	fmt::println("  --version     Print the server version and exit.")!;
 	fmt::println("  --help        Show this message and exit.")!;
 	fmt::println()!;
 	fmt::println("Environment:")!;
-	fmt::println("  HARE_LSP_LOG_DIR     Absolute directory to tee "
-		"wire-protocol logs into.")!;
-	fmt::println("  HARE_LSP_LOG_LEVEL   debug|info|warn|error "
-		"(default: info)")!;
+	fmt::println(
+
+		"  HARE_LSP_LOG_DIR     Absolute directory to tee "
+		"wire-protocol logs into.",
+	)!;
+	fmt::println(
+		"  HARE_LSP_LOG_LEVEL   debug|info|warn|error "
+		"(default: info)",
+	)!;
 };
 
 // Reads HARE_LSP_MAX_BODY_BYTES if set. Returns void when unset or
@@ -148,11 +168,14 @@ fn read_max_body_env() (size | void) = {
 	case let s: str =>
 		if (len(s) == 0) return void;
 		yield s;
-	case void => return void;
+	case void =>
+		return void;
 	};
 	match (strconv::stoz(raw)) {
-	case let n: size => return n;
-	case => return void;
+	case let n: size =>
+		return n;
+	case =>
+		return void;
 	};
 };
 
@@ -164,9 +187,7 @@ fn open_log_in_dir(dir: str, name: str) (io::file | void) = {
 	if (len(dir) == 0) return;
 	const path = strings::concat(dir, "/", name)!;
 	defer free(path);
-	match (os::create(path,
-			0o644: fs::mode,
-			fs::flag::WRONLY | fs::flag::TRUNC)) {
+	match (os::create(path, 0o644: fs::mode, fs::flag::WRONLY | fs::flag::TRUNC)) {
 	case let f: io::file =>
 		return f;
 	case fs::error =>

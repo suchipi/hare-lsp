@@ -9,7 +9,9 @@ use lsp;
 use memio;
 use strings;
 
-fn fw_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn fw_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -17,7 +19,12 @@ fn fw_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = 
 	return (s, scan, in_buf, out);
 };
 
-fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn fw_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -42,13 +49,17 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 	let (s, scan, in_buf, out) = fw_test_server();
 	defer fw_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///a.ha","languageId":"hare","version":1,"text":"export fn x() void = void;\n"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///a.ha","languageId":"hare","version":1,"text":"export fn x() void = void;\n"}}`;
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(&s, n);
 
 	const rn = `{"files":[{"oldUri":"file:///a.ha","newUri":"file:///b.ha"}]}`;
@@ -57,7 +68,10 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 		method = strings::dup("workspace/didRenameFiles")!,
 		params = rpv,
 	};
-	defer { free(r.method); json::finish(rpv); };
+	defer {
+		free(r.method);
+		json::finish(rpv);
+	};
 	handle_did_rename_files(&s, r);
 
 	assert(!has_document(&s, "file:///a.ha"));
@@ -68,13 +82,17 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 	let (s, scan, in_buf, out) = fw_test_server();
 	defer fw_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///gone.ha","languageId":"hare","version":1,"text":""}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///gone.ha","languageId":"hare","version":1,"text":""}}`;
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(&s, n);
 	assert(has_document(&s, "file:///gone.ha"));
 
@@ -84,7 +102,10 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 		method = strings::dup("workspace/didDeleteFiles")!,
 		params = dpv,
 	};
-	defer { free(r.method); json::finish(dpv); };
+	defer {
+		free(r.method);
+		json::finish(dpv);
+	};
 	handle_did_delete_files(&s, r);
 	assert(!has_document(&s, "file:///gone.ha"));
 };
@@ -100,10 +121,13 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 	let (s, scan, in_buf, out) = fw_test_server();
 	defer fw_test_cleanup(&s, scan, in_buf, out);
 
-	analysis::index_file(&s.workspace_index, "/repo/refs_target.ha",
-		strings::toutf8("export fn refs_target() void = void;\n"));
-	assert(len(analysis::lookup_by_short_name(
-		&s.workspace_index, "refs_target")) == 1);
+	analysis::index_file(
+		&s.workspace_index, "/repo/refs_target.ha",
+		strings::toutf8("export fn refs_target() void = void;\n"),
+	);
+	assert(
+		len(analysis::lookup_by_short_name(&s.workspace_index, "refs_target")) == 1
+	);
 
 	const dl = `{"files":[{"uri":"file:///repo/refs_target.ha"}]}`;
 	let dpv = json::loadstr(dl)!;
@@ -111,15 +135,21 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 		method = strings::dup("workspace/didDeleteFiles")!,
 		params = dpv,
 	};
-	defer { free(r.method); json::finish(dpv); };
+	defer {
+		free(r.method);
+		json::finish(dpv);
+	};
 	handle_did_delete_files(&s, r);
 
-	assert(len(analysis::lookup_by_short_name(
-		&s.workspace_index, "refs_target")) == 0,
-		"didDeleteFiles must drop the workspace_index entries");
+	assert(
+		len(analysis::lookup_by_short_name(&s.workspace_index, "refs_target")) == 0,
+		"didDeleteFiles must drop the workspace_index entries"
+	);
 	for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
-		assert(s.workspace_index.indexed_files[i] != "/repo/refs_target.ha",
-			"didDeleteFiles must drop the indexed_files path");
+		assert(
+			s.workspace_index.indexed_files[i] != "/repo/refs_target.ha",
+			"didDeleteFiles must drop the indexed_files path"
+		);
 	};
 };
 
@@ -131,8 +161,10 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 	let (s, scan, in_buf, out) = fw_test_server();
 	defer fw_test_cleanup(&s, scan, in_buf, out);
 
-	analysis::index_file(&s.workspace_index, "/repo/pkg/a.ha",
-		strings::toutf8("export fn trail_a() void = void;\n"));
+	analysis::index_file(
+		&s.workspace_index, "/repo/pkg/a.ha",
+		strings::toutf8("export fn trail_a() void = void;\n"),
+	);
 
 	const dl = `{"files":[{"uri":"file:///repo/pkg/"}]}`;
 	let dpv = json::loadstr(dl)!;
@@ -140,12 +172,16 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 		method = strings::dup("workspace/didDeleteFiles")!,
 		params = dpv,
 	};
-	defer { free(r.method); json::finish(dpv); };
+	defer {
+		free(r.method);
+		json::finish(dpv);
+	};
 	handle_did_delete_files(&s, r);
 
-	assert(len(analysis::lookup_by_short_name(
-		&s.workspace_index, "trail_a")) == 0,
-		"trailing-slash directory URI must still drop entries under it");
+	assert(
+		len(analysis::lookup_by_short_name(&s.workspace_index, "trail_a")) == 0,
+		"trailing-slash directory URI must still drop entries under it"
+	);
 };
 
 // Regression: clients may fold a directory delete into a single
@@ -155,12 +191,18 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 	let (s, scan, in_buf, out) = fw_test_server();
 	defer fw_test_cleanup(&s, scan, in_buf, out);
 
-	analysis::index_file(&s.workspace_index, "/repo/pkg/a.ha",
-		strings::toutf8("export fn pkg_a() void = void;\n"));
-	analysis::index_file(&s.workspace_index, "/repo/pkg/b.ha",
-		strings::toutf8("export fn pkg_b() void = void;\n"));
-	analysis::index_file(&s.workspace_index, "/repo/other.ha",
-		strings::toutf8("export fn other() void = void;\n"));
+	analysis::index_file(
+		&s.workspace_index, "/repo/pkg/a.ha",
+		strings::toutf8("export fn pkg_a() void = void;\n"),
+	);
+	analysis::index_file(
+		&s.workspace_index, "/repo/pkg/b.ha",
+		strings::toutf8("export fn pkg_b() void = void;\n"),
+	);
+	analysis::index_file(
+		&s.workspace_index, "/repo/other.ha",
+		strings::toutf8("export fn other() void = void;\n"),
+	);
 
 	const dl = `{"files":[{"uri":"file:///repo/pkg"}]}`;
 	let dpv = json::loadstr(dl)!;
@@ -168,16 +210,16 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 		method = strings::dup("workspace/didDeleteFiles")!,
 		params = dpv,
 	};
-	defer { free(r.method); json::finish(dpv); };
+	defer {
+		free(r.method);
+		json::finish(dpv);
+	};
 	handle_did_delete_files(&s, r);
 
-	assert(len(analysis::lookup_by_short_name(
-		&s.workspace_index, "pkg_a")) == 0);
-	assert(len(analysis::lookup_by_short_name(
-		&s.workspace_index, "pkg_b")) == 0);
+	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "pkg_a")) == 0);
+	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "pkg_b")) == 0);
 	// Sibling file outside the deleted dir must survive.
-	assert(len(analysis::lookup_by_short_name(
-		&s.workspace_index, "other")) == 1);
+	assert(len(analysis::lookup_by_short_name(&s.workspace_index, "other")) == 1);
 };
 
 // Regression: the file watcher's glob includes `**/*.s`, so the LSP
@@ -212,7 +254,10 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 		method = strings::dup("workspace/didChangeWatchedFiles")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_change_watched_files(&s, n);
 
 	// At least one $/logTrace notification should have been emitted.

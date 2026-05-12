@@ -40,7 +40,8 @@ export fn type_decl_underlying(d: *ast::decl) (*ast::_type | void) = {
 	match (d.decl) {
 	case let t: ast::decl_type =>
 		return t._type;
-	case => return void;
+	case =>
+		return void;
 	};
 };
 
@@ -78,7 +79,11 @@ fn walk_type(t: *ast::_type, out: *[]ast::ident, depth: u32) void = {
 	};
 };
 
-fn walk_struct_members(membs: []ast::struct_member, out: *[]ast::ident, depth: u32) void = {
+fn walk_struct_members(
+	membs: []ast::struct_member,
+	out: *[]ast::ident,
+	depth: u32,
+) void = {
 	if (depth >= MAX_WALK_DEPTH) return;
 	for (let i = 0z; i < len(membs); i += 1) {
 		match (membs[i].member) {

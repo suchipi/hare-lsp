@@ -19,7 +19,6 @@
 // double-unlex abort when fed a truncated mid-token buffer, which is
 // exactly the situation features like signature-help (cursor between
 // tokens) hand it.
-
 // Reasons we might be at a byte that's NOT part of an identifier in
 // the source. token_skip_noncode returns the byte index immediately
 // after the skipped region, or `i` itself when nothing was skipped.
@@ -82,6 +81,7 @@ export fn token_skip_noncode(data: []u8, i: size, limit: size) size = {
 			if (data[j] == '`': u8) return j + 1;
 		};
 		return limit;
-	case => return i;
+	case =>
+		return i;
 	};
 };

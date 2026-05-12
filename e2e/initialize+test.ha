@@ -15,7 +15,8 @@ use time;
 // path. Uses a string id ("1") rather than a number to confirm both flavors
 // of JSON-RPC ids are accepted (vscode-languageclient uses numbers; some
 // other clients use strings).
-def MINIMAL_INITIALIZE: str = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`;
+def MINIMAL_INITIALIZE: str =
+	`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`;
 
 @test fn e2e_initialize_returns_response() void = {
 	let s = spawn_session();
@@ -32,8 +33,7 @@ def MINIMAL_INITIALIZE: str = `{"jsonrpc":"2.0","id":1,"method":"initialize","pa
 		yield v;
 	case json::error =>
 		fmt::fatalf("e2e: response is not valid JSON: {}", text);
-	case nomem =>
-		abort("e2e: nomem parsing response");
+	case nomem => abort("e2e: nomem parsing response");
 	};
 	defer json::finish(v);
 
@@ -41,8 +41,10 @@ def MINIMAL_INITIALIZE: str = `{"jsonrpc":"2.0","id":1,"method":"initialize","pa
 	const id = field(&obj, "id");
 	assert(id as f64 == 1.0, "response id did not match request id");
 	const result = field(&obj, "result") as json::object;
-	assert(has_field(&result, "capabilities"),
-		"initialize result must include capabilities");
+	assert(
+		has_field(&result, "capabilities"),
+		"initialize result must include capabilities"
+	);
 };
 
 @test fn e2e_initialize_responds_promptly() void = {
@@ -61,8 +63,10 @@ def MINIMAL_INITIALIZE: str = `{"jsonrpc":"2.0","id":1,"method":"initialize","pa
 
 	// Hardware-pessimistic: if this takes more than a second something is
 	// fundamentally wrong (buffer flush, schedling, missing flush, etc.).
-	assert(elapsed < 1 * time::SECOND,
-		"initialize response took unreasonably long");
+	assert(
+		elapsed < 1 * time::SECOND,
+		"initialize response took unreasonably long"
+	);
 };
 
 @test fn e2e_initialize_shutdown_exits_cleanly() void = {
@@ -75,7 +79,9 @@ def MINIMAL_INITIALIZE: str = `{"jsonrpc":"2.0","id":1,"method":"initialize","pa
 	// initialized notification — no response, but the server emits
 	// workspace/configuration, register-capability, etc. We just need
 	// to keep ignoring those until shutdown responds.
-	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+	send(
+		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
+	);
 
 	// shutdown request — server must reply with id=2 (result is null
 	// per LSP).
@@ -85,6 +91,7 @@ def MINIMAL_INITIALIZE: str = `{"jsonrpc":"2.0","id":1,"method":"initialize","pa
 	// exit notification — server should terminate.
 	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"exit"}`));
 	// finish_session will wait and reap.
+
 };
 
 // Reads frames until one with the given response id arrives, ignoring
@@ -136,4 +143,3 @@ fn has_field(obj: *json::object, key: str) bool = {
 		return false;
 	};
 };
-

@@ -96,7 +96,8 @@ export fn start_index_job(
 	};
 
 	const token = match (progress_create(s)) {
-	case let pair: (progress_token, i64) => yield pair.0;
+	case let pair: (progress_token, i64) =>
+		yield pair.0;
 	case void =>
 		// Client doesn't support progress or transport failed —
 		// just drain everything inline as a fallback.
@@ -105,16 +106,17 @@ export fn start_index_job(
 		return;
 	};
 
-	let job = alloc(workspace_index_job {
-		paths = paths,
-		cursor = 0,
-		total = len(paths),
-		token = token,
-		target = target,
-		title = title,
-		done_msg_prefix = done_msg_prefix,
-		begin_sent = false,
-	})!;
+	let job =
+		alloc(workspace_index_job {
+			paths = paths,
+			cursor = 0,
+			total = len(paths),
+			token = token,
+			target = target,
+			title = title,
+			done_msg_prefix = done_msg_prefix,
+			begin_sent = false,
+		})!;
 	append(s.pending_index_jobs, job)!;
 	drain_index_job_inline(s, INDEX_INLINE_BATCHES);
 };
@@ -155,17 +157,12 @@ fn drain_one_batch(s: *server, job: *workspace_index_job) void = {
 	else
 		job.cursor + INDEX_BATCH_SIZE;
 	for (let i = job.cursor; i < limit; i += 1) {
-		const _ = analysis::read_and_index_file(job.target,
-			job.paths[i]);
+		const _ = analysis::read_and_index_file(job.target, job.paths[i]);
 	};
 	job.cursor = limit;
 	if (job.cursor < len(job.paths)) {
-		const pct = if (job.total > 0)
-			((job.cursor * 100) / job.total): int
-		else
-			-1;
-		const msg = fmt::asprintf("{} / {} files", job.cursor,
-			job.total)!;
+		const pct = if (job.total > 0) (job.cursor * 100 / job.total): int else -1;
+		const msg = fmt::asprintf("{} / {} files", job.cursor, job.total)!;
 		defer free(msg);
 		progress_report(s, job.token, msg, pct);
 	};
@@ -174,8 +171,7 @@ fn drain_one_batch(s: *server, job: *workspace_index_job) void = {
 fn finish_head_job(s: *server) void = {
 	if (len(s.pending_index_jobs) == 0) return;
 	const job = s.pending_index_jobs[0];
-	const msg = fmt::asprintf("{} {} file(s)", job.done_msg_prefix,
-		job.cursor)!;
+	const msg = fmt::asprintf("{} {} file(s)", job.done_msg_prefix, job.cursor)!;
 	defer free(msg);
 	if (job.begin_sent) {
 		progress_end(s, job.token, msg);
@@ -197,8 +193,7 @@ fn drain_paths_no_progress(
 	for (let i = 0z; i < len(paths); i += 1) {
 		const _ = analysis::read_and_index_file(target, paths[i]);
 	};
-	const msg = fmt::asprintf("{} {} file(s)", done_msg_prefix,
-		len(paths))!;
+	const msg = fmt::asprintf("{} {} file(s)", done_msg_prefix, len(paths))!;
 	defer free(msg);
 	log_info(s, msg);
 	request_diagnostic_refresh(s);

@@ -10,7 +10,9 @@ use memio;
 use strconv;
 use strings;
 
-fn st_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn st_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -18,7 +20,12 @@ fn st_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = 
 	return (s, scan, in_buf, out);
 };
 
-fn st_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn st_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -28,15 +35,21 @@ fn st_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 };
 
 fn st_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(
+			`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
+		)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -93,10 +106,12 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_semantic_tokens_full(&s, r);
 	const v = st_skip_to_response(out, 1.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const result_id = *(json::get(&result, "resultId") as *json::value) as str;
 	assert(len(result_id) > 0);
-	const data_arr = *(json::get(&result, "data") as *json::value) as []json::value;
+	const data_arr =
+		*(json::get(&result, "data") as *json::value) as []json::value;
 	assert(len(data_arr) > 0);
 };
 
@@ -118,13 +133,16 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_semantic_tokens_full(&s, full_req);
 	const v1 = st_skip_to_response(out, 1.0);
 	defer json::finish(v1);
-	const r1 = *(json::get(&(v1 as json::object), "result") as *json::value) as json::object;
+	const r1 =
+		*(json::get(&(v1 as json::object), "result") as *json::value) as json::object;
 	const id1 = *(json::get(&r1, "resultId") as *json::value) as str;
 
 	// Step 2: delta request with the same id (no edits made yet, so no
 	// changes — should produce empty edits).
-	const delta_params = strings::concat(`{"textDocument":{"uri":"file:///x.ha"},"previousResultId":"`,
-		id1, `"}`)!;
+	const delta_params =
+		strings::concat(
+			`{"textDocument":{"uri":"file:///x.ha"},"previousResultId":"`, id1, `"}`,
+		)!;
 	defer free(delta_params);
 	let dpv = json::loadstr(delta_params)!;
 	defer json::finish(dpv);
@@ -137,7 +155,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_semantic_tokens_full_delta(&s, delta_req);
 	const v2 = st_skip_to_response(out, 2.0);
 	defer json::finish(v2);
-	const r2 = *(json::get(&(v2 as json::object), "result") as *json::value) as json::object;
+	const r2 =
+		*(json::get(&(v2 as json::object), "result") as *json::value) as json::object;
 	// Should have edits (possibly empty array) and a fresh resultId.
 	assert(json::get(&r2, "edits") is *json::value);
 	const edits = *(json::get(&r2, "edits") as *json::value) as []json::value;
@@ -150,7 +169,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	st_open(&s, "file:///x.ha", "fn a() void = void;\\n");
 
 	// Delta request with an id we never issued.
-	const delta_params = `{"textDocument":{"uri":"file:///x.ha"},"previousResultId":"bogus-id-9999"}`;
+	const delta_params =
+		`{"textDocument":{"uri":"file:///x.ha"},"previousResultId":"bogus-id-9999"}`;
 	let pv = json::loadstr(delta_params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -162,7 +182,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	handle_semantic_tokens_full_delta(&s, r);
 	const v = st_skip_to_response(out, 5.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	// Falls back to full: has `data`, not `edits`.
 	assert(json::get(&result, "data") is *json::value);
 	assert(json::get(&result, "edits") is void);
