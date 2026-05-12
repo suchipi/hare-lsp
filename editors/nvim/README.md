@@ -1,6 +1,6 @@
 # hare-lsp.nvim
 
-A drop-in neovim plugin for the [hare-lsp](https://git.sr.ht/~sircmpwn/hare-lsp)
+A drop-in neovim plugin for the [hare-lsp](https://github.com/suchipi/hare-lsp)
 language server. Registers `hare-lsp` with neovim's built-in LSP client and
 ships a `:checkhealth hare-lsp` provider.
 

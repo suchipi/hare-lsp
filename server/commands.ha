@@ -4,7 +4,6 @@
 // workspace/executeCommand dispatcher. Runs hare commands synchronously
 // and streams stdout/stderr back to the client via window/logMessage.
 
-use bufio;
 use encoding::json;
 use io;
 use lsp;

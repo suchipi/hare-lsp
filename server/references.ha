@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 //
-// References, prepareRename, and rename. The current implementation does a
-// textual ident-token scan across the workspace - that's faithful to what
-// many production LSPs (gopls, rust-analyzer's fallback path) do when full
-// scope-aware analysis is unavailable.
+// References, prepareRename, and rename.
 //
-// Known limitation: the scan is not scope-aware. A `let foo` shadowing a
-// global `foo` is indistinguishable from the global, so a rename will
-// rewrite both. Comments, strings, char literals, and raw strings are
-// skipped via token_skip_noncode so prose matches don't produce false
-// positives. The README "Known limitations" section documents this for
-// users.
+// Two-tier strategy:
+//   - If the cursor resolves to a local binding (let / const / def / for /
+//     match / function parameter), the search is bounded to that binding's
+//     lexical scope via scope_local_binding. Shadowing works correctly: a
+//     `let foo` inside one function won't pull in a same-named global.
+//   - For top-level decls the workspace is scanned textually for matching
+//     ident tokens. Comments, strings, char literals, and raw strings are
+//     skipped via token_skip_noncode so prose matches don't produce false
+//     positives. Two unrelated top-level idents with the same name in
+//     different modules are still indistinguishable; see the "Known
+//     limitations" sections of README.md and docs/features.md.
 
 use analysis;
-use bufio;
 use encoding::json;
 use fs;
 use io;

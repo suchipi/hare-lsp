@@ -205,7 +205,7 @@ export fn file_parse_cache_drop_path(c: *file_parse_cache, path: str) void = {
 // True if the most recent file_parse_cache_get for the given path
 // failed because the path doesn't exist (as opposed to other I/O
 // errors). Callers use this to self-heal a stale workspace_index
-// entry — see [[get_or_drop_stale]] in workspace_index.ha.
+// entry - see [[cached_parse_or_drop_stale]] in workspace_index.ha.
 export fn file_path_missing(path: str) bool = {
 	match (os::stat(path)) {
 	case fs::filestat => return false;

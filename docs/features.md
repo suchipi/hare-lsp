@@ -143,6 +143,7 @@ Highlights:
 | `hare.diagnostics.buildTimeoutMs` | `60000` | Build wall-clock cap; `0` disables. |
 | `hare.format.indentStyle` | `"tab"` | Tab vs space indent. |
 | `hare.format.indentWidth` | `8` | Spaces per indent when `indentStyle = space`. |
+| `hare.format.trimFinalNewlines` | `true` | Trim trailing whitespace at file end. |
 | `hare.format.insertFinalNewline` | `true` | Ensure trailing newline. |
 | `hare.inlayHints.parameterNames` | `true` | Param-name hints at call sites. |
 | `hare.inlayHints.inferredTypes` | `true` | Inferred-type hints on `let` / `const`. |
