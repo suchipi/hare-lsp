@@ -50,26 +50,30 @@ export type document = struct {
 	parse_cache: nullable *parse_cache_entry,
 };
 
-// Owns a parse_result and the matching file_index. Allocated together
-// so callers can borrow both without juggling lifetimes.
+// Owns a parse_result, the matching file_index, and the lexical scope
+// graph. Allocated together so callers can borrow all three without
+// juggling lifetimes.
 export type parse_cache_entry = struct {
 	pr: analysis::parse_result,
 	idx: analysis::file_index,
+	scope: analysis::scope_graph,
 };
 
 fn finish_parse_cache(c: nullable *parse_cache_entry) void = {
 	match (c) {
 	case null => void;
 	case let p: *parse_cache_entry =>
+		analysis::finish_scope_graph(&p.scope);
 		analysis::finish_index(&p.idx);
 		analysis::finish_parse_result(&p.pr);
 		free(p);
 	};
 };
 
-// Returns a borrowed pointer to the document's cached parse + index,
-// building them on demand. The returned pointer is invalidated on the
-// next call to [[invalidate_parse_cache]] (any buffer mutation).
+// Returns a borrowed pointer to the document's cached parse + index +
+// scope graph, building them on demand. The returned pointer is
+// invalidated on the next call to [[invalidate_parse_cache]] (any buffer
+// mutation).
 export fn parse_of(doc: *document) *parse_cache_entry = {
 	match (doc.parse_cache) {
 	case let p: *parse_cache_entry => return p;
@@ -78,8 +82,13 @@ export fn parse_of(doc: *document) *parse_cache_entry = {
 	let entry = alloc(parse_cache_entry {
 		pr = analysis::parse_recover(analysis::bytes(&doc.buf), doc.uri),
 		idx = analysis::file_index { symbols = [] },
+		scope = analysis::scope_graph {
+			root = null: *analysis::scope_node,
+			nodes = [],
+		},
 	})!;
 	entry.idx = analysis::build_index(&entry.pr.subunit);
+	entry.scope = analysis::build_scope_graph(&entry.pr.subunit);
 	doc.parse_cache = entry;
 	return entry;
 };

@@ -51,6 +51,24 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 	};
 	const target = strings::fromutf8(data[ident_range.0..ident_range.1])!;
 
+	// Scope-aware fast path: if the cursor resolves to a binding that
+	// only lives in the current file (a let/const/def/for/match/func
+	// param), the search is bounded to that binding's lexical scope.
+	const local = scope_local_binding(doc, target, ident_range.0: u32);
+	if (local is scope_local) {
+		const lb = local as scope_local;
+		let arr: []json::value = scan_text_for_ident_static_in_range(
+			data, doc.uri, doc.buf.line_index, target,
+			lb.scope_start: size, lb.scope_end: size);
+		const result_v: json::value = arr;
+		defer json::finish(result_v);
+		match (lsp::encode_response_result(s.out, r.id, result_v)) {
+		case size => void;
+		case => void;
+		};
+		return;
+	};
+
 	let arr: []json::value = [];
 	let cancelled = false;
 	for (let i = 0z; i < len(s.documents); i += 1) {
@@ -175,19 +193,49 @@ fn find_references_in_file_on_disk(path: str, target: str) []json::value = {
 	return scan_text_for_ident_static(buf, uri, idx, target);
 };
 
+// Resolves the cursor in `doc` at `off` to a scope_binding scoped to the
+// open document. Returns void when the cursor refers to a top-level decl
+// (which may have callers in other files) or to no known binding.
+type scope_local = struct {
+	scope_start: u32,
+	scope_end: u32,
+};
+
+fn scope_local_binding(doc: *document, name: str, off: u32) (scope_local | void) = {
+	const cache = parse_of(doc);
+	const b = match (analysis::resolve_binding_at_byte(&cache.scope, name, off)) {
+	case let b: analysis::scope_binding => yield b;
+	case void => return void;
+	};
+	if (b.kind == analysis::binding_kind::TOPLEVEL_DECL) return void;
+	return scope_local {
+		scope_start = b.scope_start,
+		scope_end = b.scope_end,
+	};
+};
+
 // Scans a buffer for ident-token occurrences of `target` and returns a
-// new []json::value with the corresponding Location objects. Skips over
-// string literals, char literals, raw strings, line comments, and block
-// comments so a match inside text/prose doesn't produce a false-positive
-// reference (which would otherwise let a rename silently rewrite a doc
-// comment).
+// new []json::value with the corresponding Location objects.
 fn scan_text_for_ident_static(
 	data: []u8, uri: str, line_index: []size, target: str,
 ) []json::value = {
+	return scan_text_for_ident_static_in_range(data, uri, line_index,
+		target, 0z, len(data));
+};
+
+// Scans `data[start..end]` for ident-token occurrences of `target`.
+// Skips over string literals, char literals, raw strings, line comments,
+// and block comments so a match inside text/prose doesn't produce a
+// false-positive reference (which would otherwise let a rename silently
+// rewrite a doc comment).
+fn scan_text_for_ident_static_in_range(
+	data: []u8, uri: str, line_index: []size, target: str,
+	start: size, end: size,
+) []json::value = {
 	let arr: []json::value = [];
 	const t = strings::toutf8(target);
-	const limit = len(data);
-	let i = 0z;
+	const limit = if (end > len(data)) len(data) else end;
+	let i = start;
 	for (i + len(t) <= limit) {
 		// Skip past any non-code region starting at `i` (string,
 		// rune, raw string, comment). When token_skip_noncode
@@ -335,18 +383,32 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 		free(locs);
 	};
 	let cancelled = false;
-	for (let i = 0z; i < len(s.documents); i += 1) {
-		if (i % 32 == 0 && check_cancel(s, r.id)) {
-			cancelled = true;
-			break;
-		};
-		const more = find_references_in_doc(s, &s.documents[i], target);
+
+	// Scope-aware fast path: a local binding never escapes its lexical
+	// scope, so rename limits its edits to that range. Skips the
+	// workspace and other-document scan entirely.
+	const local = scope_local_binding(doc, target, ident_range.0: u32);
+	if (local is scope_local) {
+		const lb = local as scope_local;
+		let more = scan_text_for_ident_static_in_range(data, doc.uri,
+			doc.buf.line_index, target,
+			lb.scope_start: size, lb.scope_end: size);
 		append(locs, more...)!;
 		free(more);
+	} else {
+		for (let i = 0z; i < len(s.documents); i += 1) {
+			if (i % 32 == 0 && check_cancel(s, r.id)) {
+				cancelled = true;
+				break;
+			};
+			const more = find_references_in_doc(s, &s.documents[i], target);
+			append(locs, more...)!;
+			free(more);
+		};
 	};
 	const seen = collect_open_paths(s);
 	defer finish_open_paths(seen);
-	if (!cancelled) for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
+	if (!cancelled && !(local is scope_local)) for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
 		if (i % 32 == 0 && check_cancel(s, r.id)) {
 			cancelled = true;
 			break;

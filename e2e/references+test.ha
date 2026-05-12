@@ -109,6 +109,60 @@ export fn ask() int = answer();
 		"every edit should replace the identifier with the new name");
 };
 
+@test fn e2e_rename_respects_local_scope() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	const sample = `let foo: int = 1;
+
+export fn use_globals() void = {
+	foo = 2;
+};
+
+export fn shadow() void = {
+	let foo: int = 10;
+	foo = 11;
+};
+`;
+	open_doc(&s, "file:///shadow.ha", sample);
+
+	// Cursor on the `foo` declared by `let foo: int = 10` (line 7, char 5).
+	const req = `{"jsonrpc":"2.0","id":1510,"method":"textDocument/rename","params":{"textDocument":{"uri":"file:///shadow.ha"},"position":{"line":7,"character":5},"newName":"bar"}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1510.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = (*(json::get(&obj, "result") as *json::value))
+		as json::object;
+	const changes = (*(json::get(&result, "changes") as *json::value))
+		as json::object;
+	const edits = (*(json::get(&changes, "file:///shadow.ha") as *json::value))
+		as []json::value;
+	// Exactly two edits expected: line 7 (`let foo`) and line 8 (`foo = 11`).
+	assert(len(edits) == 2,
+		"local rename should produce exactly two edits");
+	for (let i = 0z; i < len(edits); i += 1) {
+		const e = edits[i] as json::object;
+		const new_text = *(json::get(&e, "newText") as *json::value) as str;
+		assert(new_text == "bar",
+			"each edit replaces the local identifier");
+		const r = *(json::get(&e, "range") as *json::value)
+			as json::object;
+		const start = *(json::get(&r, "start") as *json::value)
+			as json::object;
+		const line = *(json::get(&start, "line") as *json::value) as f64;
+		// Lines 0-4 hold the global decl and use_globals; the local
+		// rename must not touch any of them.
+		assert(line >= 7.0,
+			"local-rename edit must stay inside the shadowing function");
+	};
+};
+
 @test fn e2e_rename_rejects_invalid_identifier() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
