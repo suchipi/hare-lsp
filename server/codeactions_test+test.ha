@@ -343,6 +343,65 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	assert(found_batch);
 };
 
+@test fn diagnostic_driven_quickfix_dedupes_against_range_path() void = {
+	let (s, scan, in_buf, out) = ca_test_server();
+	defer ca_test_cleanup(&s, scan, in_buf, out);
+	ca_open(&s, "file:///dd.ha", "use foo;\\nfn x() void = void;\\n");
+
+	// Build the codeAction params with context.diagnostics carrying our
+	// unused-import diagnostic shape. The request range is at line 0
+	// where the range-based path would also produce a quickfix; only
+	// one should make it through after dedup.
+	const params = `{"textDocument":{"uri":"file:///dd.ha"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[{"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":0}},"severity":4,"code":"unused-import","source":"hare-lsp","message":"unused import","tags":[1],"data":{"kind":"unused-import","import_idx":0}}]}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 200.0,
+		method = strings::dup("textDocument/codeAction")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_code_action(&s, r);
+
+	const v = ca_skip_to_response(out, 200.0);
+	defer json::finish(v);
+	const actions = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	let quickfix_count: size = 0;
+	let saw_with_diag = false;
+	for (let i = 0z; i < len(actions); i += 1) {
+		const action = actions[i] as json::object;
+		const kind = *(json::get(&action, "kind") as *json::value) as str;
+		if (kind != "quickfix") continue;
+		quickfix_count += 1;
+		// The diagnostic-driven action carries a `diagnostics` field
+		// echoing our input diagnostic.
+		match (json::get(&action, "diagnostics")) {
+		case let p: *json::value =>
+			match (*p) {
+			case let a: []json::value =>
+				if (len(a) > 0) {
+					saw_with_diag = true;
+					const d = a[0] as json::object;
+					const code = *(json::get(&d, "code") as *json::value) as str;
+					assert(code == "unused-import");
+				};
+			case => void;
+			};
+		case => void;
+		};
+		// The edit removes the import line.
+		const edit = *(json::get(&action, "edit") as *json::value) as json::object;
+		const changes = *(json::get(&edit, "changes") as *json::value) as json::object;
+		const edits = *(json::get(&changes, "file:///dd.ha") as *json::value) as []json::value;
+		assert(len(edits) == 1);
+		const e0 = edits[0] as json::object;
+		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+		assert(new_text == "");
+	};
+	assert(quickfix_count == 1);
+	assert(saw_with_diag);
+};
+
 @test fn unused_import_quickfix_range_outside_imports_is_skipped() void = {
 	let (s, scan, in_buf, out) = ca_test_server();
 	defer ca_test_cleanup(&s, scan, in_buf, out);

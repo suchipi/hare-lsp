@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 
+use analysis;
 use bufio;
 use bytes;
 use encoding::json;
@@ -213,6 +214,92 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		assert(strings::hasprefix(sort, "1-"));
 	};
 	assert(found);
+};
+
+@test fn completion_auto_import_attaches_additional_text_edits() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	// Seed the workspace index with an exported symbol from a module
+	// the open document doesn't import.
+	const provider = strings::toutf8(
+		"export fn barbar() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/mymod/p.ha", provider);
+
+	// The open doc has no `use mymod;`. Cursor sits right after "ba".
+	comp_open(&s, "file:///c.ha", "fn main() void = ba\\n");
+
+	const params = `{"textDocument":{"uri":"file:///c.ha"},"position":{"line":0,"character":19}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 50.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 50.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "barbar") continue;
+		found = true;
+		const edits = *(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
+		assert(len(edits) >= 1);
+		const e0 = edits[0] as json::object;
+		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+		assert(strings::contains(new_text, "use mymod;"));
+		break;
+	};
+	assert(found);
+};
+
+@test fn completion_auto_import_skipped_when_already_imported() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	const provider = strings::toutf8(
+		"export fn barbar() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/mymod/p.ha", provider);
+
+	// The open doc already has `use mymod;`.
+	comp_open(&s, "file:///c2.ha",
+		"use mymod;\\nfn main() void = ba\\n");
+
+	const params = `{"textDocument":{"uri":"file:///c2.ha"},"position":{"line":1,"character":19}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 51.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 51.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "barbar") continue;
+		// No additionalTextEdits since the module is already imported.
+		match (json::get(&item, "additionalTextEdits")) {
+		case let p: *json::value =>
+			abort("expected no additionalTextEdits for imported module");
+		case => void;
+		};
+		return;
+	};
+	abort("barbar entry missing");
 };
 
 @test fn completion_keyword_has_keyword_sortText() void = {
