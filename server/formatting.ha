@@ -12,9 +12,64 @@
 
 use analysis;
 use encoding::json;
+use hare::lex;
 use lsp;
 use memio;
 use strings;
+
+// Reported by [[format_source]] when the source can't be reformatted -
+// either the recovering parser surfaced a diagnostic, or pretty-printing
+// itself failed. `message` is owned by the error value; callers free it
+// via [[format_error_finish]] after consuming the error.
+export type format_error = !struct {
+	location: (lex::location | void),
+	message: str,
+};
+
+export fn format_error_finish(e: *format_error) void = {
+	free(e.message);
+};
+
+// Formats `data` end-to-end and returns the reformatted source as a
+// freshly-allocated string the caller owns. `path` is an opaque label
+// used in parser diagnostics.
+//
+// Output is always tab-indented at column 0; callers that want a
+// space-indent variant should pass the result through
+// [[apply_indent_style]]. If parsing produces any diagnostics we refuse
+// to format and return the first one - reformatting partially-parsed
+// source would rewrite over the user's in-flight edits.
+export fn format_source(data: []u8, path: str) (str | format_error) = {
+	let pr = analysis::parse_recover(data, path);
+	defer analysis::finish_parse_result(&pr);
+	if (len(pr.errors) > 0) {
+		const e = &pr.errors[0];
+		return format_error {
+			location = e.location,
+			message = strings::dup(e.message)!,
+		};
+	};
+
+	const cs = collect_comments(data);
+	defer finish_comments(cs);
+	const bl = collect_blank_lines(data);
+	defer free(bl);
+	let cursor = comment_cursor { comments = cs, pos = 0 };
+	let d = build_subunit_doc(&pr.subunit, &cursor, bl, data);
+	defer doc_finish(&d);
+
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	match (pretty(&buf, &d, 80, 0)) {
+	case size => void;
+	case =>
+		return format_error {
+			location = void,
+			message = strings::dup("pretty-printer failed")!,
+		};
+	};
+	return strings::dup(memio::string(&buf)!)!;
+};
 
 export fn handle_formatting(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_request(r.params)) {
@@ -58,7 +113,8 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const formatted_raw = memio::string(&buf)!;
-	const formatted_str = apply_indent_style(s, formatted_raw);
+	const formatted_str = apply_indent_style(formatted_raw,
+		s.config.format_indent_style, s.config.format_indent_width);
 	defer if (formatted_str != formatted_raw) free(formatted_str);
 	const formatted = strings::toutf8(formatted_str);
 
@@ -187,7 +243,8 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const formatted_str = memio::string(&buf)!;
-	const formatted_str_with_indent = apply_indent_style(s, formatted_str);
+	const formatted_str_with_indent = apply_indent_style(formatted_str,
+		s.config.format_indent_style, s.config.format_indent_width);
 	defer if (formatted_str_with_indent != formatted_str) free(formatted_str_with_indent);
 	_ = decl_range_end; // silence unused warning if any
 
@@ -435,23 +492,23 @@ fn send_array_fmt(s: *server, id: lsp::id, arr: []json::value) void = {
 fn params_obj_fmt(p: (json::value | void)) (json::object | void) =
 	lsp::params_object(p);
 
-// Post-processes unparse output to honour config.format_indent_style.
-// hare::unparse always emits tabs; if the user wants spaces, expand the
-// leading tabs on each line into config.format_indent_width spaces.
+// Post-processes pretty-printer output to honour an indent style.
+// `pretty` always emits tabs; when `style == SPACE`, expand the leading
+// tabs on each line into `width` spaces.
 //
 // Returns the input string unchanged when style == TAB, otherwise a
 // freshly-allocated string the caller must free if it differs from the
 // input.
-export fn apply_indent_style(s: *server, source: str) str = {
-	if (s.config.format_indent_style == indent_style::TAB) return source;
-	const width = s.config.format_indent_width: size;
+export fn apply_indent_style(source: str, style: indent_style, width: u32) str = {
+	if (style == indent_style::TAB) return source;
+	const w = width: size;
 	const src = strings::toutf8(source);
 	let out: []u8 = alloc([], len(src))!;
 	let at_line_start = true;
 	for (let i = 0z; i < len(src); i += 1) {
 		const b = src[i];
 		if (at_line_start && b == '\t': u8) {
-			for (let j = 0z; j < width; j += 1) {
+			for (let j = 0z; j < w; j += 1) {
 				append(out, ' ': u8)!;
 			};
 			continue;

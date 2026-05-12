@@ -9,6 +9,7 @@
 
 use encoding::json;
 use fmt;
+use os;
 use strings;
 
 def HOVER_DOC: str = `// SPDX-License-Identifier: MPL-2.0
@@ -448,8 +449,10 @@ fn drain_until_indexed(s: *session) void = {
 };
 
 fn os_repo_root() str = {
-	// Tests run from the repo root; we hardcode it for the URI.
-	return "/Users/suchipi/Code/hare-lsp";
+	// Tests run with cwd at the repo root (driven by the Makefile);
+	// take it from the live cwd so the test works on any checkout
+	// (CI, contributor machines, etc.) without hardcoding a path.
+	return os::getcwd();
 };
 
 @test fn e2e_hover_on_identifier() void = {
