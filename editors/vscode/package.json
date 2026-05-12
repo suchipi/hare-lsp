@@ -13,7 +13,7 @@
     "Linters",
     "Formatters"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "activationEvents": [
     "onLanguage:hare"
   ],
@@ -22,6 +22,41 @@
       {
         "command": "hare-lsp.restart",
         "title": "Restart Hare LSP",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openWebsite",
+        "title": "Open Hare Website",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openDocs",
+        "title": "Open Hare Documentation",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openTutorial",
+        "title": "Open Hare Tutorial",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openSpecification",
+        "title": "Open Hare Specification",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openStdlibDocs",
+        "title": "Open Hare Standard Library Docs",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openInstallGuide",
+        "title": "Open Hare Installation Guide",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openStdlibFolder",
+        "title": "Open Hare stdlib in New Window",
         "category": "Hare"
       }
     ],
@@ -147,23 +182,68 @@
             "type": "boolean",
             "default": true,
             "description": "Show inferred-type hints on let / const bindings."
+          },
+          "hare.inlayHints.inferredTypesMaxDepth": {
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "maximum": 16,
+            "description": "Maximum recursion depth for inferred-type hints. 0 disables inference beyond declared types + literals; higher values follow function-call return types, identifier bindings, and type aliases. Capped at 16."
+          },
+          "hare.limits.maxOpenDocuments": {
+            "type": "number",
+            "default": 1024,
+            "minimum": 1,
+            "description": "Maximum number of documents the server will keep open at once."
+          },
+          "hare.limits.maxTotalBufferBytes": {
+            "type": "number",
+            "default": 268435456,
+            "minimum": 1,
+            "description": "Maximum total bytes summed across all open document buffers (default 256 MiB)."
+          },
+          "hare.limits.maxPendingRequests": {
+            "type": "number",
+            "default": 4096,
+            "minimum": 1,
+            "description": "Maximum in-flight server-initiated requests awaiting a response."
+          },
+          "hare.limits.maxCancelledIds": {
+            "type": "number",
+            "default": 256,
+            "minimum": 1,
+            "description": "Maximum number of cancelled-but-not-yet-cleared request ids."
+          },
+          "hare.limits.maxDiagnosticsPerFile": {
+            "type": "number",
+            "default": 1000,
+            "minimum": 1,
+            "description": "Maximum diagnostics published per file."
+          },
+          "hare.limits.maxWorkspaceIndexEntries": {
+            "type": "number",
+            "default": 1000000,
+            "minimum": 1,
+            "description": "Maximum workspace-index entries. Hard-capped at 1000000."
           }
         }
       }
     ]
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "package": "npm run compile && vsce package --allow-missing-repository"
+    "typecheck": "tsc --noEmit -p ./",
+    "bundle": "node esbuild.js",
+    "bundle:watch": "node esbuild.js --watch",
+    "package": "npm run typecheck && npm run bundle -- --production && vsce package --allow-missing-repository"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^24.0.0",
     "@types/vscode": "^1.75.0",
-    "@vscode/vsce": "^2.24.0",
-    "typescript": "^5.3.0"
+    "@vscode/vsce": "^3.9.1",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3"
   }
 }

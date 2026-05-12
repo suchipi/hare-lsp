@@ -116,6 +116,42 @@ use strings;
 	assert(read(&r) is io::EOF);
 };
 
+@test fn last_header_bytes_captures_partial_block() void = {
+	// A header block with no Content-Length; read() should return
+	// bad_header AND leave the captured headers visible.
+	const input = "Content-Type: foo\r\nX-Trace: deadbeef\r\n\r\n";
+	let src = memio::fixed(strings::toutf8(input));
+	let scan = bufio::newscanner(&src);
+	defer bufio::finish(&scan);
+	let r = new_reader(&scan);
+	defer finish_reader(&r);
+
+	assert(read(&r) is bad_header);
+	const captured = last_header_bytes(&r);
+	assert(bytes::equal(captured, strings::toutf8(input)));
+};
+
+@test fn last_header_bytes_resets_between_calls() void = {
+	// First read succeeds; second hits bad_header. The capture should
+	// reflect only the second call's headers, not be appended.
+	const input = "Content-Length: 2\r\n\r\n{}Content-Type: foo\r\n\r\n";
+	let src = memio::fixed(strings::toutf8(input));
+	let scan = bufio::newscanner(&src);
+	defer bufio::finish(&scan);
+	let r = new_reader(&scan);
+	defer finish_reader(&r);
+
+	const body = read(&r) as []u8;
+	assert(bytes::equal(body, strings::toutf8("{}")));
+	// On success the captured block is the headers we just consumed.
+	assert(bytes::equal(last_header_bytes(&r),
+		strings::toutf8("Content-Length: 2\r\n\r\n")));
+
+	assert(read(&r) is bad_header);
+	assert(bytes::equal(last_header_bytes(&r),
+		strings::toutf8("Content-Type: foo\r\n\r\n")));
+};
+
 @test fn write_emits_framing() void = {
 	let buf = memio::dynamic();
 	defer io::close(&buf)!;

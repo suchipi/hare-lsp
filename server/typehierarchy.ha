@@ -97,17 +97,49 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	let idents = analysis::collect_referenced_idents(underlying);
 	defer analysis::finish_idents(idents);
 
-	// For each referenced ident, look up its TYPE entries in the workspace
-	// and emit one TypeHierarchyItem per match. `visited` is the cycle
-	// guard within this single response.
+	// For each referenced ident, resolve it through the file's `use`
+	// list + workspace index to a single TYPE entry, rather than
+	// matching every workspace entry with the same short name. This
+	// keeps unrelated types in different modules from appearing linked.
+	const item_path = uri_to_path_th(item.uri);
+	defer free(item_path);
+	const item_module = analysis::module_from_path(item_path);
+	defer free(item_module);
+
 	let arr: []json::value = [];
 	let visited: [](str, str) = [];
 	defer free(visited);
 	for (let i = 0z; i < len(idents); i += 1) {
-		if (len(idents[i]) == 0) continue;
-		const short = idents[i][len(idents[i]) - 1];
-		emit_workspace_type_items(s, short, &arr, &visited,
-			item.uri, item.name);
+		const path = idents[i];
+		if (len(path) == 0) continue;
+		const name = path[len(path) - 1];
+		// `foo::bar::baz` -> qualifier "bar" (the single-segment
+		// module name workspace_entry.module records).
+		const qualifier = if (len(path) >= 2)
+			path[len(path) - 2]
+		else
+			"";
+		const entry = match (analysis::workspace_lookup_for_subunit(
+				&s.workspace_index, su, item_module,
+				qualifier, name)) {
+		case let e: *analysis::workspace_entry => yield e;
+		case void => continue;
+		};
+		if (entry.kind != analysis::symbol_kind::TYPE) continue;
+		if (entry.uri == item.uri && entry.short_name == item.name) continue;
+		if (visited_pair_has(visited, entry.uri, entry.short_name)) continue;
+		const text = match (find_document(s, entry.uri)) {
+		case let d: *document => yield analysis::bytes(&d.buf);
+		case null =>
+			yield match (cached_parse_or_drop_stale(s, entry.path)) {
+			case let p: *file_parse_entry => yield p.text;
+			case null => continue;
+			};
+		};
+		append(arr, build_type_item_for_path(s, entry.path, entry.uri,
+			entry.short_name, entry.start_off: size,
+			entry.end_off: size, text))!;
+		append(visited, (entry.uri, entry.short_name))!;
 	};
 	send_array_th(s, r.id, arr);
 };
@@ -145,10 +177,23 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 	};
 	defer free_type_item(item);
 
+	// Look up the cursor's item in the workspace index so we can use
+	// it as the expected target. Without this we'd be back to matching
+	// by short name only.
+	const item_path = uri_to_path_th(item.uri);
+	defer free(item_path);
+	const expected = match (find_workspace_type_entry(s, item_path,
+			item.name)) {
+	case let e: *analysis::workspace_entry => yield e;
+	case void =>
+		// Unindexed file or fresh type: fall back to short-name
+		// matching (no regression vs prior behavior).
+		yield null: nullable *analysis::workspace_entry;
+	};
+
 	let arr: []json::value = [];
 	let visited: [](str, str) = [];
 	defer free(visited);
-	// Group workspace TYPE entries by file so we re-parse each file once.
 	let seen_paths: []str = [];
 	defer free(seen_paths);
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
@@ -167,8 +212,9 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 		case null => continue;
 		};
 
-		// For each type decl in this file, check whether its underlying
-		// type references item.name.
+		const file_module = analysis::module_from_path(e.path);
+		defer free(file_module);
+
 		for (let j = 0z; j < len(fpe.pr.subunit.decls); j += 1) {
 			const d = &fpe.pr.subunit.decls[j];
 			match (d.decl) {
@@ -184,15 +230,39 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 			defer analysis::finish_idents(idents);
 			let matched = false;
 			for (let k = 0z; k < len(idents); k += 1) {
-				if (len(idents[k]) == 0) continue;
-				if (idents[k][len(idents[k]) - 1] == item.name) {
+				const path = idents[k];
+				if (len(path) == 0) continue;
+				if (path[len(path) - 1] != item.name) continue;
+				// Short name matches; verify it resolves to the
+				// same entry as the cursor's item. When we have
+				// no expected entry (item not yet indexed),
+				// accept the short-name match as a fallback.
+				match (expected) {
+				case null =>
 					matched = true;
-					break;
+				case let exp: *analysis::workspace_entry =>
+					const qualifier = if (len(path) >= 2)
+						path[len(path) - 2]
+					else
+						"";
+					match (analysis::workspace_lookup_for_subunit(
+							&s.workspace_index,
+							&fpe.pr.subunit,
+							file_module,
+							qualifier, item.name)) {
+					case let r: *analysis::workspace_entry =>
+						if (r.path == exp.path &&
+							r.short_name == exp.short_name &&
+							r.kind == exp.kind) {
+							matched = true;
+						};
+					case void => void;
+					};
 				};
+				if (matched) break;
 			};
 			if (!matched) continue;
 
-			// Build an item for this decl. Need its short_name and span.
 			const short = decl_type_short_name(d);
 			if (short == "") continue;
 			if (e.uri == item.uri && short == item.name) continue;
@@ -205,6 +275,21 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 		};
 	};
 	send_array_th(s, r.id, arr);
+};
+
+// Returns the workspace_entry for the TYPE decl at (path, name), or
+// void when none exists. Used to anchor the supertypes/subtypes filter.
+fn find_workspace_type_entry(
+	s: *server, path: str, name: str,
+) (*analysis::workspace_entry | void) = {
+	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
+		const e = &s.workspace_index.entries[i];
+		if (e.kind != analysis::symbol_kind::TYPE) continue;
+		if (e.path != path) continue;
+		if (e.short_name != name) continue;
+		return e;
+	};
+	return void;
 };
 
 // --- helpers ---

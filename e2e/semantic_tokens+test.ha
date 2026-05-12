@@ -4,7 +4,6 @@
 // e2e: semantic tokens (full, full/delta, range).
 
 use encoding::json;
-use fmt;
 use strings;
 
 @test fn e2e_semantic_tokens_full_returns_data() void = {

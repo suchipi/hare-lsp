@@ -58,7 +58,7 @@ test: hare-lsp harefmt
 
 clean:
 	rm -rf hare-lsp harefmt .cache
-	rm -rf editors/vscode/out editors/vscode/node_modules editors/vscode/*.vsix
+	rm -rf editors/vscode/dist editors/vscode/node_modules editors/vscode/*.vsix
 
 install: hare-lsp harefmt
 	mkdir -p "$(DESTDIR)$(BINDIR)"

@@ -89,6 +89,56 @@
           "type": "boolean",
           "default": true,
           "description": "Show inferred-type hints on `let` / `const` bindings."
+        },
+        "inferredTypesMaxDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16,
+          "default": 3,
+          "description": "Maximum recursion depth for inferred-type hints. 0 disables inference beyond declared types + literals; higher values follow function-call return types, identifier bindings, and type aliases. The server caps the effective value at 16 to prevent pathological lookups."
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configurable resource caps. Defaults are conservative; lowering applies prospectively (no proactive eviction). The body-size cap is separate: set the HARE_LSP_MAX_BODY_BYTES environment variable before launching the server because the transport must be configured before `initialize` arrives.",
+      "properties": {
+        "maxOpenDocuments": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1024,
+          "description": "Maximum number of documents the server will keep open at once."
+        },
+        "maxTotalBufferBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 268435456,
+          "description": "Maximum total bytes summed across all open document buffers (default 256 MiB)."
+        },
+        "maxPendingRequests": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4096,
+          "description": "Maximum number of in-flight server-initiated requests awaiting a response."
+        },
+        "maxCancelledIds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 256,
+          "description": "Maximum number of cancelled-but-not-yet-cleared request ids."
+        },
+        "maxDiagnosticsPerFile": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1000,
+          "description": "Maximum diagnostics published per file (excess collapsed into a single trailing diagnostic)."
+        },
+        "maxWorkspaceIndexEntries": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1000000,
+          "description": "Maximum number of workspace-index entries. Hard-capped at 1000000 regardless of the configured value."
         }
       }
     }

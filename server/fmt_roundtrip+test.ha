@@ -16,7 +16,6 @@
 // The walk skips `.cache/`, `.tmp/`, and `editors/` (vendor / vscode
 // extension code), since those aren't ours to reformat.
 
-use analysis;
 use bufio;
 use fmt;
 use fs;

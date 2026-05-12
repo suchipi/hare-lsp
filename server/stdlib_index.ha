@@ -130,3 +130,21 @@ fn is_directory(path: str) bool = {
 		return false;
 	};
 };
+
+// Enqueues a chunked indexing job that walks every `*.ha` file under
+// each stdlib search path into `s.stdlib_index`. Idempotent: runs at
+// most once per server session. Used by `workspace/symbol` so a user
+// can fuzzy-search across the whole stdlib without having navigated
+// through each module first.
+export fn ensure_full_stdlib_indexed(s: *server) void = {
+	if (s.stdlib_fully_indexed) return;
+	s.stdlib_fully_indexed = true;
+	const roots = stdlib_search_paths(s);
+	defer {
+		for (let i = 0z; i < len(roots); i += 1) free(roots[i]);
+		free(roots);
+	};
+	if (len(roots) == 0) return;
+	start_index_job(s, roots, &s.stdlib_index, "Indexing stdlib",
+		"hare-lsp: indexed stdlib");
+};

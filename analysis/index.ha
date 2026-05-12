@@ -10,7 +10,6 @@
 // analysis::workspace_index to answer go-to-definition / hover queries.
 
 use hare::ast;
-use hare::lex;
 use strings;
 
 // Kind of declaration.

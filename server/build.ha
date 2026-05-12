@@ -15,7 +15,6 @@
 // Path is filesystem-absolute and may include "../"; we URI-encode it
 // when matching against open documents.
 
-use bufio;
 use encoding::json;
 use io;
 use lsp;

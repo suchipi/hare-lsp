@@ -341,8 +341,11 @@ fn wsfx_rm(path: str) void = {
 	// Find the response in the output stream.
 	const data = memio::buffer(&out);
 	const text = strings::fromutf8(data)!;
-	// Reply shape carries isIncomplete + items keys.
-	assert(strings::contains(text, `"isIncomplete":false`));
+	// Reply shape carries isIncomplete + items keys. The actual
+	// isIncomplete value may be true when stdlib indexing is still
+	// in flight (see [[ensure_full_stdlib_indexed]]), so we only
+	// assert the key is present.
+	assert(strings::contains(text, `"isIncomplete":`));
 	assert(strings::contains(text, `"items":`));
 	assert(strings::contains(text, `"hello"`));
 };

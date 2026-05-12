@@ -4,6 +4,7 @@
 // Thin VSCode language-client wrapper around the hare-lsp binary.
 
 import { ChildProcess, execFile, spawn } from "node:child_process";
+import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
@@ -423,6 +424,34 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
+  const openExternal = (url: string) =>
+    vscode.env.openExternal(vscode.Uri.parse(url));
+
+  const findHareStdlibPath = async (): Promise<string | undefined> => {
+    const candidates: string[] = [];
+    const collect = (raw: string | undefined | null) => {
+      if (!raw) return;
+      for (const entry of raw.split(":")) {
+        if (!entry) continue;
+        if (path.basename(entry) === "stdlib") candidates.push(entry);
+      }
+    };
+    collect(
+      vscode.workspace.getConfiguration("hare").get<string>("harepath"),
+    );
+    collect(process.env.HAREPATH);
+    candidates.push("/usr/src/hare/stdlib", "/usr/local/src/hare/stdlib");
+    for (const c of candidates) {
+      try {
+        const stat = await fsp.stat(c);
+        if (stat.isDirectory()) return c;
+      } catch {
+        // ignore missing / unreadable candidates
+      }
+    }
+    return undefined;
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand("hare-lsp.showMenu", async () => {
       const harePath =
@@ -445,9 +474,41 @@ export function activate(context: vscode.ExtensionContext): void {
           label: "$(output) Show Hare LSP Output",
           command: "hare-lsp.showOutput",
         },
+        {
+          label: "Resources",
+          kind: vscode.QuickPickItemKind.Separator,
+        },
+        {
+          label: "$(globe) Open Hare Website",
+          command: "hare-lsp.openWebsite",
+        },
+        {
+          label: "$(book) Open Hare Documentation",
+          command: "hare-lsp.openDocs",
+        },
+        {
+          label: "$(mortar-board) Open Hare Tutorial",
+          command: "hare-lsp.openTutorial",
+        },
+        {
+          label: "$(law) Open Hare Specification",
+          command: "hare-lsp.openSpecification",
+        },
+        {
+          label: "$(library) Open Standard Library Docs",
+          command: "hare-lsp.openStdlibDocs",
+        },
+        {
+          label: "$(cloud-download) Open Hare Installation Guide",
+          command: "hare-lsp.openInstallGuide",
+        },
+        {
+          label: "$(folder-opened) Open Hare stdlib in New Window",
+          command: "hare-lsp.openStdlibFolder",
+        },
       ];
       const choice = await vscode.window.showQuickPick(picks, {
-        title: `Hare LSP — ${cachedVersion}`,
+        title: `Hare LSP - ${cachedVersion}`,
         placeHolder: "Hare LSP",
       });
       if (choice?.command) {
@@ -456,6 +517,38 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("hare-lsp.showOutput", () => {
       traceOutputChannel.show(true);
+    }),
+    vscode.commands.registerCommand("hare-lsp.openWebsite", () =>
+      openExternal("https://harelang.org/"),
+    ),
+    vscode.commands.registerCommand("hare-lsp.openDocs", () =>
+      openExternal("https://harelang.org/documentation/"),
+    ),
+    vscode.commands.registerCommand("hare-lsp.openTutorial", () =>
+      openExternal("https://harelang.org/tutorials/"),
+    ),
+    vscode.commands.registerCommand("hare-lsp.openSpecification", () =>
+      openExternal("https://harelang.org/specification/"),
+    ),
+    vscode.commands.registerCommand("hare-lsp.openStdlibDocs", () =>
+      openExternal("https://docs.harelang.org"),
+    ),
+    vscode.commands.registerCommand("hare-lsp.openInstallGuide", () =>
+      openExternal("https://harelang.org/documentation/install/"),
+    ),
+    vscode.commands.registerCommand("hare-lsp.openStdlibFolder", async () => {
+      const resolved = await findHareStdlibPath();
+      if (!resolved) {
+        void vscode.window.showErrorMessage(
+          "Could not find a Hare stdlib directory. Set `hare.harepath` to point at it.",
+        );
+        return;
+      }
+      await vscode.commands.executeCommand(
+        "vscode.openFolder",
+        vscode.Uri.file(resolved),
+        { forceNewWindow: true },
+      );
     }),
     vscode.window.onDidChangeActiveTextEditor(() => {
       updateVisibility();

@@ -87,7 +87,7 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	let sig: str = "";
 	let docs: str = "";
 	let found_local = false;
-	const qualifier_peek = qualifier_prefix_at(data, ident_range.0);
+	const qualifier_peek = analysis::qualifier_prefix_at(data, ident_range.0);
 	defer free(qualifier_peek);
 	if (len(qualifier_peek) == 0) {
 		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
@@ -251,7 +251,7 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	};
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
 	const cache = parse_of(doc);
-	const qualifier_peek = qualifier_prefix_at(data, ident_range.0);
+	const qualifier_peek = analysis::qualifier_prefix_at(data, ident_range.0);
 	defer free(qualifier_peek);
 	if (len(qualifier_peek) == 0) {
 		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
@@ -308,7 +308,7 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 	// Bare local lookups only apply if the reference is not qualified —
 	// if the user wrote `mod::name`, the local file's index never has
 	// `name` (it would be in `mod`).
-	const qualifier_peek = qualifier_prefix_at(data, ident_range.0);
+	const qualifier_peek = analysis::qualifier_prefix_at(data, ident_range.0);
 	defer free(qualifier_peek);
 	if (len(qualifier_peek) == 0) {
 		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
@@ -624,105 +624,28 @@ fn attr_at(data: []u8, off: size) ((size, size) | void) = {
 	};
 };
 
-fn qualifier_prefix_at(data: []u8, ident_start: size) str = {
-	// We're looking for "...::ident" — the "::" must be directly before
-	// ident_start (no whitespace between qualifier and "::").
-	if (ident_start < 2) return strings::dup("")!;
-	if (data[ident_start - 1] != ':': u8 || data[ident_start - 2] != ':': u8) {
-		return strings::dup("")!;
-	};
-	// Walk back over the qualifier ident bytes.
-	let q_end = ident_start - 2;
-	let q_start = q_end;
-	for (q_start > 0; q_start -= 1) {
-		const b = data[q_start - 1];
-		if (!is_ident_byte_nav(b)) break;
-	};
-	if (q_start == q_end) return strings::dup("")!;
-	return strings::dup(strings::fromutf8(data[q_start..q_end])!)!;
-};
-
-fn is_ident_byte_nav(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '_': u8;
-};
-
-// Collects the short-name modules imported in the file's `use` block. For
-// `use io;` adds "io"; for `use foo::bar;` adds "bar" (the last segment).
-// Caller frees the slice and each string.
-fn collect_imported_module_names(su: *ast::subunit) []str = {
-	let out: []str = [];
-	for (let i = 0z; i < len(su.imports); i += 1) {
-		const id = su.imports[i].ident;
-		if (len(id) == 0) continue;
-		append(out, strings::dup(id[len(id) - 1])!)!;
-	};
-	return out;
-};
-
-// Like `collect_imported_module_names` but returns the full module identifier
-// ("unix::poll") rather than just the last segment. Used to drive stdlib
-// directory lookups, which need the full subpath.
-fn collect_imported_module_paths(su: *ast::subunit) []str = {
-	let out: []str = [];
-	for (let i = 0z; i < len(su.imports); i += 1) {
-		const id = su.imports[i].ident;
-		if (len(id) == 0) continue;
-		append(out, join_module_ident(id))!;
-	};
-	return out;
-};
-
-// Finds the full module identifier for an import whose last segment matches
-// `qualifier` ("poll" -> "unix::poll" if such an import exists). Returns
-// the empty string when nothing matches; caller frees in that case too
-// since the result is always allocated.
-fn full_module_for_qualifier(su: *ast::subunit, qualifier: str) str = {
-	for (let i = 0z; i < len(su.imports); i += 1) {
-		const id = su.imports[i].ident;
-		if (len(id) == 0) continue;
-		if (id[len(id) - 1] != qualifier) continue;
-		return join_module_ident(id);
-	};
-	return strings::dup("")!;
-};
-
-fn join_module_ident(id: ast::ident) str = {
-	let out: []u8 = [];
-	for (let i = 0z; i < len(id); i += 1) {
-		if (i > 0) {
-			append(out, ':': u8)!;
-			append(out, ':': u8)!;
-		};
-		const seg = strings::toutf8(id[i]);
-		for (let j = 0z; j < len(seg); j += 1) {
-			append(out, seg[j])!;
-		};
-	};
-	return strings::fromutf8(out)!;
-};
-
-fn free_str_slice_nav(s: []str) void = {
-	for (let i = 0z; i < len(s); i += 1) {
-		free(s[i]);
-	};
-	free(s);
-};
-
 // Module-aware workspace lookup. Tries in priority order:
-//   1. Qualifier present  -> find_in_module(qualifier, name)
-//   2. find_in_imports(file's imports, name)
-//   3. find_first_by_short_name (last-resort fallback)
+//   1. Qualifier present  -> workspace, then stdlib (lazily indexing)
+//   2. Bare: file's imports against workspace, then stdlib
+//   3. Last-resort: any match in workspace, then stdlib
+//
+// The workspace-only resolution is delegated to
+// `analysis::workspace_lookup_for_subunit`; stdlib resolution layers on
+// top here because it needs `*server` to drive lazy indexing.
 fn workspace_lookup_aware(
 	s: *server, doc: *document, data: []u8,
 	ident_start: size, ident_str: str,
 ) (*analysis::workspace_entry | void) = {
-	const qualifier = qualifier_prefix_at(data, ident_start);
+	const qualifier = analysis::qualifier_prefix_at(data, ident_start);
 	defer free(qualifier);
+	const cache = parse_of(doc);
+	const doc_path = lsp::uri_decode_path(doc.uri);
+	defer free(doc_path);
+	const file_module = analysis::module_from_path(doc_path);
+	defer free(file_module);
 	if (len(qualifier) > 0) {
-		match (analysis::find_in_module(&s.workspace_index, qualifier, ident_str)) {
+		match (analysis::workspace_lookup_for_subunit(&s.workspace_index,
+				&cache.pr.subunit, file_module, qualifier, ident_str)) {
 		case let e: *analysis::workspace_entry => return e;
 		case void => void;
 		};
@@ -732,8 +655,7 @@ fn workspace_lookup_aware(
 		// (e.g. "poll" for `use unix::poll;`), so we also try the
 		// fully-qualified module identifier when the open file's
 		// imports point to a multi-segment path ending in `qualifier`.
-		const cache = parse_of(doc);
-		const full = full_module_for_qualifier(&cache.pr.subunit, qualifier);
+		const full = analysis::full_module_for_qualifier(&cache.pr.subunit, qualifier);
 		defer free(full);
 		const lookup_module = if (len(full) > 0) full else qualifier;
 		if (ensure_stdlib_module_indexed(s, lookup_module)) {
@@ -744,17 +666,25 @@ fn workspace_lookup_aware(
 		};
 		return void;
 	};
-	// Bare name: rank by the open file's imports.
-	const cache = parse_of(doc);
-	const imports = collect_imported_module_names(&cache.pr.subunit);
-	defer free_str_slice_nav(imports);
+	// Bare name: try the file's own module first (a same-module
+	// reference is the most common case), then rank by the open file's
+	// imports.
+	if (len(file_module) > 0) {
+		match (analysis::find_in_module(&s.workspace_index,
+				file_module, ident_str)) {
+		case let e: *analysis::workspace_entry => return e;
+		case void => void;
+		};
+	};
+	const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
+	defer analysis::free_str_slice(imports);
 	match (analysis::find_in_imports(&s.workspace_index, imports, ident_str)) {
 	case let e: *analysis::workspace_entry => return e;
 	case void => void;
 	};
 	// Ensure each import is indexed in stdlib, then try matching.
-	const full_imports = collect_imported_module_paths(&cache.pr.subunit);
-	defer free_str_slice_nav(full_imports);
+	const full_imports = analysis::collect_imported_module_paths(&cache.pr.subunit);
+	defer analysis::free_str_slice(full_imports);
 	for (let i = 0z; i < len(full_imports); i += 1) {
 		const _ = ensure_stdlib_module_indexed(s, full_imports[i]);
 	};
@@ -1061,7 +991,7 @@ fn infer_type_from_init(srv: *server, doc: *document,
 fn infer_match_expr_type(srv: *server, doc: *document,
 		m: *ast::match_expr) (str | void) = {
 	let parts: []str = [];
-	defer free_str_slice_nav(parts);
+	defer analysis::free_str_slice(parts);
 	for (let i = 0z; i < len(m.cases); i += 1) {
 		const mc = &m.cases[i];
 		match (infer_case_value_type(srv, doc, mc)) {
@@ -1250,7 +1180,7 @@ fn lookup_callee(srv: *server, doc: *document,
 		case void => void;
 		};
 		const cache = parse_of(doc);
-		const full = full_module_for_qualifier(&cache.pr.subunit, qualifier);
+		const full = analysis::full_module_for_qualifier(&cache.pr.subunit, qualifier);
 		defer free(full);
 		const mod_to_index = if (len(full) > 0) full else qualifier;
 		if (ensure_stdlib_module_indexed(srv, mod_to_index)) {
@@ -1260,8 +1190,8 @@ fn lookup_callee(srv: *server, doc: *document,
 		return void;
 	};
 	const cache = parse_of(doc);
-	const imports = collect_imported_module_names(&cache.pr.subunit);
-	defer free_str_slice_nav(imports);
+	const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
+	defer analysis::free_str_slice(imports);
 	match (analysis::find_in_imports(&srv.workspace_index, imports, name)) {
 	case let e: *analysis::workspace_entry => return e;
 	case void => void;
@@ -1418,7 +1348,7 @@ fn lookup_decl_by_ident(srv: *server, doc: *document,
 		case void => void;
 		};
 		const cache = parse_of(doc);
-		const full = full_module_for_qualifier(&cache.pr.subunit, qualifier);
+		const full = analysis::full_module_for_qualifier(&cache.pr.subunit, qualifier);
 		defer free(full);
 		const mod_to_index = if (len(full) > 0) full else qualifier;
 		if (ensure_stdlib_module_indexed(srv, mod_to_index)) {
@@ -1436,8 +1366,8 @@ fn lookup_decl_by_ident(srv: *server, doc: *document,
 	case let i: size => return &cache.pr.subunit.decls[i];
 	case void => void;
 	};
-	const imports = collect_imported_module_names(&cache.pr.subunit);
-	defer free_str_slice_nav(imports);
+	const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
+	defer analysis::free_str_slice(imports);
 	match (analysis::find_in_imports(&srv.workspace_index, imports, name)) {
 	case let e: *analysis::workspace_entry =>
 		return decl_from_workspace_entry(srv, e, name);

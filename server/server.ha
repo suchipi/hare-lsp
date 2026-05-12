@@ -101,6 +101,18 @@ export type server = struct {
 	// each keystroke.
 	file_parse_cache: file_parse_cache,
 
+	// FIFO queue of in-flight indexing jobs. The head is drained one
+	// batch at a time between dispatch ticks in [[run]]. New jobs are
+	// appended via [[start_index_job]]. Both workspace and full-stdlib
+	// indexing flow through this queue so they don't trample each
+	// other.
+	pending_index_jobs: []*workspace_index_job,
+
+	// True after [[ensure_full_stdlib_indexed]] has enqueued a job
+	// (whether or not it has finished). Used to make
+	// `workspace/symbol` invoke stdlib indexing once per session.
+	stdlib_fully_indexed: bool,
+
 	// Minimum severity of stderr log lines emitted via `slog_*`. See
 	// `log.ha`. Defaults to INFO; can be overridden by setting the
 	// HARE_LSP_LOG_LEVEL env var before launching the binary.
@@ -127,10 +139,26 @@ export def EXIT_ERROR: int = 1;
 
 // Constructs a new server bound to the given input scanner and output handle.
 // The scanner must outlive the server. Caller is responsible for finishing it.
-export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
+export fn new(reader_src: *bufio::scanner, out: io::handle) server = {
+	return new_with_reader(lsp::new_reader(reader_src), out);
+};
+
+// Like [[new]] but lets the caller override the LSP transport's max
+// body size. Used by `cmd/hare-lsp/main.ha` when `HARE_LSP_MAX_BODY_BYTES`
+// is set so very large workspace edits can be accepted. Constructs the
+// reader directly with the custom limit rather than allocating a
+// default reader and immediately replacing it.
+export fn new_with_max_body(
+	reader_src: *bufio::scanner, out: io::handle, max_body: size,
+) server = {
+	return new_with_reader(
+		lsp::new_reader_with_limit(reader_src, max_body), out);
+};
+
+fn new_with_reader(reader: lsp::reader, out: io::handle) server = server {
 	state = server_state::PRE_INIT,
 	trace = lsp::trace_value::OFF,
-	reader = lsp::new_reader(reader_src),
+	reader = reader,
 	out = out,
 	client_pid = void,
 	next_request_id = 0,
@@ -150,6 +178,8 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = server {
 	stdlib_index = analysis::new_workspace_index(),
 	indexed_stdlib_modules = [],
 	file_parse_cache = new_file_parse_cache(),
+	pending_index_jobs = [],
+	stdlib_fully_indexed = false,
 	log_min_level = log_level_from_env(),
 };
 
@@ -200,6 +230,7 @@ export fn finish(s: *server) void = {
 	};
 	free(s.indexed_stdlib_modules);
 	finish_file_parse_cache(&s.file_parse_cache);
+	finish_pending_index(s);
 };
 
 // Runs the main message loop until the client sends `exit` (or EOF). Returns
@@ -225,6 +256,7 @@ export fn run(s: *server) int = {
 			// send may itself fail if the peer also closed its end.
 			send_error(s, void, lsp::PARSE_ERROR, lsp::strerror(e));
 			log_stderr_strerror(s, "transport error", lsp::strerror(e));
+			log_transport_context(s);
 			return EXIT_ERROR;
 		};
 
@@ -252,6 +284,11 @@ export fn run(s: *server) int = {
 		// coalesces; a trailing edit publishes once any later message
 		// arrives.
 		flush_pending_diagnostics(s);
+		// Drain one batch of background workspace indexing, if any.
+		// Cooperative: each batch processes a small number of files
+		// then yields back to the loop so the next message is served
+		// promptly.
+		drain_index_job(s);
 	};
 	return EXIT_OK;
 };
@@ -321,7 +358,7 @@ fn pending_index(s: *server, id: i64) int = {
 // is dropped. A client that never replies to outgoing requests otherwise
 // grows this slice without bound.
 export fn pending_remember(s: *server, id: i64, method: str) void = {
-	if (len(s.pending_requests) >= MAX_PENDING_REQUESTS) {
+	if (len(s.pending_requests) >= s.config.limits.max_pending_requests) {
 		free(s.pending_requests[0].method);
 		delete(s.pending_requests[0]);
 	};
@@ -943,4 +980,62 @@ fn log_stderr(s: *server, msg: str) void = {
 
 fn log_stderr_strerror(s: *server, prefix: str, msg: str) void = {
 	slog_error(s, prefix, ":", msg);
+};
+
+// Cap on the diagnostic dump so a runaway header doesn't blow up the
+// log line. The longest legitimate LSP header block is well under this.
+def DIAG_HEADER_CAP: size = 512;
+
+// Dumps the partial header bytes captured by [[lsp::read]] during the
+// failing call. Emits both the byte count and a printable-escaped quote
+// so binary noise stays readable in the log. No-op when nothing was
+// captured (e.g. the error fired before any line was scanned).
+fn log_transport_context(s: *server) void = {
+	const ctx = lsp::last_header_bytes(&s.reader);
+	if (len(ctx) == 0) {
+		slog_error(s, "transport context: (no bytes captured)");
+		return;
+	};
+	const view = if (len(ctx) > DIAG_HEADER_CAP) {
+		yield ctx[..DIAG_HEADER_CAP];
+	} else {
+		yield ctx;
+	};
+	const quoted = quote_bytes_for_log(view);
+	defer free(quoted);
+	const suffix = if (len(ctx) > DIAG_HEADER_CAP) " (truncated)" else "";
+	slog_error(s, "transport context", len(ctx): uint, "bytes:",
+		quoted, suffix);
+};
+
+// Renders bytes as a printable string, escaping CR, LF, tab, backslash,
+// double-quote, and any non-printable bytes as \xNN. The result is
+// wrapped in double quotes. Caller frees.
+fn quote_bytes_for_log(data: []u8) str = {
+	let out: []u8 = [];
+	const hex: [16]u8 = ['0': u8, '1': u8, '2': u8, '3': u8, '4': u8,
+		'5': u8, '6': u8, '7': u8, '8': u8, '9': u8, 'a': u8, 'b': u8,
+		'c': u8, 'd': u8, 'e': u8, 'f': u8];
+	append(out, '"': u8)!;
+	for (let i = 0z; i < len(data); i += 1) {
+		const b = data[i];
+		if (b == '\r': u8) {
+			append(out, ['\\': u8, 'r': u8]...)!;
+		} else if (b == '\n': u8) {
+			append(out, ['\\': u8, 'n': u8]...)!;
+		} else if (b == '\t': u8) {
+			append(out, ['\\': u8, 't': u8]...)!;
+		} else if (b == '\\': u8) {
+			append(out, ['\\': u8, '\\': u8]...)!;
+		} else if (b == '"': u8) {
+			append(out, ['\\': u8, '"': u8]...)!;
+		} else if (b >= 0x20 && b < 0x7f) {
+			append(out, b)!;
+		} else {
+			append(out, ['\\': u8, 'x': u8,
+				hex[b >> 4], hex[b & 0xf]]...)!;
+		};
+	};
+	append(out, '"': u8)!;
+	return strings::fromutf8(out)!: str;
 };

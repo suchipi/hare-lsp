@@ -161,14 +161,21 @@ export fn handle_did_change_workspace_folders(s: *server, n: lsp::notification) 
 	match (json::get(&event, "added")) {
 	case let p: *json::value =>
 		const new = decode_workspace_folders(*p);
+		let roots: []str = [];
+		defer {
+			for (let j = 0z; j < len(roots); j += 1) free(roots[j]);
+			free(roots);
+		};
 		for (let i = 0z; i < len(new); i += 1) {
 			append(s.workspace_folders, new[i])!;
-			// Scan the new folder.
-			const path = uri_to_dir_path(new[i].uri);
-			defer free(path);
-			const _ = analysis::index_directory(&s.workspace_index, path);
+			append(roots, uri_to_dir_path(new[i].uri))!;
 		};
 		free(new);
+		if (len(roots) > 0) {
+			start_index_job(s, roots, &s.workspace_index,
+				"Indexing workspace",
+				"hare-lsp: indexed");
+		};
 	case => void;
 	};
 };
