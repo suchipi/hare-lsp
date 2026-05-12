@@ -1,4 +1,4 @@
-# Hare LSP — VSCode extension
+# Hare LSP VSCode extension
 
 Adds Hare language support to VSCode by wrapping the `hare-lsp` language server.
 
@@ -47,4 +47,4 @@ and update `package.json` to match.
 
 ## License
 
-MPL-2.0 — same as the language server and Hare itself.
+MPL-2.0, same as the language server and Hare itself.

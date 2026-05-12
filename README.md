@@ -7,8 +7,8 @@ A Language Server Protocol implementation for the [Hare programming language](ht
 ## Features
 
 - **Diagnostics** (push and pull): an in-process recovering parser produces diagnostics on every change. On save, `hare build` adds type-check errors. Toggle build via `diagnostics.enableBuild`.
-- **Navigation**: hover, definition, type-definition, declaration, implementation, references, document highlight, prepare-rename + rename, document & workspace symbols, document links (target resolution for workspace imports — stdlib imports resolve only when `HAREPATH` overlaps a workspace folder), call hierarchy, type hierarchy.
-- **Editing**: completion, signature help, formatting (full / range / on-type with reindent), code actions (organize imports), code lens (run test, N references), inlay hints (parameter names + inferred types — best-effort: literals and declared types today), semantic tokens (full + range + delta), folding ranges, selection ranges.
+- **Navigation**: hover, definition, type-definition, declaration, implementation, references, document highlight, prepare-rename + rename, document & workspace symbols, document links (target resolution for workspace imports; stdlib imports resolve only when `HAREPATH` overlaps a workspace folder), call hierarchy, type hierarchy.
+- **Editing**: completion, signature help, formatting (full / range / on-type with reindent), code actions (organize imports), code lens (run test, N references), inlay hints (parameter names + inferred types; best-effort, currently literals and declared types), semantic tokens (full + range + delta), folding ranges, selection ranges.
 - **Workspace**: multi-root workspace folders, configuration pull, file watchers, will/did create/rename/delete, executeCommand (`hare-lsp.runTest`, `hare-lsp.runModule`).
 - **Window**: showMessage, showMessageRequest, logMessage, showDocument, work-done progress.
 - **Lifecycle**: initialize, initialized, shutdown, exit, $/cancelRequest, $/setTrace, $/logTrace, dynamic capability registration.
@@ -91,7 +91,7 @@ The canonical JSON Schema for these settings is checked in at [editors/vscode/sc
 | `HARE_LSP_LOG_DIR` | Absolute directory to tee the wire-protocol stream into `hare-lsp-{in,out,err}.log`. Useful for diagnosing handshake or framing issues. |
 | `HARE_LSP_LOG_LEVEL` | Minimum stderr-log severity. One of `debug`, `info`, `warn`, `error`. Defaults to `info`. |
 
-## `harefmt` — standalone formatter CLI
+## `harefmt`: standalone formatter CLI
 
 `make` also builds `./harefmt`, a thin CLI wrapping the same comment-preserving formatter the LSP uses for `textDocument/formatting`. Use it from the shell or CI to format `*.ha` files outside an editor.
 
@@ -121,8 +121,8 @@ Exit codes follow the gofmt / prettier convention: `0` = clean, `1` = at least o
 
 `harefmt` honours two ignore files at each directory level along the walk:
 
-- `.harefmtignore` — same syntax as `.gitignore`. Use this for paths you want skipped from formatting but kept in version control.
-- `.gitignore` — read by default so vendored / generated `*.ha` files in your repo are automatically excluded.
+- `.harefmtignore`: same syntax as `.gitignore`. Use this for paths you want skipped from formatting but kept in version control.
+- `.gitignore`: read by default so vendored / generated `*.ha` files in your repo are automatically excluded.
 
 Both files are walked upward from each path you pass on the command line, stopping at the first `.git/` ancestor (or filesystem root if no git repo is found). Closer (more nested) ignore files override more distant ones; within a single file, the last matching pattern wins.
 
@@ -142,11 +142,11 @@ Negation works the standard gitignore way:
 !keep.gen.ha
 ```
 
-**Caveat (standard gitignore behaviour):** once a directory is excluded, files inside it can no longer be re-included via a `!` pattern. The walker prunes excluded directories before descending, so `vendor/` followed by `!vendor/important.ha` will NOT visit `important.ha` — git itself behaves the same way. If you need to re-include something under an excluded directory, un-exclude the directory first and exclude only its specific contents.
+**Caveat (standard gitignore behaviour):** once a directory is excluded, files inside it can no longer be re-included via a `!` pattern. The walker prunes excluded directories before descending, so `vendor/` followed by `!vendor/important.ha` will NOT visit `important.ha`. Git itself behaves the same way. If you need to re-include something under an excluded directory, un-exclude the directory first and exclude only its specific contents.
 
 ### Standalone `gitignore` module
 
-The gitignore-style pattern parser and matcher used by `harefmt` lives in its own top-level Hare module at [`gitignore/`](gitignore/) (see [`gitignore/pattern.ha`](gitignore/pattern.ha) and [`gitignore/match.ha`](gitignore/match.ha)). It has no dependency on the rest of the project — just stdlib's `strings` and `fnmatch` — and exposes parsing, single-pattern matching, ordered-list evaluation (last-match-wins), and layered evaluation (outer-first for nested ignore files). Anyone who wants the same matching semantics in another Hare project can vendor the directory unchanged.
+The gitignore-style pattern parser and matcher used by `harefmt` lives in its own top-level Hare module at [`gitignore/`](gitignore/) (see [`gitignore/pattern.ha`](gitignore/pattern.ha) and [`gitignore/match.ha`](gitignore/match.ha)). It has no dependency on the rest of the project (just stdlib's `strings` and `fnmatch`) and exposes parsing, single-pattern matching, ordered-list evaluation (last-match-wins), and layered evaluation (outer-first for nested ignore files). Anyone who wants the same matching semantics in another Hare project can vendor the directory unchanged.
 
 ## Known limitations
 
@@ -162,4 +162,4 @@ These features work but have caveats worth knowing before relying on them:
 
 ## License
 
-MPL-2.0 — same as Hare itself.
+MPL-2.0, same as Hare itself.

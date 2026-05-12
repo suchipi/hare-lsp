@@ -34,7 +34,7 @@ First release. Implements the full applicable surface of LSP 3.17:
   workDoneProgress create/cancel, $/progress.
 - **Workspace indexing**: walks each root for *.ha and builds a flat
   index of declarations; updates incrementally on watcher events.
-- **Configuration**: every `hare.*` key is live — `path`, `tags`,
+- **Configuration**: every `hare.*` key is live: `path`, `tags`,
   `diagnostics.{debounceMs,enableBuild}`, `format.{indentStyle,
   indentWidth,trimFinalNewlines,insertFinalNewline}`, and
   `inlayHints.{parameterNames,inferredTypes}`. No reserved/dormant keys.
