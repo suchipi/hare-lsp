@@ -31,15 +31,15 @@ use strings;
 // the literal-renderer can peek at source bytes (for detecting raw
 // strings, which the AST otherwise throws away).
 //
-// `rune_to_byte` maps the lexer's rune-index offsets (which is what
-// `ast::location.off` actually stores — see hare::lex::lexloc, which
-// increments by 1 per rune regardless of UTF-8 byte width) into byte
-// offsets for slicing `data`. Built once per format call.
+// `loc.start.off` and `loc.end.off` on every AST node are byte
+// offsets into `data` - `analysis::parse_recover` runs
+// `fixup_parse_result` to translate the lexer's native rune indices
+// up front, so callers slicing `data` here can use those offsets
+// directly without further conversion.
 export type build_ctx = struct {
 	c: *comment_cursor,
 	bl: blank_lines,
 	data: []u8,
-	rune_to_byte: []size,
 };
 
 // Builds the doc for an entire compilation subunit (a single .ha
@@ -53,11 +53,7 @@ export fn build_subunit_doc(
 	data: []u8,
 ) doc = {
 	const data_len = len(data);
-	const r2b = build_rune_to_byte(data);
-	defer free(r2b);
-	let bc = build_ctx {
-		c = c, bl = bl, data = data, rune_to_byte = r2b,
-	};
+	let bc = build_ctx { c = c, bl = bl, data = data };
 	let items: []doc = [];
 
 	// Boundary for "file header" comments: the start of whichever
@@ -138,11 +134,7 @@ export fn build_decls_range_doc(
 	bl: blank_lines,
 	data: []u8,
 ) doc = {
-	const r2b = build_rune_to_byte(data);
-	defer free(r2b);
-	let bc = build_ctx {
-		c = c, bl = bl, data = data, rune_to_byte = r2b,
-	};
+	let bc = build_ctx { c = c, bl = bl, data = data };
 	let items: []doc = [];
 	for (let i = first; i <= last; i += 1) {
 		const decl_off = su.decls[i].loc.start.off: size;
@@ -155,7 +147,6 @@ export fn build_decls_range_doc(
 };
 
 // ----- Decls --------------------------------------------------------
-
 export fn build_decl_doc(d: *ast::decl, bc: *build_ctx) doc = {
 	let items: []doc = [];
 
@@ -183,11 +174,7 @@ export fn build_decl_doc(d: *ast::decl, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
-fn build_decl_func(
-	d: *ast::decl,
-	f: ast::decl_func,
-	bc: *build_ctx,
-) doc = {
+fn build_decl_func(d: *ast::decl, f: ast::decl_func, bc: *build_ctx) doc = {
 	let items: []doc = [];
 
 	switch (f.attrs) {
@@ -292,7 +279,23 @@ fn build_decl_type(t: ast::decl_type, bc: *build_ctx) doc = {
 // `key = value` form doesn't fit on one line. In flat mode renders as
 // ` value`; in broken mode renders as `\n\tvalue` at the current
 // indent + 1.
+//
+// EXCEPTION: when the RHS opens its own block (`match { ... }`,
+// `switch { ... }`, `for { ... }`, `if { ... } else { ... }`, a
+// compound `{ ... }`, or a multi-line struct/array/tuple literal),
+// keep the keyword/opening bracket on the same line as `=` and let
+// the block contents wrap inside. Per the Hare style guide examples,
+// `const x = match (foo) {` stays on one line; only the cases break.
+// Forcing a break BEFORE the RHS in those cases produces a stray
+// `=` at end of line followed by `\n\tmatch (...)` which is uglier
+// and consumes a full line for nothing.
 fn build_init_value_doc(e: *ast::expr, bc: *build_ctx) doc = {
+	if (rhs_introduces_own_block(e)) {
+		let items: []doc = [];
+		append(items, text(" "))!;
+		append(items, build_expr_doc(e, bc))!;
+		return concat(items);
+	};
 	let inner: []doc = [];
 	append(inner, line(" "))!;
 	append(inner, build_expr_doc(e, bc))!;
@@ -301,8 +304,45 @@ fn build_init_value_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	return group(g_items);
 };
 
-// ----- Imports ------------------------------------------------------
+// Returns true if `e` renders as a construct whose first token is
+// followed by an opening `(`, `{`, or `[` and whose body wraps
+// internally - keeping such constructs on the `=` line preserves the
+// visual cue that the RHS continues into a block, instead of pushing
+// the keyword down to a new indented line.
+fn rhs_introduces_own_block(e: *ast::expr) bool = {
+	match (e.expr) {
+	case ast::match_expr =>
+		return true;
+	case ast::switch_expr =>
+		return true;
+	case ast::for_expr =>
+		return true;
+	case ast::compound_expr =>
+		return true;
+	case let i: ast::if_expr =>
+		return i.fbranch != null;
+	// An `if` without an `else` branch can render flat as a
+	// single line (`if (cond) value`); only when there's an
+	// else branch does it span multiple lines and benefit
+	// from staying glued to `=`.
 
+	case let l: ast::literal_expr =>
+		match (l) {
+		case ast::struct_literal =>
+			return true;
+		case ast::array_literal =>
+			return true;
+		case ast::tuple_literal =>
+			return true;
+		case ast::plain_literal =>
+			return false;
+		};
+	case =>
+		return false;
+	};
+};
+
+// ----- Imports ------------------------------------------------------
 export fn build_import_doc(im: *ast::import) doc = {
 	let items: []doc = [];
 	append(items, text("use "))!;
@@ -346,7 +386,6 @@ fn build_member_list(members: []str) doc = {
 };
 
 // ----- Compound body & statements ----------------------------------
-
 fn build_compound_body(
 	body: *ast::expr,
 	cmp: *ast::compound_expr,
@@ -404,7 +443,6 @@ fn push_comments_before(
 };
 
 // ----- Types --------------------------------------------------------
-
 export fn build_type_doc(t: *ast::_type, bc: *build_ctx) doc = {
 	match (t.repr) {
 	case let a: ast::alias_type =>
@@ -469,8 +507,7 @@ fn build_func_proto_doc(t: *ast::func_type, bc: *build_ctx) doc = {
 			append(inner, text(" = "))!;
 			append(inner, build_expr_doc(&e, bc))!;
 		};
-		const more = i + 1 < len(t.params)
-			|| t.variadism == ast::variadism::C;
+		const more = i + 1 < len(t.params) || t.variadism == ast::variadism::C;
 		if (more) {
 			append(inner, text(","))!;
 			append(inner, line(" "))!;
@@ -501,9 +538,18 @@ fn build_func_proto_doc(t: *ast::func_type, bc: *build_ctx) doc = {
 };
 
 fn build_enum_type(e: *ast::enum_type, bc: *build_ctx) doc = {
+	// Build the body as a softline-separated list so a short enum
+	// (e.g. `enum { NONE, WRITE, CHECK, STDOUT }`) renders inline if
+	// it fits. The Wadler `group` chooses flat or broken once based
+	// on total flat width; in broken mode every softline becomes
+	// a newline, restoring the historic one-variant-per-line layout.
+	// Flat: `enum { A, B, C }` (single-line style: spaces after `{`
+	// and before `}`, no trailing comma).
+	// Broken: `enum {\n\tA,\n\tB,\n\tC,\n}` (multi-line style:
+	// each on its own line, trailing comma required).
 	let inner: []doc = [];
+	append(inner, line(" "))!;
 	for (let i = 0z; i < len(e.values); i += 1) {
-		append(inner, hardline())!;
 		const v = &e.values[i];
 		append(inner, text(v.name))!;
 		match (v.value) {
@@ -512,7 +558,13 @@ fn build_enum_type(e: *ast::enum_type, bc: *build_ctx) doc = {
 			append(inner, text(" = "))!;
 			append(inner, build_expr_doc(ex, bc))!;
 		};
-		append(inner, text(","))!;
+		if (i + 1 < len(e.values)) {
+			append(inner, text(","))!;
+			append(inner, line(" "))!;
+		};
+	};
+	if (len(e.values) > 0) {
+		append(inner, if_broken(","))!;
 	};
 
 	let outer: []doc = [];
@@ -523,9 +575,9 @@ fn build_enum_type(e: *ast::enum_type, bc: *build_ctx) doc = {
 	};
 	append(outer, text("{"))!;
 	append(outer, nest(1, concat(inner)))!;
-	append(outer, hardline())!;
+	append(outer, line(" "))!;
 	append(outer, text("}"))!;
-	return concat(outer);
+	return group(outer);
 };
 
 fn build_list_type(l: *ast::list_type, bc: *build_ctx) doc = {
@@ -564,10 +616,23 @@ fn build_struct_union_type(t: *ast::_type, bc: *build_ctx) doc = {
 	case => abort();
 	};
 
+	// Softline-separated members so a tiny struct (e.g.
+	// `struct { x: int, y: int }`) renders inline if it fits within
+	// 80 cols. Per the Hare style guide, single-line struct uses
+	// `{ field, field }` (spaces, no trailing comma); multi-line
+	// uses one field per line with a required trailing comma.
 	let inner: []doc = [];
+	append(inner, line(" "))!;
 	for (let i = 0z; i < len(members); i += 1) {
-		append(inner, hardline())!;
 		const m = &members[i];
+		// Flush comments above this field. Approximation: use the
+		// field's `_type` loc as the boundary - per-field doc
+		// comments live on the line(s) just before the type. The
+		// struct_member AST node itself has no loc.
+		const field_off = struct_member_off(m);
+		if (field_off != 0z) {
+			const _ = push_comments_before(&inner, bc.c, field_off);
+		};
 		match (m.member) {
 		case let f: ast::struct_field =>
 			append(inner, text(f.name))!;
@@ -581,13 +646,37 @@ fn build_struct_union_type(t: *ast::_type, bc: *build_ctx) doc = {
 		case let a: ast::struct_alias =>
 			append(inner, text(render_ident(a)))!;
 		};
-		append(inner, text(","))!;
+		if (i + 1 < len(members)) {
+			append(inner, text(","))!;
+			append(inner, line(" "))!;
+		};
+	};
+	// Flush any comments that appear after the last field but
+	// before the closing `}` (file-internal trailing notes).
+	const struct_end = t.loc.end.off: size;
+	const _ = push_comments_before(&inner, bc.c, struct_end);
+	if (len(members) > 0) {
+		append(inner, if_broken(","))!;
 	};
 
 	append(outer, nest(1, concat(inner)))!;
-	append(outer, hardline())!;
+	append(outer, line(" "))!;
 	append(outer, text("}"))!;
-	return concat(outer);
+	return group(outer);
+};
+
+// Best-effort byte offset for the start of a struct/union member.
+// Returns 0 for struct_alias members (the alias is a bare ident with
+// no loc reachable here).
+fn struct_member_off(m: *ast::struct_member) size = {
+	match (m.member) {
+	case let f: ast::struct_field =>
+		return f._type.loc.start.off: size;
+	case let e: ast::struct_embedded =>
+		return (e: *ast::_type).loc.start.off: size;
+	case ast::struct_alias =>
+		return 0z;
+	};
 };
 
 fn build_tagged_type(tt: ast::tagged_type, bc: *build_ctx) doc = {
@@ -637,7 +726,6 @@ fn build_tuple_type(tt: ast::tuple_type, bc: *build_ctx) doc = {
 };
 
 // ----- Expressions --------------------------------------------------
-
 export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	match (e.expr) {
 	case let a: ast::access_expr =>
@@ -709,7 +797,7 @@ export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	case let cmp: ast::compound_expr =>
 		return build_compound_body(e, &cmp, bc);
 	case let m: ast::match_expr =>
-		return build_match_expr(&m, bc);
+		return build_match_expr(&m, e.loc, bc);
 	case let l: ast::len_expr =>
 		let items: []doc = [];
 		append(items, text("len("))!;
@@ -749,7 +837,7 @@ export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	case let s: ast::slice_expr =>
 		return build_slice_expr(&s, bc);
 	case let s: ast::switch_expr =>
-		return build_switch_expr(&s, bc);
+		return build_switch_expr(&s, e.loc, bc);
 	case let u: ast::unarithm_expr =>
 		return build_unarithm_expr(&u, bc);
 	case ast::undefined_expr =>
@@ -916,62 +1004,106 @@ fn build_assign_expr(a: *ast::assign_expr, bc: *build_ctx) doc = {
 
 fn assign_op_str(op: binarithm_op) str = {
 	switch (op) {
-	case binarithm_op::BAND => return "&=";
-	case binarithm_op::LAND => return "&&=";
-	case binarithm_op::BOR => return "|=";
-	case binarithm_op::LOR => return "||=";
-	case binarithm_op::DIV => return "/=";
-	case binarithm_op::LSHIFT => return "<<=";
-	case binarithm_op::MINUS => return "-=";
-	case binarithm_op::MODULO => return "%=";
-	case binarithm_op::PLUS => return "+=";
-	case binarithm_op::RSHIFT => return ">>=";
-	case binarithm_op::TIMES => return "*=";
-	case binarithm_op::BXOR => return "^=";
-	case binarithm_op::LXOR => return "^^=";
+	case binarithm_op::BAND =>
+		return "&=";
+	case binarithm_op::LAND =>
+		return "&&=";
+	case binarithm_op::BOR =>
+		return "|=";
+	case binarithm_op::LOR =>
+		return "||=";
+	case binarithm_op::DIV =>
+		return "/=";
+	case binarithm_op::LSHIFT =>
+		return "<<=";
+	case binarithm_op::MINUS =>
+		return "-=";
+	case binarithm_op::MODULO =>
+		return "%=";
+	case binarithm_op::PLUS =>
+		return "+=";
+	case binarithm_op::RSHIFT =>
+		return ">>=";
+	case binarithm_op::TIMES =>
+		return "*=";
+	case binarithm_op::BXOR =>
+		return "^=";
+	case binarithm_op::LXOR =>
+		return "^^=";
 	case => abort("non-assignable op");
 	};
 };
 
 fn binarithm_op_str(op: binarithm_op) str = {
 	switch (op) {
-	case binarithm_op::BAND => return "&";
-	case binarithm_op::BOR => return "|";
-	case binarithm_op::DIV => return "/";
-	case binarithm_op::GT => return ">";
-	case binarithm_op::GTEQ => return ">=";
-	case binarithm_op::LAND => return "&&";
-	case binarithm_op::LEQUAL => return "==";
-	case binarithm_op::LESS => return "<";
-	case binarithm_op::LESSEQ => return "<=";
-	case binarithm_op::LOR => return "||";
-	case binarithm_op::LSHIFT => return "<<";
-	case binarithm_op::LXOR => return "^^";
-	case binarithm_op::MINUS => return "-";
-	case binarithm_op::MODULO => return "%";
-	case binarithm_op::NEQUAL => return "!=";
-	case binarithm_op::PLUS => return "+";
-	case binarithm_op::RSHIFT => return ">>";
-	case binarithm_op::TIMES => return "*";
-	case binarithm_op::BXOR => return "^";
+	case binarithm_op::BAND =>
+		return "&";
+	case binarithm_op::BOR =>
+		return "|";
+	case binarithm_op::DIV =>
+		return "/";
+	case binarithm_op::GT =>
+		return ">";
+	case binarithm_op::GTEQ =>
+		return ">=";
+	case binarithm_op::LAND =>
+		return "&&";
+	case binarithm_op::LEQUAL =>
+		return "==";
+	case binarithm_op::LESS =>
+		return "<";
+	case binarithm_op::LESSEQ =>
+		return "<=";
+	case binarithm_op::LOR =>
+		return "||";
+	case binarithm_op::LSHIFT =>
+		return "<<";
+	case binarithm_op::LXOR =>
+		return "^^";
+	case binarithm_op::MINUS =>
+		return "-";
+	case binarithm_op::MODULO =>
+		return "%";
+	case binarithm_op::NEQUAL =>
+		return "!=";
+	case binarithm_op::PLUS =>
+		return "+";
+	case binarithm_op::RSHIFT =>
+		return ">>";
+	case binarithm_op::TIMES =>
+		return "*";
+	case binarithm_op::BXOR =>
+		return "^";
 	};
 };
 
 fn binprec(op: binarithm_op) uint = {
 	switch (op) {
-	case binarithm_op::DIV, binarithm_op::MODULO,
-		binarithm_op::TIMES => return 10;
-	case binarithm_op::MINUS, binarithm_op::PLUS => return 9;
-	case binarithm_op::LSHIFT, binarithm_op::RSHIFT => return 8;
-	case binarithm_op::BAND => return 7;
-	case binarithm_op::BXOR => return 6;
-	case binarithm_op::BOR => return 5;
-	case binarithm_op::GT, binarithm_op::GTEQ,
-		binarithm_op::LESS, binarithm_op::LESSEQ => return 4;
-	case binarithm_op::LEQUAL, binarithm_op::NEQUAL => return 3;
-	case binarithm_op::LAND => return 2;
-	case binarithm_op::LXOR => return 1;
-	case binarithm_op::LOR => return 0;
+	case binarithm_op::DIV, binarithm_op::MODULO, binarithm_op::TIMES =>
+		return 10;
+	case binarithm_op::MINUS, binarithm_op::PLUS =>
+		return 9;
+	case binarithm_op::LSHIFT, binarithm_op::RSHIFT =>
+		return 8;
+	case binarithm_op::BAND =>
+		return 7;
+	case binarithm_op::BXOR =>
+		return 6;
+	case binarithm_op::BOR =>
+		return 5;
+	case binarithm_op::GT,
+	binarithm_op::GTEQ,
+	binarithm_op::LESS,
+	binarithm_op::LESSEQ =>
+		return 4;
+	case binarithm_op::LEQUAL, binarithm_op::NEQUAL =>
+		return 3;
+	case binarithm_op::LAND =>
+		return 2;
+	case binarithm_op::LXOR =>
+		return 1;
+	case binarithm_op::LOR =>
+		return 0;
 	};
 };
 
@@ -1017,17 +1149,16 @@ fn build_binexpr_operand(
 	};
 };
 
-fn build_binding_expr(
-	b: *ast::binding_expr,
-	bc: *build_ctx,
-	op: str,
-) doc = {
+fn build_binding_expr(b: *ast::binding_expr, bc: *build_ctx, op: str) doc = {
 	let items: []doc = [];
 	if (b.is_static) append(items, text("static "))!;
 	switch (b.kind) {
-	case ast::binding_kind::DEF => append(items, text("def "))!;
-	case ast::binding_kind::CONST => append(items, text("const "))!;
-	case ast::binding_kind::LET => append(items, text("let "))!;
+	case ast::binding_kind::DEF =>
+		append(items, text("def "))!;
+	case ast::binding_kind::CONST =>
+		append(items, text("const "))!;
+	case ast::binding_kind::LET =>
+		append(items, text("let "))!;
 	};
 	for (let i = 0z; i < len(b.bindings); i += 1) {
 		const bi = b.bindings[i];
@@ -1158,10 +1289,14 @@ fn build_for_expr(f: *ast::for_expr, bc: *build_ctx) doc = {
 	append(items, text("("))!;
 
 	const op = switch (f.kind) {
-	case ast::for_kind::ACCUMULATOR => yield "=";
-	case ast::for_kind::EACH_VALUE => yield "..";
-	case ast::for_kind::EACH_POINTER => yield "&..";
-	case ast::for_kind::ITERATOR => yield "=>";
+	case ast::for_kind::ACCUMULATOR =>
+		yield "=";
+	case ast::for_kind::EACH_VALUE =>
+		yield "..";
+	case ast::for_kind::EACH_POINTER =>
+		yield "&..";
+	case ast::for_kind::ITERATOR =>
+		yield "=>";
 	};
 
 	match (f.bindings) {
@@ -1245,7 +1380,11 @@ fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
-fn build_match_expr(m: *ast::match_expr, bc: *build_ctx) doc = {
+fn build_match_expr(
+	m: *ast::match_expr,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
 	let outer: []doc = [];
 	append(outer, text("match "))!;
 	if (m.label != "") {
@@ -1280,15 +1419,44 @@ fn build_match_expr(m: *ast::match_expr, bc: *build_ctx) doc = {
 		};
 		append(inner, text(" =>"))!;
 		append(inner, build_case_exprs(cs.exprs, bc))!;
+		// Flush any trailing comments inside this case body (e.g.
+		// `case => abort(); // unreachable`) before moving on.
+		// Boundary is the next case's start, or - for the last
+		// case - the byte before the closing `}`.
+		const boundary = if (i + 1 <
+		len(m.cases)) case_boundary_match(&m.cases[i + 1]) else loc.end.off: size;
+		const _ = push_comments_before(&inner, bc.c, boundary);
 	};
 
-	append(outer, nest(1, concat(inner)))!;
+	// Per the Hare style guide, `case` labels align with the `match`
+	// keyword's column - they are NOT nested inside the braces. The
+	// case bodies (after `=>`) get indented one level deeper, which
+	// `build_case_exprs` handles via its own `nest(1, ...)` wrapper.
+	append(outer, concat(inner))!;
 	append(outer, hardline())!;
 	append(outer, text("}"))!;
 	return concat(outer);
 };
 
-fn build_switch_expr(s: *ast::switch_expr, bc: *build_ctx) doc = {
+// Best-effort byte offset for the start of a match case. The match
+// case AST has no loc of its own, so we approximate using the first
+// available child loc - the binding type, then the first body expr.
+// Returns 0 (no flush) when nothing usable is reachable.
+fn case_boundary_match(cs: *ast::match_case) size = {
+	match (cs._type) {
+	case let t: *ast::_type =>
+		return t.loc.start.off: size;
+	case null => void;
+	};
+	if (len(cs.exprs) > 0) return cs.exprs[0].loc.start.off: size;
+	return 0z;
+};
+
+fn build_switch_expr(
+	s: *ast::switch_expr,
+	loc: ast::location,
+	bc: *build_ctx,
+) doc = {
 	let outer: []doc = [];
 	append(outer, text("switch "))!;
 	if (s.label != "") {
@@ -1321,12 +1489,26 @@ fn build_switch_expr(s: *ast::switch_expr, bc: *build_ctx) doc = {
 			append(inner, group(opts))!;
 		};
 		append(inner, build_case_exprs(cs.exprs, bc))!;
+		// See the matching comment in `build_match_expr`. Flush
+		// trailing case-body comments (e.g. `case => abort(); //
+		// unreachable`) at each case boundary or before `}`.
+		const boundary = if (i + 1 <
+		len(s.cases)) case_boundary_switch(&s.cases[i + 1]) else loc.end.off: size;
+		const _ = push_comments_before(&inner, bc.c, boundary);
 	};
 
-	append(outer, nest(1, concat(inner)))!;
+	// `case` labels align with the `switch` keyword's column - see
+	// the matching comment in `build_match_expr`.
+	append(outer, concat(inner))!;
 	append(outer, hardline())!;
 	append(outer, text("}"))!;
 	return concat(outer);
+};
+
+fn case_boundary_switch(cs: *ast::switch_case) size = {
+	if (len(cs.options) > 0) return cs.options[0].loc.start.off: size;
+	if (len(cs.exprs) > 0) return cs.exprs[0].loc.start.off: size;
+	return 0z;
 };
 
 fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
@@ -1361,11 +1543,16 @@ fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
 fn build_unarithm_expr(u: *ast::unarithm_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	const op_str = switch (u.op) {
-	case ast::unarithm_op::ADDR => yield "&";
-	case ast::unarithm_op::BNOT => yield "~";
-	case ast::unarithm_op::DEREF => yield "*";
-	case ast::unarithm_op::LNOT => yield "!";
-	case ast::unarithm_op::MINUS => yield "-";
+	case ast::unarithm_op::ADDR =>
+		yield "&";
+	case ast::unarithm_op::BNOT =>
+		yield "~";
+	case ast::unarithm_op::DEREF =>
+		yield "*";
+	case ast::unarithm_op::LNOT =>
+		yield "!";
+	case ast::unarithm_op::MINUS =>
+		yield "-";
 	};
 	append(items, text(op_str))!;
 	const needs_parens = match (u.operand.expr) {
@@ -1442,17 +1629,28 @@ fn build_literal_expr(
 	// at the literal's location to recover the lexical form.
 	match (l) {
 	case let p: ast::plain_literal =>
-		// For STRING literals, prefer the verbatim source text over
-		// upstream's `unparse` rendering. The upstream renderer
-		// only escapes `\` and `"` — not `\r`, `\n`, `\t`, etc. —
-		// so a literal containing escape sequences round-trips
-		// through `unparse` as raw bytes inside `"..."`, breaking
-		// any file that uses things like "\r\n". This also
-		// preserves the original lexical form: backtick raw
-		// strings stay as raw strings, adjacent concatenated
-		// literals stay concatenated, etc.
 		if (p.storage == ast::builtin_type::STR) {
+			// For STRING literals, prefer the verbatim source text over
+			// upstream's `unparse` rendering. The upstream renderer
+			// only escapes `\` and `"` — not `\r`, `\n`, `\t`, etc. —
+			// so a literal containing escape sequences round-trips
+			// through `unparse` as raw bytes inside `"..."`, breaking
+			// any file that uses things like "\r\n". This also
+			// preserves the original lexical form: backtick raw
+			// strings stay as raw strings, adjacent concatenated
+			// literals stay concatenated, etc.
 			match (verbatim_string_at(bc, loc)) {
+			case let s: str =>
+				return text(s);
+			case void => void;
+			};
+		};
+		if (is_numeric_or_rune_storage(p.storage)) {
+			// Numeric and rune literals: preserve the user's chosen
+			// base, digit grouping, suffix, and escape form. `unparse`
+			// would normalize 0x80 -> 128, 0o755 -> 493, 1_000_000 ->
+			// 1000000, etc.
+			match (verbatim_token_at(bc, loc)) {
 			case let s: str =>
 				return text(s);
 			case void => void;
@@ -1468,40 +1666,6 @@ fn build_literal_expr(
 	};
 };
 
-// Walks `data` once and returns a slice mapping rune index → byte
-// offset. `rune_to_byte[i]` is the byte offset of the start of the
-// i-th rune. Length is `(rune count) + 1` so callers can also map
-// the past-the-end position. For pure-ASCII input, every entry is
-// `i`, but multi-byte UTF-8 sequences cause divergence.
-fn build_rune_to_byte(data: []u8) []size = {
-	let out: []size = [];
-	let byte_off = 0z;
-	for (byte_off < len(data)) {
-		append(out, byte_off)!;
-		const b = data[byte_off];
-		// UTF-8 continuation bytes start with 10xxxxxx; leading
-		// bytes have other patterns.
-		const width: size = if (b < 0x80) 1z
-			else if (b < 0xc0) 1z   // shouldn't happen at start
-			else if (b < 0xe0) 2z
-			else if (b < 0xf0) 3z
-			else 4z;
-		byte_off += width;
-		if (byte_off > len(data)) {
-			byte_off = len(data);
-		};
-	};
-	append(out, len(data))!;
-	return out;
-};
-
-// Translates a lexer rune-offset to a byte offset into `data`. Out-
-// of-range indices clamp to `len(data)`.
-fn rune_to_byte_off(bc: *build_ctx, rune_off: size) size = {
-	if (rune_off >= len(bc.rune_to_byte)) return len(bc.data);
-	return bc.rune_to_byte[rune_off];
-};
-
 // Returns true iff the source bytes immediately before `loc.start`
 // are the keyword `const ` (ignoring intervening whitespace). Used
 // to recover the `const` modifier on return types — `hare::parse`
@@ -1509,7 +1673,7 @@ fn rune_to_byte_off(bc: *build_ctx, rune_off: size) size = {
 // `_type`, which calls `try(lexer, ltok::CONST)?;` and never stores
 // the result).
 fn type_has_const_prefix(bc: *build_ctx, loc: ast::location) bool = {
-	const start = rune_to_byte_off(bc, loc.start.off: size);
+	const start = loc.start.off: size;
 	if (start < 6) return false;
 	// Walk backwards through whitespace to find the previous non-
 	// whitespace byte run.
@@ -1530,9 +1694,10 @@ fn type_has_const_prefix(bc: *build_ctx, loc: ast::location) bool = {
 	// like `xconst`.
 	if (i == 5) return true;
 	const before = bc.data[i - 6];
-	return before == ' ': u8 || before == '\t': u8 || before == '\n': u8
-		|| before == '(': u8 || before == ',': u8
-		|| before == '=': u8;
+	return before == ' ': u8 || before == '\t': u8 || before == '\n': u8 ||
+	before == '(': u8 ||
+	before == ',': u8 ||
+	before == '=': u8;
 };
 
 // Returns the verbatim source text of a string literal at `loc`,
@@ -1549,9 +1714,11 @@ fn type_has_const_prefix(bc: *build_ctx, loc: ast::location) bool = {
 // whitespace between them.
 fn verbatim_string_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 	const data = bc.data;
-	const start = rune_to_byte_off(bc, loc.start.off: size);
-	const end_rune = (loc.end.off: size) + 1;
-	const end = rune_to_byte_off(bc, end_rune);
+	const start = loc.start.off: size;
+	// loc.end.off is the byte offset of the LAST byte of the literal
+	// (inclusive); +1 turns it into an exclusive end suitable for
+	// slicing.
+	const end = loc.end.off: size + 1;
 	if (start >= len(data) || end > len(data) || end <= start) {
 		return;
 	};
@@ -1562,16 +1729,16 @@ fn verbatim_string_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 	if (close >= len(data)) return;
 	// If end loc only covers this one segment, return just it.
 	if (close + 1 >= end) {
-		return strings::dup(strings::fromutf8(
-			data[start..close + 1])!)!;
+		return strings::dup(strings::fromutf8(data[start..close + 1])!)!;
 	};
 	// Concatenated strings — extend through every adjacent segment
 	// the AST's loc.end covers.
 	let final_close = close;
 	let i = close + 1;
 	for (i < end) {
-		for (i < end && (data[i] == ' ': u8 || data[i] == '\t': u8
-				|| data[i] == '\n': u8); i += 1) void;
+		for (i < end &&
+		(data[i] == ' ': u8 || data[i] == '\t': u8 ||
+		data[i] == '\n': u8); i += 1) void;
 		if (i >= end) break;
 		const delim = data[i];
 		if (delim != '`': u8 && delim != '"': u8) break;
@@ -1580,8 +1747,67 @@ fn verbatim_string_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 		final_close = nclose;
 		i = nclose + 1;
 	};
-	return strings::dup(strings::fromutf8(
-		data[start..final_close + 1])!)!;
+	return strings::dup(strings::fromutf8(data[start..final_close + 1])!)!;
+};
+
+// Returns true if `s` is a builtin storage type whose source form
+// carries information `hare::unparse` would lose - integer base
+// (0x/0o/0b), digit grouping (1_000), explicit suffix (100u8), float
+// representation (1.0 vs 1.0f64), or rune escape form ('\n' vs '\x0a').
+fn is_numeric_or_rune_storage(s: ast::builtin_type) bool = {
+	switch (s) {
+	case ast::builtin_type::INT,
+	ast::builtin_type::I8,
+	ast::builtin_type::I16,
+	ast::builtin_type::I32,
+	ast::builtin_type::I64,
+	ast::builtin_type::SIZE,
+	ast::builtin_type::UINT,
+	ast::builtin_type::U8,
+	ast::builtin_type::U16,
+	ast::builtin_type::U32,
+	ast::builtin_type::U64,
+	ast::builtin_type::UINTPTR,
+	ast::builtin_type::F32,
+	ast::builtin_type::F64,
+	ast::builtin_type::RUNE,
+	ast::builtin_type::ICONST,
+	ast::builtin_type::FCONST,
+	ast::builtin_type::RCONST =>
+		return true;
+	// Untyped (suffix-less) integer / float / rune literals
+	// land here; they're the common case (`0x80`, `1.5`,
+	// `'a'` all parse as the *CONST variant unless an
+	// explicit suffix or context-required type narrows them).
+
+	case =>
+		return false;
+	};
+};
+
+// Returns the verbatim source bytes covered by `loc`, or void if the
+// loc is out of range. Used for non-string literals (numbers, runes)
+// where we want to preserve the user's chosen lexical form rather
+// than re-emit through `hare::unparse`.
+//
+// `loc.end.off` is reported INCLUSIVELY for some node kinds (a const
+// init at `... = 1;` has start=end pointing at `1`) and EXCLUSIVELY
+// for others (a switch case option `case 1 =>` has end one byte
+// past the `1`). To avoid pulling stray trailing whitespace into the
+// captured token in the latter case, trim any trailing space/tab/
+// newline before returning - numbers and runes never legitimately
+// end in whitespace.
+fn verbatim_token_at(bc: *build_ctx, loc: ast::location) (str | void) = {
+	const data = bc.data;
+	const start = loc.start.off: size;
+	let end = loc.end.off: size + 1;
+	if (start >= len(data) || end > len(data) || end <= start) return;
+	for (end > start + 1) {
+		const b = data[end - 1];
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8) break;
+		end -= 1;
+	};
+	return strings::dup(strings::fromutf8(data[start..end])!)!;
 };
 
 // Given a byte offset of the opening delimiter of a string literal
@@ -1594,8 +1820,7 @@ fn end_first_string_segment(data: []u8, start: size) size = {
 	const delim = data[start];
 	let i = start + 1;
 	for (i < len(data) && data[i] != delim; i += 1) {
-		if (delim == '"': u8 && data[i] == '\\': u8
-				&& i + 1 < len(data)) {
+		if (delim == '"': u8 && data[i] == '\\': u8 && i + 1 < len(data)) {
 			i += 1;
 		};
 	};
@@ -1658,9 +1883,13 @@ fn build_struct_literal(s: *ast::struct_literal, bc: *build_ctx) doc = {
 	};
 	append(outer, text(" {"))!;
 
+	// Softline-separated members so a small struct literal can
+	// render as `point { x = 1, y = 2 }` on a single line. The
+	// trailing autofill / undefined markers (`...`, `@undefined...`)
+	// stay attached to the field list with the same softline spacing.
 	let inner: []doc = [];
+	append(inner, line(" "))!;
 	for (let i = 0z; i < len(s.fields); i += 1) {
-		append(inner, hardline())!;
 		match (s.fields[i]) {
 		case let v: ast::struct_value =>
 			append(inner, text(v.name))!;
@@ -1678,76 +1907,109 @@ fn build_struct_literal(s: *ast::struct_literal, bc: *build_ctx) doc = {
 		case let nested: *ast::struct_literal =>
 			append(inner, build_struct_literal(nested, bc))!;
 		};
-		append(inner, text(","))!;
+		if (i + 1 < len(s.fields)) {
+			append(inner, text(","))!;
+			append(inner, line(" "))!;
+		};
 	};
 	if (s.undefined) {
-		append(inner, hardline())!;
+		if (len(s.fields) > 0) {
+			append(inner, text(","))!;
+			append(inner, line(" "))!;
+		};
 		append(inner, text("@undefined..."))!;
 	} else if (s.autofill) {
-		append(inner, hardline())!;
+		if (len(s.fields) > 0) {
+			append(inner, text(","))!;
+			append(inner, line(" "))!;
+		};
 		append(inner, text("..."))!;
+	} else if (len(s.fields) > 0) {
+		append(inner, if_broken(","))!;
 	};
 
 	append(outer, nest(1, concat(inner)))!;
-	append(outer, hardline())!;
+	append(outer, line(" "))!;
 	append(outer, text("}"))!;
-	return concat(outer);
+	return group(outer);
 };
 
 // ----- Helpers ------------------------------------------------------
-
 // Reuses upstream is_postfix / is_unary / is_cast semantics so we
 // emit the same parenthesization unparse does.
-
 fn is_plain(e: *ast::expr) bool = {
 	match (e.expr) {
-	case ast::literal_expr => return true;
-	case ast::access_identifier => return true;
-	case => return false;
+	case ast::literal_expr =>
+		return true;
+	case ast::access_identifier =>
+		return true;
+	case =>
+		return false;
 	};
 };
 
 fn is_builtin(e: *ast::expr) bool = {
 	if (is_plain(e)) return true;
 	match (e.expr) {
-	case ast::alloc_expr => return true;
-	case ast::assert_expr => return true;
-	case ast::variadic_expr => return true;
-	case ast::len_expr => return true;
-	case ast::align_expr => return true;
-	case ast::size_expr => return true;
-	case ast::offset_expr => return true;
-	case ast::append_expr => return true;
-	case ast::insert_expr => return true;
-	case => return false;
+	case ast::alloc_expr =>
+		return true;
+	case ast::assert_expr =>
+		return true;
+	case ast::variadic_expr =>
+		return true;
+	case ast::len_expr =>
+		return true;
+	case ast::align_expr =>
+		return true;
+	case ast::size_expr =>
+		return true;
+	case ast::offset_expr =>
+		return true;
+	case ast::append_expr =>
+		return true;
+	case ast::insert_expr =>
+		return true;
+	case =>
+		return false;
 	};
 };
 
 fn is_postfix(e: *ast::expr) bool = {
 	if (is_builtin(e)) return true;
 	match (e.expr) {
-	case ast::call_expr => return true;
-	case ast::access_expr => return true;
-	case ast::slice_expr => return true;
-	case ast::error_assert_expr => return true;
-	case ast::propagate_expr => return true;
-	case => return false;
+	case ast::call_expr =>
+		return true;
+	case ast::access_expr =>
+		return true;
+	case ast::slice_expr =>
+		return true;
+	case ast::error_assert_expr =>
+		return true;
+	case ast::propagate_expr =>
+		return true;
+	case =>
+		return false;
 	};
 };
 
 fn is_unary(e: *ast::expr) bool = {
 	if (is_postfix(e)) return true;
 	match (e.expr) {
-	case ast::compound_expr => return true;
-	case ast::match_expr => return true;
-	case ast::switch_expr => return true;
-	case ast::unarithm_expr => return true;
-	case => return false;
+	case ast::compound_expr =>
+		return true;
+	case ast::match_expr =>
+		return true;
+	case ast::switch_expr =>
+		return true;
+	case ast::unarithm_expr =>
+		return true;
+	case =>
+		return false;
 	};
 };
 
 fn is_cast(e: *ast::expr) bool = {
-	return is_unary(e) || (e.expr is ast::cast_expr);
+	return is_unary(e) || e.expr is ast::cast_expr;
 };
 
 // Renders a literal (plain / struct) via unparse for the bits whose
@@ -1755,14 +2017,14 @@ fn is_cast(e: *ast::expr) bool = {
 // sequences, …). The result is always a single line.
 fn render_literal(l: ast::literal_expr) str = {
 	let buf = memio::dynamic();
-	defer match (io::close(&buf)) { case => void; };
-	const wrapper = ast::expr {
-		loc = ast::location { ... },
-		expr = l,
+	defer match (io::close(&buf)) {
+	case => void;
 	};
+	const wrapper = ast::expr { loc = ast::location { ... }, expr = l };
 	match (unparse::expr(&buf, &unparse::syn_nowrap, &wrapper)) {
 	case size => void;
-	case => return strings::dup("<unparse error>")!;
+	case =>
+		return strings::dup("<unparse error>")!;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };

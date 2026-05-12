@@ -21,7 +21,6 @@ use strings;
 // Strings on `doc_text`, `doc_line.flat`, and `doc_comment.text` are
 // OWNED by the doc and freed via `finish`. Use `text()`, `line()`, and
 // `comment()` constructors to allocate-and-dup.
-
 // Literal text that always renders the same.
 export type doc_text = struct { content: str };
 
@@ -56,12 +55,19 @@ export type doc_comment = struct { text: str };
 // contribute to fit decisions.
 export type doc_if_broken = struct { text: str };
 
-export type doc = (doc_text | doc_line | doc_hardline | doc_group |
-	doc_nest | doc_concat | doc_comment | doc_if_broken);
+export type doc = (
+	doc_text |
+	doc_line |
+	doc_hardline |
+	doc_group |
+	doc_nest |
+	doc_concat |
+	doc_comment |
+	doc_if_broken
+);
 
 // Constructors. Each dup's any input strings so the caller doesn't
 // have to worry about ownership.
-
 export fn text(s: str) doc = doc_text { content = strings::dup(s)! };
 
 export fn line(flat: str) doc = doc_line { flat = strings::dup(flat)! };
@@ -70,10 +76,10 @@ export fn hardline() doc = doc_hardline { tag = 0 };
 
 export fn group(items: []doc) doc = doc_group { items = items };
 
-export fn nest(delta: i32, inner: doc) doc = doc_nest {
-	delta = delta,
-	inner = alloc(inner)!,
-};
+export fn nest(
+	delta: i32,
+	inner: doc,
+) doc = doc_nest { delta = delta, inner = alloc(inner)! };
 
 export fn concat(items: []doc) doc = doc_concat { items = items };
 
@@ -116,11 +122,16 @@ type render_mode = enum { FLAT, BROKEN };
 // no doc_hardline or doc_comment, both of which always force a break.
 fn fits_flat(d: *doc) bool = {
 	match (*d) {
-	case doc_text => return true;
-	case doc_line => return true;
-	case doc_hardline => return false;
-	case doc_comment => return false;
-	case doc_if_broken => return true;
+	case doc_text =>
+		return true;
+	case doc_line =>
+		return true;
+	case doc_hardline =>
+		return false;
+	case doc_comment =>
+		return false;
+	case doc_if_broken =>
+		return true;
 	case let g: doc_group =>
 		for (let i = 0z; i < len(g.items); i += 1) {
 			if (!fits_flat(&g.items[i])) return false;
@@ -139,8 +150,9 @@ fn fits_flat(d: *doc) bool = {
 // Flat width of `d` (assuming flat mode throughout). Used by groups
 // to decide whether to break. Returns SIZE_MAX if any subdoc forces a
 // break (hardline / comment).
-const WIDTH_INFINITY: size = ~0z; // size's max value
+const WIDTH_INFINITY: size = ~0z;
 
+// size's max value
 fn flat_width(d: *doc) size = {
 	match (*d) {
 	case let t: doc_text =>
@@ -187,8 +199,17 @@ export fn pretty(
 	let cur_col = 0z;
 	let written = 0z;
 	let pending_tabs: i32 = 0;
-	render(out, d, render_mode::BROKEN, max_col, indent, 0z,
-		&cur_col, &written, &pending_tabs)?;
+	render(
+		out,
+		d,
+		render_mode::BROKEN,
+		max_col,
+		indent,
+		0z,
+		&cur_col,
+		&written,
+		&pending_tabs,
+	)?;
 	return written;
 };
 
@@ -221,37 +242,77 @@ fn render(
 	case doc_hardline =>
 		emit_break(out, indent, cur_col, written, pending_tabs)?;
 	case let g: doc_group =>
-		// Decide flat-or-broken based on remaining columns,
-		// counting both the group's own flat width AND the
-		// `tail_width` of text that will follow on the same line
-		// in flat mode.
-		const remaining = if (*cur_col >= max_col) 0z
-			else max_col - *cur_col;
+		const remaining = if (*cur_col >= max_col) 0z else max_col - *cur_col;
 		const w = sum_flat_width(g.items);
-		const total = if (w == WIDTH_INFINITY) WIDTH_INFINITY
-			else if (tail_width == WIDTH_INFINITY) WIDTH_INFINITY
-			else if (w > WIDTH_INFINITY - tail_width) WIDTH_INFINITY
-			else w + tail_width;
-		const child_mode = if (total <= remaining && fits_all(g.items))
-			render_mode::FLAT
-		else
-			render_mode::BROKEN;
-		render_items(out, g.items, child_mode, max_col, indent,
-			tail_width, cur_col, written, pending_tabs)?;
+		const total = if (w ==
+		WIDTH_INFINITY)
+		WIDTH_INFINITY
+		else if (tail_width ==
+		WIDTH_INFINITY)
+		WIDTH_INFINITY
+		else if (w > WIDTH_INFINITY - tail_width) WIDTH_INFINITY else w + tail_width;
+		const child_mode = if (total <= remaining &&
+		fits_all(g.items)) render_mode::FLAT else render_mode::BROKEN;
+		render_items(
+			out,
+			g.items,
+			child_mode,
+			max_col,
+			indent,
+			tail_width,
+			cur_col,
+			written,
+			pending_tabs,
+		)?;
+	// Decide flat-or-broken based on remaining columns,
+	// counting both the group's own flat width AND the
+	// `tail_width` of text that will follow on the same line
+	// in flat mode.
+
 	case let n: doc_nest =>
-		render(out, n.inner, mode, max_col, indent + n.delta,
-			tail_width, cur_col, written, pending_tabs)?;
+		render(
+			out,
+			n.inner,
+			mode,
+			max_col,
+			indent + n.delta,
+			tail_width,
+			cur_col,
+			written,
+			pending_tabs,
+		)?;
 	case let c: doc_concat =>
-		render_items(out, c.items, mode, max_col, indent,
-			tail_width, cur_col, written, pending_tabs)?;
+		render_items(
+			out,
+			c.items,
+			mode,
+			max_col,
+			indent,
+			tail_width,
+			cur_col,
+			written,
+			pending_tabs,
+		)?;
 	case let cm: doc_comment =>
-		// `cm.text` is the raw text after `//` from the source and
-		// includes any leading whitespace the user wrote (typically
-		// one space). Emit `//` with no extra space so we don't
-		// double up.
+		if (*cur_col > 0 && *pending_tabs == 0) {
+			// A line comment must always start on a fresh line and ends
+			// with `\n`; if we're mid-line (no preceding break), break
+			// here first so the comment doesn't fuse onto the previous
+			// token (e.g. `};// comment`). When a hardline already
+			// fired (cur_col reset, indent flushed via pending_tabs),
+			// we don't need an extra break - that's how callers like
+			// `build_compound_body` chain `hardline()` + comment
+			// without producing a blank line.
+			emit_break(out, indent, cur_col, written, pending_tabs)?;
+		};
 		emit_str(out, "//", cur_col, written, pending_tabs)?;
 		emit_str(out, cm.text, cur_col, written, pending_tabs)?;
 		emit_break(out, indent, cur_col, written, pending_tabs)?;
+	// `cm.text` is the raw text after `//` from the source and
+	// includes any leading whitespace the user wrote (typically
+	// one space). Emit `//` with no extra space so we don't
+	// double up.
+
 	case let ib: doc_if_broken =>
 		switch (mode) {
 		case render_mode::FLAT => void;
@@ -278,8 +339,17 @@ fn render_items(
 ) (void | io::error) = {
 	for (let i = 0z; i < len(items); i += 1) {
 		const my_tail = tail_after(items, i + 1, mode, outer_tail);
-		render(out, &items[i], mode, max_col, indent, my_tail,
-			cur_col, written, pending_tabs)?;
+		render(
+			out,
+			&items[i],
+			mode,
+			max_col,
+			indent,
+			my_tail,
+			cur_col,
+			written,
+			pending_tabs,
+		)?;
 	};
 };
 
@@ -344,8 +414,8 @@ fn line_lead_width(d: *doc, mode: render_mode) (size, bool) = {
 		};
 	case let g: doc_group =>
 		const w = sum_flat_width(g.items);
-		const inner_mode = if (w == WIDTH_INFINITY) render_mode::BROKEN
-			else render_mode::FLAT;
+		const inner_mode = if (w ==
+		WIDTH_INFINITY) render_mode::BROKEN else render_mode::FLAT;
 		return line_lead_items(g.items, inner_mode);
 	case let n: doc_nest =>
 		return line_lead_width(n.inner, mode);
