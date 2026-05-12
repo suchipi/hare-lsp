@@ -50,20 +50,16 @@ export fn want(lexer: *lex::lexer, want: lex::ltok...) (lex::token | error) = {
 	// same render for tokstr (it ignores location for the keyword/symbol
 	// tokens used here) and keeps the unlex slot clean.
 	for (let i = 0z; i < len(want); i += 1) {
-		const tstr = if (want[i] == ltok::NAME)
-			"name"
-		else
-			lex::tokstr((want[i], void, tok.2));
+		const tstr = if (want[i] == ltok::NAME) "name"
+			else lex::tokstr((want[i], void, tok.2));
 		fmt::fprintf(&buf, "'{}'", tstr)!;
 		if (i + 1 < len(want)) {
 			fmt::fprint(&buf, ", ")!;
 		};
 	};
 	lex::unlex(lexer, tok);
-	return syntaxerr(
-		tok.2, "Unexpected '{}', was expecting {}", lex::tokstr(tok),
-		memio::string(&buf)!,
-	);
+	return syntaxerr(tok.2,
+		"Unexpected '{}', was expecting {}", lex::tokstr(tok), memio::string(&buf)!);
 };
 
 // Looks for a matching ltok from the lexer, and if not present, unlexes the

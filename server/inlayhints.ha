@@ -91,8 +91,8 @@ fn emit_inferred_type_hints(
 		// past keyword + name to the next ':' or '='.
 		const insert_off = find_post_name_offset(data, off);
 		const enc = position_encoding(s);
-		const pos =
-			analysis::byte_to_position(data, doc.buf.line_index, enc, insert_off);
+		const pos = analysis::byte_to_position(data,
+			doc.buf.line_index, enc, insert_off);
 		let hint = json::newobject();
 		let p_obj = json::newobject();
 		json::put(&p_obj, "line", pos.line: f64)!;

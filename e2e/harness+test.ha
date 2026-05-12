@@ -61,10 +61,8 @@ fn spawn_session() session = {
 	case let c: exec::command =>
 		yield c;
 	case let e: exec::error =>
-		fmt::fatalf(
-			"e2e: cannot prepare {}: {} (is the binary built? run `make`)", BIN_PATH,
-			exec::strerror(e),
-		);
+		fmt::fatalf("e2e: cannot prepare {}: {} (is the binary built? run `make`)",
+			BIN_PATH, exec::strerror(e));
 	case nomem => abort("e2e: out of memory preparing command");
 	};
 
@@ -106,8 +104,8 @@ fn finish_session(s: *session) void = {
 
 	// Give the process a brief moment to exit on its own. If it's still
 	// running, send SIGTERM, then SIGKILL as a last resort.
-	const deadline =
-		time::add(time::now(time::clock::MONOTONIC), 500 * time::MILLISECOND);
+	const deadline = time::add(time::now(time::clock::MONOTONIC),
+		500 * time::MILLISECOND);
 	for (true) {
 		match (exec::peek(&s.proc)) {
 		case let st: exec::status =>
@@ -167,10 +165,8 @@ fn recv(s: *session) []u8 = {
 
 		const now = time::now(time::clock::MONOTONIC);
 		if (time::compare(now, deadline) >= 0) {
-			fmt::fatalf(
-				"e2e: recv timed out after {} ms (buffered {} bytes)",
-				RECV_TIMEOUT / time::MILLISECOND, len(s.read_buf),
-			);
+			fmt::fatalf("e2e: recv timed out after {} ms (buffered {} bytes)",
+				RECV_TIMEOUT / time::MILLISECOND, len(s.read_buf));
 		};
 		const remaining_ns = time::diff(now, deadline);
 
@@ -194,10 +190,8 @@ fn recv(s: *session) []u8 = {
 		case let n: size =>
 			yield n;
 		case io::EOF =>
-			fmt::fatalf(
-				"e2e: server stdout closed after {} bytes (incomplete frame)",
-				len(s.read_buf),
-			);
+			fmt::fatalf("e2e: server stdout closed after {} bytes (incomplete frame)",
+				len(s.read_buf));
 		case let e: io::error =>
 			fmt::fatalf("e2e: read failed: {}", io::strerror(e));
 		};
@@ -294,17 +288,13 @@ fn find_content_length(headers: str) (size | void) = {
 // response, then sends `initialized`. Most e2e tests don't care about
 // the response body, so the bytes are discarded.
 fn do_init(s: *session) void = {
-	send(
-		s,
+	send(s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(s, 1.0));
-	send(
-		s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 };
 
 // Sends a textDocument/didOpen for the given URI with the given body.

@@ -138,10 +138,8 @@ fn primitive_type(lexer: *lex::lexer) (ast::_type | error) = {
 	case ltok::NOMEM =>
 		yield builtin_type::NOMEM;
 	case =>
-		return syntaxerr(
-			mkloc(lexer), "Unexpected {}, was expecting primitive type",
-			lex::tokstr(tok),
-		);
+		return syntaxerr(mkloc(lexer),
+			"Unexpected {}, was expecting primitive type", lex::tokstr(tok));
 	};
 	return ast::_type {
 		loc = loc_from(lexer, tok.2),
@@ -302,8 +300,7 @@ fn struct_union_type(lexer: *lex::lexer) (ast::_type | error) = {
 			const docs = &membs[len(membs) - 1].docs;
 			if (linecomment != "" && *docs == "") {
 				*docs = linecomment;
-			} else
-				free(linecomment);
+			} else free(linecomment);
 		case => abort();
 		};
 	};
@@ -366,9 +363,8 @@ fn struct_embed_or_field(
 fn array_slice_type(lexer: *lex::lexer) (ast::_type | error) = {
 	let start = want(lexer, ltok::LBRACKET)?;
 
-	let length = match (try(
-		lexer, ltok::UNDERSCORE, ltok::TIMES, ltok::RBRACKET,
-	)?) {
+	let length = match (try(lexer,
+		ltok::UNDERSCORE, ltok::TIMES, ltok::RBRACKET)?) {
 	case void =>
 		yield alloc(expr(lexer)?)!;
 	case let tok: lex::token =>
@@ -428,9 +424,8 @@ fn enum_type(lexer: *lex::lexer) (ast::_type | error) = {
 		const loc = mkloc(lexer);
 		let name = want(lexer, ltok::NAME)?;
 		let comment = lex::comment(lexer);
-		let value: nullable *ast::expr = if (try(
-			lexer, ltok::EQUAL,
-		)? is lex::token) alloc(expr(lexer)?)! else null;
+		let value: nullable *ast::expr = if (try(lexer,
+			ltok::EQUAL)? is lex::token) alloc(expr(lexer)?)! else null;
 
 		defer append(membs, ast::enum_field {
 			name = name.1 as str,
@@ -445,8 +440,7 @@ fn enum_type(lexer: *lex::lexer) (ast::_type | error) = {
 			if (linecomment != "" && comment == "") {
 				free(comment);
 				comment = linecomment;
-			} else
-				free(linecomment);
+			} else free(linecomment);
 		case ltok::RBRACE =>
 			break;
 		case => abort();
@@ -523,9 +517,8 @@ export fn _type(lexer: *lex::lexer) (ast::_type | error) = {
 	case ltok::NAME =>
 		yield alias_type(lexer)?;
 	case =>
-		return syntaxerr(
-			mkloc(lexer), "Unexpected {}, was expecting type", lex::tokstr(tok),
-		);
+		return syntaxerr(mkloc(lexer),
+			"Unexpected {}, was expecting type", lex::tokstr(tok));
 	};
 	return typ;
 };

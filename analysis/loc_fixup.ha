@@ -422,9 +422,11 @@ fn build_rune_to_byte_table(data: []u8) []size = {
 	for (i < len(data)) {
 		append(out, i)!;
 		const b = data[i];
-		const width: size = if (b < 0x80)
-			1z
-		else if (b < 0xc0) 1z else if (b < 0xe0) 2z else if (b < 0xf0) 3z else 4z;
+		const width: size = if (b < 0x80) 1z
+			else if (b < 0xc0) 1z
+			else if (b < 0xe0) 2z
+			else if (b < 0xf0) 3z
+			else 4z;
 		i += width;
 		if (i > len(data)) i = len(data);
 	};

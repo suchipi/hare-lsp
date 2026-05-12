@@ -77,9 +77,8 @@ fn index_decl(idx: *file_index, d: *ast::decl) void = {
 	match (d.decl) {
 	case let f: ast::decl_func =>
 		const params = extract_param_names(f);
-		add_symbol(
-			idx, f.ident, symbol_kind::FUNCTION, d.loc, docs, d.exported, params,
-		);
+		add_symbol(idx,
+			f.ident, symbol_kind::FUNCTION, d.loc, docs, d.exported, params);
 	case let t: ast::decl_type =>
 		add_symbol(idx, t.ident, symbol_kind::TYPE, d.loc, docs, d.exported, []);
 	case let g: ast::decl_global =>
@@ -115,10 +114,8 @@ fn add_symbol(
 	param_names: []str,
 ) void = {
 	const joined = ident_join(id);
-	const short = if (len(id) > 0)
-		strings::dup(id[len(id) - 1])!
-	else
-		strings::dup("")!;
+	const short = if (len(id) > 0) strings::dup(id[len(id) - 1])!
+		else strings::dup("")!;
 	// For now the name span is approximated as the loc's start..start+len(short).
 	const name_span = ast::location {
 		start = loc.start,

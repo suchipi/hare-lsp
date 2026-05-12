@@ -84,9 +84,8 @@ fn follow_alias_chain(s: *server, current: str, budget: u32) str = {
 // TYPE, doesn't have an underlying, or the underlying can't be
 // rendered.
 fn resolve_alias_once(s: *server, name: str) (str | void) = {
-	const entry = match (analysis::find_first_by_short_name(
-		&s.workspace_index, name,
-	)) {
+	const entry = match (analysis::find_first_by_short_name(&s.workspace_index,
+		name)) {
 	case let e: *analysis::workspace_entry =>
 		if (e.kind != analysis::symbol_kind::TYPE) return void;
 		yield e;

@@ -144,10 +144,8 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 
 	const cancel =
 		fmt::asprintf(
-
 			`{{"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{{"token":"{}"}}}}`,
-			token,
-		)!;
+			token)!;
 	defer free(cancel);
 	send(&s, strings::toutf8(cancel));
 

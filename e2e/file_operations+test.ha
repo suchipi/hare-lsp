@@ -94,31 +94,22 @@ use strings;
 	// that any backlog of post-`initialized` server messages gets read
 	// while waiting for the documentSymbol response.
 	open_doc(&s, "file:///prior.ha", "export fn p() void = void;\n");
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2409,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///prior.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2409,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///prior.ha"}}}`
+		));
 	free(wait_for_response(&s, 2409.0));
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","method":"workspace/didCreateFiles","params":{"files":[{"uri":"file:///new.ha"}]}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","method":"workspace/didCreateFiles","params":{"files":[{"uri":"file:///new.ha"}]}}`
+		));
 
 	// Sanity: server still answers requests.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2410,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///prior.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2410,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///prior.ha"}}}`
+		));
 	free(wait_for_response(&s, 2410.0));
 };
 
@@ -130,23 +121,17 @@ use strings;
 	open_doc(&s, "file:///old_name.ha", "export fn foo() void = void;\n");
 
 	// Rename via notification.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","method":"workspace/didRenameFiles","params":{"files":[{"oldUri":"file:///old_name.ha","newUri":"file:///new_name.ha"}]}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","method":"workspace/didRenameFiles","params":{"files":[{"oldUri":"file:///old_name.ha","newUri":"file:///new_name.ha"}]}}`
+		));
 
 	// Verify by asking documentSymbol against the new URI -- should
 	// return one symbol if the rename was applied to the document store.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2411,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///new_name.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2411,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///new_name.ha"}}}`
+		));
 	const body = wait_for_response(&s, 2411.0);
 	defer free(body);
 	const text = strings::fromutf8(body)!;
@@ -167,23 +152,17 @@ use strings;
 
 	open_doc(&s, "file:///doomed.ha", "export fn doomed() void = void;\n");
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","method":"workspace/didDeleteFiles","params":{"files":[{"uri":"file:///doomed.ha"}]}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","method":"workspace/didDeleteFiles","params":{"files":[{"uri":"file:///doomed.ha"}]}}`
+		));
 
 	// After deletion the document should be gone; documentSymbol
 	// returns an empty array for an unknown URI.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2412,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///doomed.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2412,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///doomed.ha"}}}`
+		));
 	const body = wait_for_response(&s, 2412.0);
 	defer free(body);
 	const text = strings::fromutf8(body)!;
@@ -204,34 +183,25 @@ use strings;
 
 	// Open a doc first so subsequent ping has something to return.
 	open_doc(&s, "file:///ping.ha", "export fn p() void = void;\n");
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2412,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ping.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2412,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ping.ha"}}}`
+		));
 	free(wait_for_response(&s, 2412.0));
 
 	// Send the watched-files notification. The watcher refreshes the
 	// workspace index for the changed paths; without a real workspace
 	// folder there's nothing to refresh, but the dispatcher must
 	// still consume the message.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":[{"uri":"file:///watched.ha","type":1}]}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":[{"uri":"file:///watched.ha","type":1}]}}`
+		));
 
 	// Ping again to confirm the server is still responsive.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2413,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ping.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2413,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ping.ha"}}}`
+		));
 	free(wait_for_response(&s, 2413.0));
 };

@@ -24,17 +24,13 @@ use strings;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	// Mirrors the lsp/codec.ha and server/navigation.ha shape that
 	// triggered the bug: a single `use` followed by a blank line
@@ -92,17 +88,13 @@ export fn main() void = void;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample = `use strings;
 export fn main() void = void;
@@ -126,17 +118,13 @@ export fn main() void = void;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample = `use hare::ast;
 export fn main() void = void;
@@ -161,17 +149,13 @@ export fn main() void = void;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`use analysis;
@@ -227,11 +211,9 @@ export fn main() void = void;
 		const exp = expected[i];
 		if (start_line != exp.0 || end_line != exp.0 || start_char != exp.1 ||
 		end_char != exp.2) {
-			fmt::fatalf(
-				"link[{}] = ({},{}..{},{}), expected ({},{}..{},{}). body={}", i,
-				start_line, start_char, end_line, end_char, exp.0, exp.1, exp.0, exp.2,
-				text,
-			);
+			fmt::fatalf("link[{}] = ({},{}..{},{}), expected ({},{}..{},{}). body={}",
+				i, start_line, start_char, end_line, end_char, exp.0, exp.1, exp.0, exp.2,
+				text);
 		};
 	};
 };
@@ -261,8 +243,7 @@ fn check_link_range(
 		fmt::fatalf(
 			"DocumentLink range = ({},{}..{},{}), expected ({},{}..{},{}). body={}",
 			start_line, start_char, end_line, end_char, line, start_col, line, end_col,
-			text,
-		);
+			text);
 	};
 };
 
@@ -276,17 +257,13 @@ fn check_link_range(
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`// header — has an em-dash
@@ -313,17 +290,13 @@ export fn main() void = void;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`use strings;

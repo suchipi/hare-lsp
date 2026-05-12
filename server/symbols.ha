@@ -59,14 +59,10 @@ export fn handle_document_symbol(s: *server, r: lsp::request) void = {
 		json::set(&item, "name", sym.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_lsp(sym.kind))!;
 		// Location: file URI + full span.
-		const start_pos =
-			analysis::byte_to_position(
-				data, doc.buf.line_index, enc, sym.span.start.off: size,
-			);
-		const end_pos =
-			analysis::byte_to_position(
-				data, doc.buf.line_index, enc, sym.span.end.off: size,
-			);
+		const start_pos = analysis::byte_to_position(data,
+			doc.buf.line_index, enc, sym.span.start.off: size);
+		const end_pos = analysis::byte_to_position(data,
+			doc.buf.line_index, enc, sym.span.end.off: size);
 		let loc = json::newobject();
 		json::set(&loc, "uri", uri: json::value)!;
 		let range = encode_range_pos(start_pos, end_pos);
@@ -114,11 +110,9 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off =
-		analysis::position_to_byte(
-			data, doc.buf.line_index, position_encoding(s),
-			analysis::position { line = pos.line, character = pos.character },
-		);
+	const off = analysis::position_to_byte(data,
+		doc.buf.line_index, position_encoding(s),
+		analysis::position { line = pos.line, character = pos.character });
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
 		yield r;
@@ -139,14 +133,10 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 	let arr: []json::value = [];
 	let item = json::newobject();
 	const enc = position_encoding(s);
-	const start_pos =
-		analysis::byte_to_position(
-			data, doc.buf.line_index, enc, sym.span.start.off: size,
-		);
-	const end_pos =
-		analysis::byte_to_position(
-			data, doc.buf.line_index, enc, sym.span.end.off: size,
-		);
+	const start_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, sym.span.start.off: size);
+	const end_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, sym.span.end.off: size);
 	json::put(&item, "range", encode_range_pos(start_pos, end_pos))!;
 	json::put(&item, "kind", 1: f64)!; // Text
 	append(arr, item: json::value)!;
@@ -257,14 +247,12 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		case lsp::bad_message =>
 			continue;
 		};
-		const off =
-			analysis::position_to_byte(
-				data, doc.buf.line_index, position_encoding(s),
-				analysis::position {
-					line = pos.line,
-					character = pos.character,
-				},
-			);
+		const off = analysis::position_to_byte(data,
+			doc.buf.line_index, position_encoding(s),
+			analysis::position {
+				line = pos.line,
+				character = pos.character,
+			});
 		const enc = position_encoding(s);
 		// Build the expansion chain from innermost to outermost. The
 		// LSP SelectionRange shape is recursive — each level has an
@@ -376,14 +364,10 @@ export fn handle_document_link(s: *server, r: lsp::request) void = {
 	let arr: []json::value = [];
 	for (let i = 0z; i < len(cache.pr.subunit.imports); i += 1) {
 		const imp = cache.pr.subunit.imports[i];
-		const start_pos =
-			analysis::byte_to_position(
-				data, doc.buf.line_index, enc, imp.loc.start.off: size,
-			);
-		const end_pos =
-			analysis::byte_to_position(
-				data, doc.buf.line_index, enc, imp.loc.end.off: size,
-			);
+		const start_pos = analysis::byte_to_position(data,
+			doc.buf.line_index, enc, imp.loc.start.off: size);
+		const end_pos = analysis::byte_to_position(data,
+			doc.buf.line_index, enc, imp.loc.end.off: size);
 		let item = json::newobject();
 		json::put(&item, "range", encode_range_pos(start_pos, end_pos))!;
 		let parts: []str = [];

@@ -38,10 +38,8 @@ fn sym_test_cleanup(
 
 fn sym_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(
-			`{"textDocument":{"uri":"`, uri,
-			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
-		)!;
+		strings::concat(`{"textDocument":{"uri":"`,
+			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -132,10 +130,9 @@ fn sym_stdlib_module_prefix(module: str) str = {
 @test fn document_symbol_lists_all_decls() void = {
 	let (s, scan, in_buf, out) = sym_test_server();
 	defer sym_test_cleanup(&s, scan, in_buf, out);
-	sym_open(
-		&s, "file:///x.ha",
-		"fn a() void = void;\\nfn b() void = void;\\ntype c = int;\\n",
-	);
+	sym_open(&s,
+		"file:///x.ha",
+		"fn a() void = void;\\nfn b() void = void;\\ntype c = int;\\n");
 
 	const params = `{"textDocument":{"uri":"file:///x.ha"}}`;
 	let pv = json::loadstr(params)!;
@@ -180,10 +177,9 @@ fn sym_stdlib_module_prefix(module: str) str = {
 @test fn document_link_returns_imports() void = {
 	let (s, scan, in_buf, out) = sym_test_server();
 	defer sym_test_cleanup(&s, scan, in_buf, out);
-	sym_open(
-		&s, "file:///x.ha",
-		"use io;\\nuse strings;\\n\\nexport fn main() void = void;\\n",
-	);
+	sym_open(&s,
+		"file:///x.ha",
+		"use io;\\nuse strings;\\n\\nexport fn main() void = void;\\n");
 
 	const params = `{"textDocument":{"uri":"file:///x.ha"}}`;
 	let pv = json::loadstr(params)!;
@@ -221,9 +217,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	const list_v = sym_skip_to_response(out, 10.0);
 	defer json::finish(list_v);
 	const list_arr =
-		*(json::get(
-			&(list_v as json::object), "result",
-		) as *json::value) as []json::value;
+		*(json::get(&(list_v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(list_arr) >= 1);
 	// The first link should have a data field carrying ["io"].
 	const first = list_arr[0] as json::object;

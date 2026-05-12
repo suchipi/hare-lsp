@@ -33,11 +33,9 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off =
-		analysis::position_to_byte(
-			data, doc.buf.line_index, position_encoding(s),
-			analysis::position { line = pos.line, character = pos.character },
-		);
+	const off = analysis::position_to_byte(data,
+		doc.buf.line_index, position_encoding(s),
+		analysis::position { line = pos.line, character = pos.character });
 	const ctx = match (find_call_context(data, off)) {
 	case let c: call_context =>
 		yield c;
@@ -49,9 +47,8 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 
 	// Resolve the callee in the file's index, then in the workspace index.
 	const cache = parse_of(doc);
-	const decl_idx = match (find_decl_by_short_name(
-		&cache.pr.subunit, ctx.callee_name,
-	)) {
+	const decl_idx = match (find_decl_by_short_name(&cache.pr.subunit,
+		ctx.callee_name)) {
 	case let i: size =>
 		yield i;
 	case void =>

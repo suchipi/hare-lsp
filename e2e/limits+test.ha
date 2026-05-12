@@ -24,11 +24,9 @@ use strings;
 	// `text` field), enough to trip the cap even on small frames.
 	let buf: []u8 = [];
 	defer free(buf);
-	const prefix =
-		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{},"_pad":"`,
-		);
+	const prefix = strings::toutf8(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{},"_pad":"`
+	);
 	append(buf, prefix...)!;
 	for (let i = 0z; i < 2048z; i += 1) {
 		append(buf, 'A': u8)!;
@@ -65,9 +63,8 @@ use strings;
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{"workspace":{"configuration":true}}}}`;
 	send(&s, strings::toutf8(init));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	// After `initialized`, the server issues workspace/configuration.
 	// Find that request and reply with the limits override.
@@ -81,10 +78,8 @@ use strings;
 			defer free(id);
 			const reply =
 				fmt::asprintf(
-
 					`{{"jsonrpc":"2.0","id":{},"result":[{{"limits":{{"maxOpenDocuments":2}}}}]}}`,
-					id,
-				)!;
+					id)!;
 			defer free(reply);
 			send(&s, strings::toutf8(reply));
 			saw_config_request = true;

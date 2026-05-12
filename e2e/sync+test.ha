@@ -20,22 +20,16 @@ use strings;
 	open_doc(&s, "file:///dc.ha", "export fn original() void = void;\n");
 
 	// Full-document content change (no `range` field -> full sync).
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///dc.ha","version":2},"contentChanges":[{"text":"export fn replaced() void = void;\n"}]}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///dc.ha","version":2},"contentChanges":[{"text":"export fn replaced() void = void;\n"}]}}`
+		));
 
 	// Confirm by asking documentSymbol -- the new name should appear.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2500,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///dc.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2500,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///dc.ha"}}}`
+		));
 	const body = wait_for_response(&s, 2500.0);
 	defer free(body);
 	const text = strings::fromutf8(body)!;
@@ -60,21 +54,15 @@ use strings;
 	open_doc(&s, "file:///dci.ha", "export fn a_name() void = void;\n");
 
 	// Replace `a_name` (chars 10..16 on line 0) with `b_name`.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
+			`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///dci.ha","version":2},"contentChanges":[{"range":{"start":{"line":0,"character":10},"end":{"line":0,"character":16}},"text":"b_name"}]}}`
+		));
 
-			`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///dci.ha","version":2},"contentChanges":[{"range":{"start":{"line":0,"character":10},"end":{"line":0,"character":16}},"text":"b_name"}]}}`,
-		),
-	);
-
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2501,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///dci.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2501,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///dci.ha"}}}`
+		));
 	const body = wait_for_response(&s, 2501.0);
 	defer free(body);
 	const text = strings::fromutf8(body)!;
@@ -94,21 +82,15 @@ use strings;
 
 	open_doc(&s, "file:///close.ha", "export fn keep() void = void;\n");
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
+			`{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"file:///close.ha"}}}`
+		));
 
-			`{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"file:///close.ha"}}}`,
-		),
-	);
-
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2502,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///close.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2502,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///close.ha"}}}`
+		));
 	const body = wait_for_response(&s, 2502.0);
 	defer free(body);
 	const text = strings::fromutf8(body)!;
@@ -126,22 +108,16 @@ use strings;
 
 	open_doc(&s, "file:///save.ha", "export fn s() void = void;\n");
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"file:///save.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"file:///save.ha"}}}`
+		));
 
 	// Sanity: server still answers requests.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2503,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///save.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2503,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///save.ha"}}}`
+		));
 	free(wait_for_response(&s, 2503.0));
 };
 
@@ -153,21 +129,15 @@ use strings;
 	open_doc(&s, "file:///ws.ha", "export fn w() void = void;\n");
 
 	// reason: 1 = Manual.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
+			`{"jsonrpc":"2.0","method":"textDocument/willSave","params":{"textDocument":{"uri":"file:///ws.ha"},"reason":1}}`
+		));
 
-			`{"jsonrpc":"2.0","method":"textDocument/willSave","params":{"textDocument":{"uri":"file:///ws.ha"},"reason":1}}`,
-		),
-	);
-
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2504,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ws.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2504,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ws.ha"}}}`
+		));
 	free(wait_for_response(&s, 2504.0));
 };
 

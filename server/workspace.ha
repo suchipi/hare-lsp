@@ -197,9 +197,8 @@ export fn handle_did_change_workspace_folders(
 		};
 		free(new);
 		if (len(roots) > 0) {
-			start_index_job(
-				s, roots, &s.workspace_index, "Indexing workspace", "hare-lsp: indexed",
-			);
+			start_index_job(s,
+				roots, &s.workspace_index, "Indexing workspace", "hare-lsp: indexed");
 		};
 	case => void;
 	};

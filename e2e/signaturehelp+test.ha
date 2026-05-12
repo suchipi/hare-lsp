@@ -84,9 +84,8 @@ export fn main() void = {
 	const result = *(json::get(&obj, "result") as *json::value);
 	match (result) {
 	case json::object =>
-		fmt::fatalf(
-			"e2e: signatureHelp outside a call should be null, got: {}", text,
-		);
+		fmt::fatalf("e2e: signatureHelp outside a call should be null, got: {}",
+			text);
 	case => void;
 	};
 };

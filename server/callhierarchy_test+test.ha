@@ -37,10 +37,8 @@ fn ch_test_cleanup(
 
 fn ch_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(
-			`{"textDocument":{"uri":"`, uri,
-			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
-		)!;
+		strings::concat(`{"textDocument":{"uri":"`,
+			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -119,10 +117,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn incoming_calls_returns_call_sites() void = {
 	let (s, scan, in_buf, out) = ch_test_server();
 	defer ch_test_cleanup(&s, scan, in_buf, out);
-	ch_open(
-		&s, "file:///x.ha",
-		"fn target() void = void;\\nfn caller() void = target();\\n",
-	);
+	ch_open(&s,
+		"file:///x.ha", "fn target() void = void;\\nfn caller() void = target();\\n");
 
 	const params =
 		`{"item":{"name":"target","kind":12,"uri":"file:///x.ha","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":24}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":24}}}}`;
@@ -154,10 +150,9 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn outgoing_calls_dedupes_duplicate_workspace_entries() void = {
 	let (s, scan, in_buf, out) = ch_test_server();
 	defer ch_test_cleanup(&s, scan, in_buf, out);
-	ch_open(
-		&s, "file:///dup.ha",
-		"fn caller() void = target();\\nfn target() void = void;\\n",
-	);
+	ch_open(&s,
+		"file:///dup.ha",
+		"fn caller() void = target();\\nfn target() void = void;\\n");
 
 	// Index the same path twice on purpose: simulates a re-index that
 	// failed to drop the prior entries before re-adding them.

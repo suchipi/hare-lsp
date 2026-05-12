@@ -75,13 +75,10 @@ use strings;
 	open_doc(&s, "file:///std.ha", sample);
 
 	// First request a full snapshot to learn its resultId.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2102,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":"file:///std.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2102,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":"file:///std.ha"}}}`
+		));
 	const body1 = wait_for_response(&s, 2102.0);
 	defer free(body1);
 	let v1 = json::loadstr(strings::fromutf8(body1)!)!;
@@ -94,10 +91,8 @@ use strings;
 	// empty, so `edits` is an empty array.
 	const delta_msg =
 		strings::concat(
-
 			`{"jsonrpc":"2.0","id":2103,"method":"textDocument/semanticTokens/full/delta","params":{"textDocument":{"uri":"file:///std.ha"},"previousResultId":"`,
-			prev_id, `"}}`,
-		)!;
+			prev_id, `"}}`)!;
 	defer free(delta_msg);
 	send(&s, strings::toutf8(delta_msg));
 

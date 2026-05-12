@@ -125,8 +125,8 @@ fn resolve_ref(s: *server, doc: *document, ref: str) (ref_target | void) = {
 			return target_for_entry(s, e);
 		case void => void;
 		};
-		const full_imports =
-			analysis::collect_imported_module_paths(&cache.pr.subunit);
+		const full_imports = analysis::collect_imported_module_paths(
+			&cache.pr.subunit);
 		defer analysis::free_str_slice(full_imports);
 		for (let i = 0z; i < len(full_imports); i += 1) {
 			const _ = ensure_stdlib_module_indexed(s, full_imports[i]);
@@ -199,10 +199,8 @@ fn target_for_local(
 ) (ref_target | void) = {
 	const data = analysis::bytes(&doc.buf);
 	const enc = position_encoding(s);
-	const pos =
-		analysis::byte_to_position(
-			data, doc.buf.line_index, enc, sym.span.start.off: size,
-		);
+	const pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, sym.span.start.off: size);
 	return ref_target {
 		uri = strings::dup(doc.uri)!,
 		line = pos.line,
@@ -223,8 +221,8 @@ fn target_for_entry(
 	const line_index = analysis::build_line_index(fpe.text);
 	defer free(line_index);
 	const enc = position_encoding(s);
-	const pos =
-		analysis::byte_to_position(fpe.text, line_index, enc, e.start_off: size);
+	const pos = analysis::byte_to_position(fpe.text,
+		line_index, enc, e.start_off: size);
 	return ref_target {
 		uri = strings::dup(e.uri)!,
 		line = pos.line,
@@ -250,9 +248,8 @@ fn format_ref_link(label: str, t: ref_target) str = {
 	defer free(args_json);
 	const encoded = percent_encode_uri_component(args_json);
 	defer free(encoded);
-	return strings::concat(
-		"[", label, "](command:hare-lsp.openLocation?", encoded, ")",
-	)!;
+	return strings::concat("[",
+		label, "](command:hare-lsp.openLocation?", encoded, ")")!;
 };
 
 // Percent-encodes `s` for use inside a URI's query/path component.

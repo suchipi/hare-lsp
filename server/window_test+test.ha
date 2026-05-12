@@ -137,8 +137,8 @@ fn next_framed(data: []u8) (json::value, size) = {
 	let (s, scan, in_buf) = test_server(&out);
 	defer finish_test_server(&s, scan, in_buf);
 
-	const id_v =
-		show_message_request(&s, lsp::message_type::INFO, "pick", ["A", "B"]);
+	const id_v = show_message_request(&s,
+		lsp::message_type::INFO, "pick", ["A", "B"]);
 	const id = id_v as i64;
 	assert(id == 0);
 	assert(len(s.pending_requests) == 1);
@@ -149,9 +149,8 @@ fn next_framed(data: []u8) (json::value, size) = {
 	defer json::finish(v);
 	const o = v as json::object;
 	assert(
-		*(json::get(
-			&o, "method",
-		) as *json::value) as str == "window/showMessageRequest"
+		*(json::get(&o,
+			"method") as *json::value) as str == "window/showMessageRequest"
 	);
 	const params = *(json::get(&o, "params") as *json::value) as json::object;
 	const actions =
@@ -182,9 +181,8 @@ fn next_framed(data: []u8) (json::value, size) = {
 	off += off1;
 	const o1 = v1 as json::object;
 	assert(
-		*(json::get(
-			&o1, "method",
-		) as *json::value) as str == "window/workDoneProgress/create"
+		*(json::get(&o1,
+			"method") as *json::value) as str == "window/workDoneProgress/create"
 	);
 
 	// Message 2: $/progress {kind: "begin", title: "Indexing"}

@@ -363,9 +363,8 @@ fn handle_request(s: *server, r: lsp::request) void = {
 	switch (s.state) {
 	case server_state::PRE_INIT =>
 		if (r.method != "initialize") {
-			send_error(
-				s, r.id, lsp::SERVER_NOT_INITIALIZED, "server has not been initialized",
-			);
+			send_error(s,
+				r.id, lsp::SERVER_NOT_INITIALIZED, "server has not been initialized");
 			return;
 		};
 	case server_state::SHUTTING_DOWN =>
@@ -471,10 +470,9 @@ fn handle_request(s: *server, r: lsp::request) void = {
 	case "workspace/executeCommand" =>
 		handle_execute_command(s, r);
 	case =>
-		send_error(
-			s, r.id, lsp::METHOD_NOT_FOUND,
-			fmt::asprintf("method not found: {}", r.method)!,
-		);
+		send_error(s,
+			r.id, lsp::METHOD_NOT_FOUND,
+			fmt::asprintf("method not found: {}", r.method)!);
 	};
 };
 
@@ -936,9 +934,8 @@ fn handle_cancel_request(s: *server, n: lsp::notification) void = {
 	case let s: str =>
 		yield strings::dup(s)!;
 	case =>
-		warn_invalid_notification(
-			s, "$/cancelRequest", "'id' must be a number or string",
-		);
+		warn_invalid_notification(s,
+			"$/cancelRequest", "'id' must be a number or string");
 		return;
 	};
 	record_cancellation(s, id);

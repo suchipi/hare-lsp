@@ -18,13 +18,10 @@ use strings;
 	defer finish_session(&s);
 
 	// Skip do_init(): send a non-initialize request first.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":2600,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":0}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":2600,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":0}}}`
+		));
 
 	const body = wait_for_response(&s, 2600.0);
 	defer free(body);
@@ -50,11 +47,10 @@ fn smoke_notification(notif: str, probe_uri: str, ping_id: f64) void = {
 
 	open_doc(&s, probe_uri, "export fn p() void = void;\n");
 	const ping =
-		strings::concat(
-			`{"jsonrpc":"2.0","id":`, f64_to_int_str(ping_id),
+		strings::concat(`{"jsonrpc":"2.0","id":`,
+			f64_to_int_str(ping_id),
 			`,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"`,
-			probe_uri, `"}}}`,
-		)!;
+			probe_uri, `"}}}`)!;
 	defer free(ping);
 	send(&s, strings::toutf8(ping));
 	free(wait_for_response(&s, ping_id));
@@ -63,11 +59,10 @@ fn smoke_notification(notif: str, probe_uri: str, ping_id: f64) void = {
 
 	const ping2_id = ping_id + 1.0;
 	const ping2 =
-		strings::concat(
-			`{"jsonrpc":"2.0","id":`, f64_to_int_str(ping2_id),
+		strings::concat(`{"jsonrpc":"2.0","id":`,
+			f64_to_int_str(ping2_id),
 			`,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"`,
-			probe_uri, `"}}}`,
-		)!;
+			probe_uri, `"}}}`)!;
 	defer free(ping2);
 	send(&s, strings::toutf8(ping2));
 	free(wait_for_response(&s, ping2_id));
@@ -98,37 +93,29 @@ fn f64_to_int_str(v: f64) str = {
 @test fn e2e_cancel_request_is_consumed() void = {
 	smoke_notification(
 		`{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":9999}}`,
-		"file:///lc_cancel.ha", 2601.0,
-	);
+		"file:///lc_cancel.ha", 2601.0);
 };
 
 @test fn e2e_set_trace_is_consumed() void = {
 	smoke_notification(
 		`{"jsonrpc":"2.0","method":"$/setTrace","params":{"value":"verbose"}}`,
-		"file:///lc_trace.ha", 2603.0,
-	);
+		"file:///lc_trace.ha", 2603.0);
 };
 
 @test fn e2e_workdone_progress_cancel_is_consumed() void = {
 	smoke_notification(
-
 		`{"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":"my-token"}}`,
-		"file:///lc_progress.ha", 2605.0,
-	);
+		"file:///lc_progress.ha", 2605.0);
 };
 
 @test fn e2e_did_change_configuration_is_consumed() void = {
 	smoke_notification(
-
 		`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"hare":{"diagnostics":{"debounceMs":250}}}}}`,
-		"file:///lc_config.ha", 2607.0,
-	);
+		"file:///lc_config.ha", 2607.0);
 };
 
 @test fn e2e_did_change_workspace_folders_is_consumed() void = {
 	smoke_notification(
-
 		`{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{"event":{"added":[{"uri":"file:///newfolder","name":"new"}],"removed":[]}}}`,
-		"file:///lc_folders.ha", 2609.0,
-	);
+		"file:///lc_folders.ha", 2609.0);
 };

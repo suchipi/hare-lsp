@@ -67,17 +67,17 @@ export fn level_enabled(
 ) bool = lvl: int >= min: int;
 
 // --- emit helpers ----------------------------------------------------
-export fn slog_debug(s: *server, args: fmt::formattable...) void =
-	log_args(s, log_level::DEBUG, args...);
+export fn slog_debug(s: *server, args: fmt::formattable...) void = log_args(s,
+	log_level::DEBUG, args...);
 
-export fn slog_info(s: *server, args: fmt::formattable...) void =
-	log_args(s, log_level::INFO, args...);
+export fn slog_info(s: *server, args: fmt::formattable...) void = log_args(s,
+	log_level::INFO, args...);
 
-export fn slog_warn(s: *server, args: fmt::formattable...) void =
-	log_args(s, log_level::WARN, args...);
+export fn slog_warn(s: *server, args: fmt::formattable...) void = log_args(s,
+	log_level::WARN, args...);
 
-export fn slog_error(s: *server, args: fmt::formattable...) void =
-	log_args(s, log_level::ERROR, args...);
+export fn slog_error(s: *server, args: fmt::formattable...) void = log_args(s,
+	log_level::ERROR, args...);
 
 fn log_args(s: *server, lvl: log_level, args: fmt::formattable...) void = {
 	if (!level_enabled(s.log_min_level, lvl)) return;

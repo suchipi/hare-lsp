@@ -121,10 +121,9 @@ fn fw_test_cleanup(
 	let (s, scan, in_buf, out) = fw_test_server();
 	defer fw_test_cleanup(&s, scan, in_buf, out);
 
-	analysis::index_file(
-		&s.workspace_index, "/repo/refs_target.ha",
-		strings::toutf8("export fn refs_target() void = void;\n"),
-	);
+	analysis::index_file(&s.workspace_index,
+		"/repo/refs_target.ha",
+		strings::toutf8("export fn refs_target() void = void;\n"));
 	assert(
 		len(analysis::lookup_by_short_name(&s.workspace_index, "refs_target")) == 1
 	);
@@ -161,10 +160,8 @@ fn fw_test_cleanup(
 	let (s, scan, in_buf, out) = fw_test_server();
 	defer fw_test_cleanup(&s, scan, in_buf, out);
 
-	analysis::index_file(
-		&s.workspace_index, "/repo/pkg/a.ha",
-		strings::toutf8("export fn trail_a() void = void;\n"),
-	);
+	analysis::index_file(&s.workspace_index,
+		"/repo/pkg/a.ha", strings::toutf8("export fn trail_a() void = void;\n"));
 
 	const dl = `{"files":[{"uri":"file:///repo/pkg/"}]}`;
 	let dpv = json::loadstr(dl)!;
@@ -191,18 +188,12 @@ fn fw_test_cleanup(
 	let (s, scan, in_buf, out) = fw_test_server();
 	defer fw_test_cleanup(&s, scan, in_buf, out);
 
-	analysis::index_file(
-		&s.workspace_index, "/repo/pkg/a.ha",
-		strings::toutf8("export fn pkg_a() void = void;\n"),
-	);
-	analysis::index_file(
-		&s.workspace_index, "/repo/pkg/b.ha",
-		strings::toutf8("export fn pkg_b() void = void;\n"),
-	);
-	analysis::index_file(
-		&s.workspace_index, "/repo/other.ha",
-		strings::toutf8("export fn other() void = void;\n"),
-	);
+	analysis::index_file(&s.workspace_index,
+		"/repo/pkg/a.ha", strings::toutf8("export fn pkg_a() void = void;\n"));
+	analysis::index_file(&s.workspace_index,
+		"/repo/pkg/b.ha", strings::toutf8("export fn pkg_b() void = void;\n"));
+	analysis::index_file(&s.workspace_index,
+		"/repo/other.ha", strings::toutf8("export fn other() void = void;\n"));
 
 	const dl = `{"files":[{"uri":"file:///repo/pkg"}]}`;
 	let dpv = json::loadstr(dl)!;

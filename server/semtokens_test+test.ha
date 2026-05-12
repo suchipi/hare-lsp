@@ -36,10 +36,8 @@ fn st_test_cleanup(
 
 fn st_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(
-			`{"textDocument":{"uri":"`, uri,
-			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
-		)!;
+		strings::concat(`{"textDocument":{"uri":"`,
+			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -140,9 +138,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// Step 2: delta request with the same id (no edits made yet, so no
 	// changes — should produce empty edits).
 	const delta_params =
-		strings::concat(
-			`{"textDocument":{"uri":"file:///x.ha"},"previousResultId":"`, id1, `"}`,
-		)!;
+		strings::concat(`{"textDocument":{"uri":"file:///x.ha"},"previousResultId":"`,
+			id1, `"}`)!;
 	defer free(delta_params);
 	let dpv = json::loadstr(delta_params)!;
 	defer json::finish(dpv);

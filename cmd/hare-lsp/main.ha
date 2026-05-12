@@ -92,14 +92,10 @@ export fn main() void = {
 	case void =>
 		yield io::tee(os::stderr, io::empty);
 	};
-	const in_handle: io::handle = if (in_log is io::file)
-		&in_tee: io::handle
-	else
-		os::stdin;
-	const out_handle: io::handle = if (out_log is io::file)
-		&out_tee: io::handle
-	else
-		os::stdout_file;
+	const in_handle: io::handle = if (in_log is io::file) &in_tee: io::handle
+		else os::stdin;
+	const out_handle: io::handle = if (out_log is io::file) &out_tee: io::handle
+		else os::stdout_file;
 	if (err_log is io::file) {
 		// Replace the process-wide stderr so structured log lines
 		// written by `server::slog_*` (and any direct os::stderr
@@ -144,21 +140,17 @@ fn print_usage() void = {
 	fmt::println("Options:")!;
 	fmt::println(
 		"  --doctor      Check that hare, hare-json, and "
-		"HAREPATH look healthy.",
-	)!;
+		"HAREPATH look healthy.")!;
 	fmt::println("  --version     Print the server version and exit.")!;
 	fmt::println("  --help        Show this message and exit.")!;
 	fmt::println()!;
 	fmt::println("Environment:")!;
 	fmt::println(
-
 		"  HARE_LSP_LOG_DIR     Absolute directory to tee "
-		"wire-protocol logs into.",
-	)!;
+		"wire-protocol logs into.")!;
 	fmt::println(
 		"  HARE_LSP_LOG_LEVEL   debug|info|warn|error "
-		"(default: info)",
-	)!;
+		"(default: info)")!;
 };
 
 // Reads HARE_LSP_MAX_BODY_BYTES if set. Returns void when unset or

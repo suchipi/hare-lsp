@@ -145,16 +145,14 @@ use strings;
 	assert(bytes::equal(body, strings::toutf8("{}")));
 	// On success the captured block is the headers we just consumed.
 	assert(
-		bytes::equal(
-			last_header_bytes(&r), strings::toutf8("Content-Length: 2\r\n\r\n"),
-		)
+		bytes::equal(last_header_bytes(&r),
+			strings::toutf8("Content-Length: 2\r\n\r\n"))
 	);
 
 	assert(read(&r) is bad_header);
 	assert(
-		bytes::equal(
-			last_header_bytes(&r), strings::toutf8("Content-Type: foo\r\n\r\n"),
-		)
+		bytes::equal(last_header_bytes(&r),
+			strings::toutf8("Content-Type: foo\r\n\r\n"))
 	);
 };
 

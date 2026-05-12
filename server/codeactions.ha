@@ -148,8 +148,8 @@ fn add_organize_imports_action(
 		end_off += 1;
 	};
 	const enc = position_encoding(s);
-	const sp =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, start_off);
+	const sp = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, start_off);
 	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, end_off);
 
 	// Build the WorkspaceEdit { changes: { uri: [TextEdit] } }
@@ -283,14 +283,13 @@ fn add_unused_import_actions(
 		if (size_in_list(covered, idx)) continue;
 		const imp = &pr.subunit.imports[idx];
 		const (rm_start, rm_end) = import_removal_range(data, imp);
-		if (!range_overlaps_unused(
-			data, doc.buf.line_index, enc, req_range, rm_start, rm_end,
-		)) continue;
+		if (!range_overlaps_unused(data,
+			doc.buf.line_index, enc, req_range, rm_start, rm_end)) continue;
 
 		const title = unused_import_title(imp);
 		defer free(title);
-		const edit =
-			build_removal_edit(data, doc.buf.line_index, enc, rm_start, rm_end);
+		const edit = build_removal_edit(data,
+			doc.buf.line_index, enc, rm_start, rm_end);
 
 		let edits: []json::value = [];
 		append(edits, edit)!;
@@ -308,8 +307,8 @@ fn add_unused_import_actions(
 		const idx = unused[i];
 		const imp = &pr.subunit.imports[idx];
 		const (rm_start, rm_end) = import_removal_range(data, imp);
-		const edit =
-			build_removal_edit(data, doc.buf.line_index, enc, rm_start, rm_end);
+		const edit = build_removal_edit(data,
+			doc.buf.line_index, enc, rm_start, rm_end);
 		append(batch_edits, edit)!;
 	};
 	const we_batch = build_workspace_edit(uri, batch_edits);
@@ -422,8 +421,8 @@ fn add_diagnostic_quickfixes(
 		const (rm_start, rm_end) = import_removal_range(data, imp);
 		const title = unused_import_title(imp);
 		defer free(title);
-		const edit =
-			build_removal_edit(data, doc.buf.line_index, enc, rm_start, rm_end);
+		const edit = build_removal_edit(data,
+			doc.buf.line_index, enc, rm_start, rm_end);
 		let edits: []json::value = [];
 		append(edits, edit)!;
 		const we = build_workspace_edit(uri, edits);
@@ -665,16 +664,12 @@ fn range_overlaps_unused(
 	case void =>
 		return true;
 	};
-	const a =
-		analysis::position_to_byte(
-			data, line_index, enc,
-			analysis::position { line = r.start.line, character = r.start.character },
-		);
-	const b =
-		analysis::position_to_byte(
-			data, line_index, enc,
-			analysis::position { line = r.end.line, character = r.end.character },
-		);
+	const a = analysis::position_to_byte(data,
+		line_index, enc,
+		analysis::position { line = r.start.line, character = r.start.character });
+	const b = analysis::position_to_byte(data,
+		line_index, enc,
+		analysis::position { line = r.end.line, character = r.end.character });
 	if (a == b) return a >= imp_start && a <= imp_end;
 	return a < imp_end && imp_start < b;
 };

@@ -194,9 +194,9 @@ export fn shadow() void = {
 	const tmpl =
 		`{"jsonrpc":"2.0","id":1520,"method":"textDocument/references","params":{"textDocument":{"uri":"`;
 	const req =
-		strings::concat(
-			tmpl, uri_a,
-			`"},"position":{"line":0,"character":12},"context":{"includeDeclaration":true}}}`,
+		strings::concat(tmpl,
+			uri_a,
+			`"},"position":{"line":0,"character":12},"context":{"includeDeclaration":true}}}`
 		)!;
 	defer free(req);
 	send(&s, strings::toutf8(req));
@@ -240,9 +240,8 @@ export fn shadow() void = {
 	const tmpl =
 		`{"jsonrpc":"2.0","id":1521,"method":"textDocument/rename","params":{"textDocument":{"uri":"`;
 	const req =
-		strings::concat(
-			tmpl, uri_a, `"},"position":{"line":0,"character":12},"newName":"renamed"}}`,
-		)!;
+		strings::concat(tmpl,
+			uri_a, `"},"position":{"line":0,"character":12},"newName":"renamed"}}`)!;
 	defer free(req);
 	send(&s, strings::toutf8(req));
 
@@ -325,17 +324,14 @@ fn write_test_file(path: str, body: str) void = {
 fn init_with_workspace_folder(s: *session, root: str) void = {
 	const msg =
 		strings::concat(
-
 			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
 			root, `","workspaceFolders":[{"uri":"file://`, root,
-			`","name":"crossmod"}],"capabilities":{}}}`,
-		)!;
+			`","name":"crossmod"}],"capabilities":{}}}`)!;
 	defer free(msg);
 	send(s, strings::toutf8(msg));
 	free(wait_for_response(s, 1.0));
-	send(
-		s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 };
 
 fn drain_until_indexed_ref(s: *session) void = {

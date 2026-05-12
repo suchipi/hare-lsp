@@ -39,10 +39,8 @@ fn nav_test_cleanup(
 
 fn nav_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(
-			`{"textDocument":{"uri":"`, uri,
-			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
-		)!;
+		strings::concat(`{"textDocument":{"uri":"`,
+			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -124,9 +122,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn hover_on_builtin_returns_docs() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
-	nav_open(
-		&s, "file:///b.ha", `export fn f() void = { let x: size = len(\"hi\"); };`,
-	);
+	nav_open(&s,
+		"file:///b.ha", `export fn f() void = { let x: size = len(\"hi\"); };`);
 
 	// Position is on "len" — character 38.
 	const params =
@@ -297,10 +294,9 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn type_definition_returns_location_for_type_only() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
-	nav_open(
-		&s, "file:///x.ha",
-		"type point = struct { x: int };\\nexport fn f() void = void;\\n",
-	);
+	nav_open(&s,
+		"file:///x.ha",
+		"type point = struct { x: int };\\nexport fn f() void = void;\\n");
 
 	// Hover on "point" — line 0, char 5.
 	const params =
@@ -400,9 +396,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer nav_rm(def_path);
 	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
 
-	nav_open(
-		&s, "file:///caller.ha", "fn caller() void = { let n = answer(); };\\n",
-	);
+	nav_open(&s,
+		"file:///caller.ha", "fn caller() void = { let n = answer(); };\\n");
 
 	// Position on `answer` — char index roughly 29.
 	const params =
@@ -444,9 +439,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
 
 	// `let t = want()?;` — hover on `t` (line 0, char 25).
-	nav_open(
-		&s, "file:///caller_prop.ha", "fn caller() void = { let t = want()?; };\\n",
-	);
+	nav_open(&s,
+		"file:///caller_prop.ha", "fn caller() void = { let t = want()?; };\\n");
 
 	const params =
 		`{"textDocument":{"uri":"file:///caller_prop.ha"},"position":{"line":0,"character":25}}`;
@@ -491,9 +485,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
 
 	// `let t = want()!;` — hover on `t` (line 0, char 25).
-	nav_open(
-		&s, "file:///caller_bang.ha", "fn caller() void = { let t = want()!; };\\n",
-	);
+	nav_open(&s,
+		"file:///caller_bang.ha", "fn caller() void = { let t = want()!; };\\n");
 
 	const params =
 		`{"textDocument":{"uri":"file:///caller_bang.ha"},"position":{"line":0,"character":25}}`;
@@ -546,9 +539,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	analysis::index_file(&s.workspace_index, path_b, strings::toutf8(text));
 
 	// caller.ha imports lspmoda only.
-	nav_open(
-		&s, "file:///caller.ha", "use lspmoda;\\n\\nfn caller() void = init();\\n",
-	);
+	nav_open(&s,
+		"file:///caller.ha", "use lspmoda;\\n\\nfn caller() void = init();\\n");
 
 	// Position on `init` in caller.ha.
 	const params =
@@ -906,10 +898,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	// In `bufio::newscanner(...)`, hovering on `bufio` should show the
 	// bufio README, not fall through to a (missing) decl lookup.
-	nav_open(
-		&s, "file:///mb3.ha",
-		"use bufio;\\nfn f() void = { bufio::newscanner(0); };\\n",
-	);
+	nav_open(&s,
+		"file:///mb3.ha", "use bufio;\\nfn f() void = { bufio::newscanner(0); };\\n");
 
 	// Position on the second `bufio` (in the body, line 1).
 	// Source: "fn f() void = { bufio::newscanner(0); };"

@@ -139,10 +139,8 @@ export fn ask() int = answer();
 		const id_buf: [16]u8 = [0...];
 		const id_str = fmt::bsprintf(id_buf, "{}", id: f64)!;
 		const req =
-			strings::concat(
-				tmpl, id_str,
-				`,"method":"workspace/symbol","params":{"query":"newscanner"}}`,
-			)!;
+			strings::concat(tmpl,
+				id_str, `,"method":"workspace/symbol","params":{"query":"newscanner"}}`)!;
 		defer free(req);
 		send(&s, strings::toutf8(req));
 		const body = wait_for_response(&s, id);

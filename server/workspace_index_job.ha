@@ -154,8 +154,7 @@ fn drain_one_batch(s: *server, job: *workspace_index_job) void = {
 	};
 	const limit = if (job.cursor + INDEX_BATCH_SIZE > len(job.paths))
 		len(job.paths)
-	else
-		job.cursor + INDEX_BATCH_SIZE;
+		else job.cursor + INDEX_BATCH_SIZE;
 	for (let i = job.cursor; i < limit; i += 1) {
 		const _ = analysis::read_and_index_file(job.target, job.paths[i]);
 	};

@@ -39,10 +39,8 @@ fn th_test_cleanup(
 
 fn th_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(
-			`{"textDocument":{"uri":"`, uri,
-			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
-		)!;
+		strings::concat(`{"textDocument":{"uri":"`,
+			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -153,9 +151,9 @@ fn th_index(s: *server, path: str, text: str) void = {
 
 	// Ask: what are Inner's subtypes? Expect Wrapper.
 	const params_str =
-		strings::concat(
-			`{"item":{"name":"Inner","kind":23,"uri":"file://`, path,
-			`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":17}},"selectionRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":17}}}}`,
+		strings::concat(`{"item":{"name":"Inner","kind":23,"uri":"file://`,
+			path,
+			`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":17}},"selectionRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":17}}}}`
 		)!;
 	defer free(params_str);
 	let pv = json::loadstr(params_str)!;
@@ -195,15 +193,14 @@ fn th_index(s: *server, path: str, text: str) void = {
 	defer rmfile(path);
 
 	th_index(&s, path, text);
-	th_open(
-		&s, "file://.tmp/hare-lsp-th-tagged-test.ha",
-		"type T = (A | B);\\ntype A = int;\\ntype B = str;\\n",
-	);
+	th_open(&s,
+		"file://.tmp/hare-lsp-th-tagged-test.ha",
+		"type T = (A | B);\\ntype A = int;\\ntype B = str;\\n");
 
 	const params_str =
-		strings::concat(
-			`{"item":{"name":"T","kind":23,"uri":"file://`, path,
-			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}}}}`,
+		strings::concat(`{"item":{"name":"T","kind":23,"uri":"file://`,
+			path,
+			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":17}}}}`
 		)!;
 	defer free(params_str);
 	let pv = json::loadstr(params_str)!;
@@ -284,9 +281,9 @@ fn th_index(s: *server, path: str, text: str) void = {
 	th_index(&s, path, text);
 
 	const params_str =
-		strings::concat(
-			`{"item":{"name":"Node","kind":23,"uri":"file://`, path,
-			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}}}}`,
+		strings::concat(`{"item":{"name":"Node","kind":23,"uri":"file://`,
+			path,
+			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":35}}}}`
 		)!;
 	defer free(params_str);
 	let pv = json::loadstr(params_str)!;
@@ -389,9 +386,9 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const a_uri = strings::concat("file://", a_real)!;
 	defer free(a_uri);
 	const params =
-		strings::concat(
-			`{"item":{"name":"T","kind":23,"uri":"`, a_uri,
-			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}}}}`,
+		strings::concat(`{"item":{"name":"T","kind":23,"uri":"`,
+			a_uri,
+			`","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":11}}}}`
 		)!;
 	defer free(params);
 	let pv = json::loadstr(params)!;
@@ -463,9 +460,9 @@ fn th_index(s: *server, path: str, text: str) void = {
 	defer free(a_uri);
 	// Cursor on mod_a's X (line 1).
 	const params =
-		strings::concat(
-			`{"item":{"name":"X","kind":23,"uri":"`, a_uri,
-			`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}},"selectionRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}}}}`,
+		strings::concat(`{"item":{"name":"X","kind":23,"uri":"`,
+			a_uri,
+			`","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}},"selectionRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":13}}}}`
 		)!;
 	defer free(params);
 	let pv = json::loadstr(params)!;

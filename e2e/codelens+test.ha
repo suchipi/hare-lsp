@@ -14,17 +14,13 @@ use strings;
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample = `export fn main() void = void;
 `;
@@ -33,13 +29,10 @@ use strings;
 	send(&s, strings::toutf8(did_open));
 
 	// Ask for the file's lenses.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":10,"method":"textDocument/codeLens","params":{"textDocument":{"uri":"file:///cl_anchor.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":10,"method":"textDocument/codeLens","params":{"textDocument":{"uri":"file:///cl_anchor.ha"}}}`
+		));
 	const lenses_body = wait_for_response(&s, 10.0);
 	defer free(lenses_body);
 	let lenses_v = json::loadstr(strings::fromutf8(lenses_body)!)!;
@@ -58,8 +51,7 @@ use strings;
 	const resolve_msg =
 		strings::concat(
 			`{"jsonrpc":"2.0","id":11,"method":"codeLens/resolve","params":{"range":`,
-			dump_value(range_v), `,"data":`, dump_value(data_v), `}}`,
-		)!;
+			dump_value(range_v), `,"data":`, dump_value(data_v), `}}`)!;
 	defer free(resolve_msg);
 	send(&s, strings::toutf8(resolve_msg));
 

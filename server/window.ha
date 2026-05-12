@@ -30,17 +30,17 @@ export fn log_message(s: *server, kind: lsp::message_type, msg: str) void = {
 };
 
 // Convenience wrappers.
-export fn log_error(s: *server, msg: str) void =
-	log_message(s, lsp::message_type::ERROR, msg);
+export fn log_error(s: *server, msg: str) void = log_message(s,
+	lsp::message_type::ERROR, msg);
 
-export fn log_warning(s: *server, msg: str) void =
-	log_message(s, lsp::message_type::WARNING, msg);
+export fn log_warning(s: *server, msg: str) void = log_message(s,
+	lsp::message_type::WARNING, msg);
 
-export fn log_info(s: *server, msg: str) void =
-	log_message(s, lsp::message_type::INFO, msg);
+export fn log_info(s: *server, msg: str) void = log_message(s,
+	lsp::message_type::INFO, msg);
 
-export fn log_debug(s: *server, msg: str) void =
-	log_message(s, lsp::message_type::DEBUG, msg);
+export fn log_debug(s: *server, msg: str) void = log_message(s,
+	lsp::message_type::DEBUG, msg);
 
 // --- window/showMessage ----------------------------------------------
 // Sends a window/showMessage notification. Use sparingly — clients typically

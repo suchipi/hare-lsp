@@ -145,7 +145,6 @@ export fn ensure_full_stdlib_indexed(s: *server) void = {
 		free(roots);
 	};
 	if (len(roots) == 0) return;
-	start_index_job(
-		s, roots, &s.stdlib_index, "Indexing stdlib", "hare-lsp: indexed stdlib",
-	);
+	start_index_job(s,
+		roots, &s.stdlib_index, "Indexing stdlib", "hare-lsp: indexed stdlib");
 };

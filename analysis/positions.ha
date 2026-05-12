@@ -72,9 +72,8 @@ export fn position_to_byte(
 	if (line >= len(line_index)) return len(text);
 	const line_start = line_index[line];
 	const line_end = line_content_end(text, line_index, line);
-	return units_to_byte(
-		text[line_start..line_end], enc, pos.character: size,
-	) + line_start;
+	return units_to_byte(text[line_start..line_end],
+		enc, pos.character: size) + line_start;
 };
 
 // Returns the byte offset where the content of `line` ends, excluding

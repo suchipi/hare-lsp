@@ -162,9 +162,8 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	let chunk: [4096]u8 = [0...];
 	const timeout_ms = s.config.build_timeout_ms;
 	const deadline_abs = if (timeout_ms > 0) {
-		yield time::add(
-			time::now(time::clock::MONOTONIC), timeout_ms: i64 * time::MILLISECOND,
-		);
+		yield time::add(time::now(time::clock::MONOTONIC),
+			timeout_ms: i64 * time::MILLISECOND);
 	} else {
 		yield time::instant { sec = 0, nsec = 0 };
 	};

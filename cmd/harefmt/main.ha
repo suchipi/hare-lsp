@@ -145,17 +145,15 @@ fn parse_args(args: []str) (cli | cli_error) = {
 	};
 
 	if (c.mode == mode::NONE) {
-		fmt::fprintln(
-			os::stderr, "harefmt: missing one of --write, --check, --stdout",
-		)!;
+		fmt::fprintln(os::stderr,
+			"harefmt: missing one of --write, --check, --stdout")!;
 		free(c.paths);
 		return cli_error::USAGE;
 	};
 	if (c.mode == mode::STDOUT) {
 		if (len(c.paths) != 1) {
-			fmt::fprintln(
-				os::stderr, "harefmt: --stdout requires exactly one path arg (or `-`)",
-			)!;
+			fmt::fprintln(os::stderr,
+				"harefmt: --stdout requires exactly one path arg (or `-`)")!;
 			free(c.paths);
 			return cli_error::USAGE;
 		};
@@ -170,48 +168,37 @@ fn parse_args(args: []str) (cli | cli_error) = {
 };
 
 fn print_usage(out: io::handle) void = {
-	fmt::fprintln(
-		out, "Usage: harefmt --write|--check|--stdout [OPTIONS] <path>...",
-	)!;
+	fmt::fprintln(out,
+		"Usage: harefmt --write|--check|--stdout [OPTIONS] <path>...")!;
 	fmt::fprintln(out, "       harefmt --stdout -")!;
 	fmt::fprintln(out)!;
-	fmt::fprintln(
-		out, "Format Hare source files using the same engine as hare-lsp.",
-	)!;
+	fmt::fprintln(out,
+		"Format Hare source files using the same engine as hare-lsp.")!;
 	fmt::fprintln(out)!;
 	fmt::fprintln(out, "Modes (exactly one required):")!;
 	fmt::fprintln(out, "  -w, --write           Format files in place.")!;
-	fmt::fprintln(
-		out, "  -c, --check           Don't write. Print each unformatted file's",
-	)!;
-	fmt::fprintln(
-		out, "                        path on its own line. Exit 1 if any file",
-	)!;
+	fmt::fprintln(out,
+		"  -c, --check           Don't write. Print each unformatted file's")!;
+	fmt::fprintln(out,
+		"                        path on its own line. Exit 1 if any file")!;
 	fmt::fprintln(out, "                        would change.")!;
-	fmt::fprintln(
-		out, "      --stdout          Read one file (or `-` for stdin), write the",
-	)!;
-	fmt::fprintln(
-		out, "                        formatted output to stdout. Exit 1 on parse",
-	)!;
+	fmt::fprintln(out,
+		"      --stdout          Read one file (or `-` for stdin), write the")!;
+	fmt::fprintln(out,
+		"                        formatted output to stdout. Exit 1 on parse")!;
 	fmt::fprintln(out, "                        error.")!;
 	fmt::fprintln(out)!;
 	fmt::fprintln(out, "Options:")!;
-	fmt::fprintln(
-		out, "      --no-ignore               Don't read .harefmtignore files.",
-	)!;
-	fmt::fprintln(
-		out, "      --no-gitignore            Don't read .gitignore files.",
-	)!;
-	fmt::fprintln(
-		out, "      --follow-dir-symlinks     Follow symlinked directories.",
-	)!;
-	fmt::fprintln(
-		out, "      --no-follow-file-symlinks Skip symlinked regular files.",
-	)!;
-	fmt::fprintln(
-		out, "  -h, --help                    Show this help and exit.",
-	)!;
+	fmt::fprintln(out,
+		"      --no-ignore               Don't read .harefmtignore files.")!;
+	fmt::fprintln(out,
+		"      --no-gitignore            Don't read .gitignore files.")!;
+	fmt::fprintln(out,
+		"      --follow-dir-symlinks     Follow symlinked directories.")!;
+	fmt::fprintln(out,
+		"      --no-follow-file-symlinks Skip symlinked regular files.")!;
+	fmt::fprintln(out,
+		"  -h, --help                    Show this help and exit.")!;
 	fmt::fprintln(out, "  -V, --version                 Print version and exit.")!;
 };
 
@@ -348,9 +335,8 @@ fn process_file(abs: str, st: *state) void = {
 fn report_format_error(label: str, e: *server::format_error) void = {
 	match (e.location) {
 	case let loc: lex::location =>
-		fmt::fprintfln(
-			os::stderr, "{}:{}:{}: {}", label, loc.line, loc.col, e.message,
-		)!;
+		fmt::fprintfln(os::stderr,
+			"{}:{}:{}: {}", label, loc.line, loc.col, e.message)!;
 	case void =>
 		fmt::fprintfln(os::stderr, "{}: {}", label, e.message)!;
 	};

@@ -130,18 +130,14 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 		const _ = io::close(master);
 	};
 
-	const _ =
-		tty::set_winsize(
-			slave,
-			tty::ttysize {
-				rows = 24,
-				columns = 80,
-			},
-		);
+	const _ = tty::set_winsize(slave,
+		tty::ttysize {
+			rows = 24,
+			columns = 80,
+		});
 
-	let cmd = match (exec::cmd(
-		"nvim", "--clean", "-u", NVIM_INIT_PATH, NVIM_BUFFER_PATH,
-	)) {
+	let cmd = match (exec::cmd("nvim",
+		"--clean", "-u", NVIM_INIT_PATH, NVIM_BUFFER_PATH)) {
 	case let c: exec::command =>
 		yield c;
 	case let e: exec::error =>
@@ -211,9 +207,8 @@ fn wait_for_sentinel(master: io::file, total: time::duration) str = {
 	for (true) {
 		const now = time::now(time::clock::MONOTONIC);
 		if (time::compare(now, deadline) >= 0) {
-			fmt::fatalf(
-				"e2e: timed out waiting for nvim sentinel at {}", NVIM_SENTINEL_PATH,
-			);
+			fmt::fatalf("e2e: timed out waiting for nvim sentinel at {}",
+				NVIM_SENTINEL_PATH);
 		};
 
 		// Drain whatever bytes are queued on the master so neovim

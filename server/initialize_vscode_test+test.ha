@@ -276,10 +276,8 @@ const VSCODE_INITIALIZE_PARAMS: str =
 @test fn vscode_initialize_via_transport() void = {
 	// Construct the full JSON-RPC message wrapping the captured params.
 	const msg =
-		strings::concat(
-			`{"jsonrpc":"2.0","id":0,"method":"initialize","params":`,
-			VSCODE_INITIALIZE_PARAMS, `}`,
-		)!;
+		strings::concat(`{"jsonrpc":"2.0","id":0,"method":"initialize","params":`,
+			VSCODE_INITIALIZE_PARAMS, `}`)!;
 	defer free(msg);
 	const body = strings::toutf8(msg);
 

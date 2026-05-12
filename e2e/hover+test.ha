@@ -27,17 +27,13 @@ export fn ask() int = answer();
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`use bufio;
@@ -68,9 +64,8 @@ export fn main() void = {
 		case let o: json::object =>
 			yield o;
 		case =>
-			fmt::fatalf(
-				"e2e: hover returned null for inferred-type local. body={}", text,
-			);
+			fmt::fatalf("e2e: hover returned null for inferred-type local. body={}",
+				text);
 		};
 	case void =>
 		fmt::fatalf("e2e: hover response missing result: {}", text);
@@ -99,17 +94,13 @@ export fn main() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`export fn add(a: int, b: int) int = {
@@ -157,17 +148,13 @@ export fn main() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample = `export let buffer_size: size = 12345;
 `;
@@ -210,17 +197,13 @@ export fn main() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`use os;
@@ -269,17 +252,13 @@ export fn main() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`use os;
@@ -312,9 +291,8 @@ export fn main() void = {
 	case let arr: []json::value =>
 		assert(len(arr) > 0, "definition should return at least one location");
 	case =>
-		fmt::fatalf(
-			"e2e: definition returned null for os::stdout_file. body={}", text,
-		);
+		fmt::fatalf("e2e: definition returned null for os::stdout_file. body={}",
+			text);
 	};
 };
 
@@ -324,17 +302,13 @@ export fn main() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`use bufio;
@@ -369,8 +343,7 @@ export fn main() void = {
 	case =>
 		fmt::fatalf(
 			"e2e: stdlib hover returned null — bufio::newscanner unresolved. body={}",
-			text,
-		);
+			text);
 	};
 	const contents =
 		*(json::get(&result_obj, "contents") as *json::value) as json::object;
@@ -387,17 +360,13 @@ export fn main() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample =
 		`export fn main() void = {
@@ -451,17 +420,13 @@ export fn main() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	const sample = `export fn echo(n: int) int = {
 	return n;
@@ -509,17 +474,14 @@ export fn main() void = {
 	// lookups resolve.
 	const init_msg =
 		strings::concat(
-
 			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
 			os_repo_root(), `","workspaceFolders":[{"uri":"file://`, os_repo_root(),
-			`","name":"hare-lsp"}],"capabilities":{}}}`,
-		)!;
+			`","name":"hare-lsp"}],"capabilities":{}}}`)!;
 	defer free(init_msg);
 	send(&s, strings::toutf8(init_msg));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	// Open a small file that mirrors the user's actual main.ha shape.
 	const sample =
@@ -559,10 +521,8 @@ export fn main() void = {
 	case json::object => void;
 	case =>
 		fmt::fatalf(
-
 			"e2e: hover on `server::run` returned null — workspace-qualified hover broken. body={}",
-			text,
-		);
+			text);
 	};
 };
 
@@ -591,17 +551,13 @@ fn os_repo_root() str = {
 	defer finish_session(&s);
 
 	// Initialize. We need to be ready before opening docs.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(&s, 1.0));
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	// didOpen.
 	const did_open = build_did_open("file:///hover_test.ha", HOVER_DOC);
@@ -635,10 +591,8 @@ fn os_repo_root() str = {
 		yield o;
 	case =>
 		fmt::fatalf(
-
 			"e2e: hover returned null/non-object — server didn't recognize the identifier. Body: {}",
-			text,
-		);
+			text);
 	};
 	const contents = match (json::get(&result_obj, "contents")) {
 	case let p: *json::value =>
@@ -665,11 +619,9 @@ fn build_did_open(uri: str, body: str) str = {
 	// backslashes.
 	let result =
 		strings::concat(
-
 			`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"`,
 			uri, `","languageId":"hare","version":1,"text":`, json_string_quote(body),
-			`}}}`,
-		)!;
+			`}}}`)!;
 	return result;
 };
 

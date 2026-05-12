@@ -78,17 +78,15 @@ fn resolve_struct_member_at(
 	// of the last consumed token (see [[hare::lex::prevloc]]). For an
 	// access_field `recv.field`, that's the start of `field`. We pass
 	// the field name's start offset and match against `loc.end.off`.
-	const af = match (find_access_field_in_subunit(
-		&cache.pr.subunit, ident_range.0, name,
-	)) {
+	const af = match (find_access_field_in_subunit(&cache.pr.subunit,
+		ident_range.0, name)) {
 	case let af: ast::access_field =>
 		yield af;
 	case void =>
 		return void;
 	};
-	const recv_type = match (type_of_expr(
-		s, doc, &cache.pr.subunit, af.object, 0,
-	)) {
+	const recv_type = match (type_of_expr(s,
+		doc, &cache.pr.subunit, af.object, 0)) {
 	case let lt: located_type =>
 		yield lt;
 	case void =>
@@ -541,9 +539,8 @@ fn walk_for_binding_type(
 				return binding_type(s, doc, su, bd, depth);
 			};
 		};
-		return walk_for_binding_type(
-			s, doc, su, b.bindings[0].init, name, off, depth,
-		);
+		return walk_for_binding_type(s,
+			doc, su, b.bindings[0].init, name, off, depth);
 	case let c: ast::compound_expr =>
 		let hit: (located_type | void) = void;
 		for (let i = 0z; i < len(c.exprs); i += 1) {
@@ -793,14 +790,12 @@ fn lookup_member_in_type(
 	case let ut: ast::union_type =>
 		return lookup_in_members(holder, ut: []ast::struct_member, name);
 	case let p: ast::pointer_type =>
-		return lookup_member_in_type(
-			s,
+		return lookup_member_in_type(s,
 			located_type {
 				t = p.referent,
 				text = holder.text,
 				uri = holder.uri,
-			}, name, depth + 1,
-		);
+			}, name, depth + 1);
 	case let a: ast::alias_type =>
 		const id_lookup_doc = find_doc_for_uri(s, holder.uri);
 		const lookup_doc = match (id_lookup_doc) {
@@ -825,14 +820,12 @@ fn lookup_member_in_type(
 			return void;
 		};
 		const (text, uri) = locate_decl_anywhere(s, d, holder);
-		return lookup_member_in_type(
-			s,
+		return lookup_member_in_type(s,
 			located_type {
 				t = u,
 				text = text,
 				uri = uri,
-			}, name, depth + 1,
-		);
+			}, name, depth + 1);
 	case =>
 		return void;
 	};
@@ -1023,10 +1016,10 @@ export fn try_send_struct_member_hover(
 		return false;
 	};
 	const enc = position_encoding(s);
-	const start_pos =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, ident_range.0);
-	const end_pos =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, ident_range.1);
+	const start_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, ident_range.0);
+	const end_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, ident_range.1);
 
 	let result = json::newobject();
 	let contents = json::newobject();
@@ -1070,10 +1063,10 @@ export fn try_send_struct_member_definition(
 	const line_index = analysis::build_line_index(m.owner_text);
 	defer free(line_index);
 	const enc = position_encoding(s);
-	const start_pos =
-		analysis::byte_to_position(m.owner_text, line_index, enc, m.name_start);
-	const end_pos =
-		analysis::byte_to_position(m.owner_text, line_index, enc, m.name_end);
+	const start_pos = analysis::byte_to_position(m.owner_text,
+		line_index, enc, m.name_start);
+	const end_pos = analysis::byte_to_position(m.owner_text,
+		line_index, enc, m.name_end);
 
 	let result = json::newobject();
 	json::set(&result, "uri", m.owner_uri: json::value)!;

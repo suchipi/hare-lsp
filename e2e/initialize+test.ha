@@ -79,9 +79,8 @@ def MINIMAL_INITIALIZE: str =
 	// initialized notification — no response, but the server emits
 	// workspace/configuration, register-capability, etc. We just need
 	// to keep ignoring those until shutdown responds.
-	send(
-		&s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`),
-	);
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	// shutdown request — server must reply with id=2 (result is null
 	// per LSP).

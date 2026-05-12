@@ -89,8 +89,8 @@ fn detect_module_hover(
 		return void;
 	};
 	// Find which segment encloses off; on a `::`, anchor to segment 0.
-	const seg_under =
-		segment_index_in_run(data, run_start, run_end, segments, off);
+	const seg_under = segment_index_in_run(data,
+		run_start, run_end, segments, off);
 	const ident_end = match (seg_under) {
 	case let i: size =>
 		yield i + 1;

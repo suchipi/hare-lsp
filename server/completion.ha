@@ -114,11 +114,9 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
-	const off =
-		analysis::position_to_byte(
-			data, doc.buf.line_index, position_encoding(s),
-			analysis::position { line = pos.line, character = pos.character },
-		);
+	const off = analysis::position_to_byte(data,
+		doc.buf.line_index, position_encoding(s),
+		analysis::position { line = pos.line, character = pos.character });
 
 	// Inspect the bytes preceding `off` to detect "mod::" context.
 	const prefix_info = scan_completion_prefix(data, off);

@@ -78,9 +78,8 @@ fn next_msg(data: []u8) (json::value, size) = {
 	defer json::finish(v);
 	const o = v as json::object;
 	assert(
-		*(json::get(
-			&o, "method",
-		) as *json::value) as str == "textDocument/publishDiagnostics"
+		*(json::get(&o,
+			"method") as *json::value) as str == "textDocument/publishDiagnostics"
 	);
 	const params = *(json::get(&o, "params") as *json::value) as json::object;
 	const diags =

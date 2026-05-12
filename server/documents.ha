@@ -155,36 +155,32 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didOpen", "missing or non-object params",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didOpen", "missing or non-object params");
 		return;
 	};
 	const text_doc = match (object_field_object(&obj, "textDocument")) {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didOpen", "missing or non-object 'textDocument'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didOpen", "missing or non-object 'textDocument'");
 		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str =>
 		yield s;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didOpen", "missing or non-string 'textDocument.uri'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didOpen", "missing or non-string 'textDocument.uri'");
 		return;
 	};
 	const text = match (object_string(&text_doc, "text")) {
 	case let s: str =>
 		yield s;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didOpen", "missing or non-string 'textDocument.text'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didOpen", "missing or non-string 'textDocument.text'");
 		return;
 	};
 	const lang = match (object_string(&text_doc, "languageId")) {
@@ -237,27 +233,24 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didChange", "missing or non-object params",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didChange", "missing or non-object params");
 		return;
 	};
 	const text_doc = match (object_field_object(&obj, "textDocument")) {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didChange", "missing or non-object 'textDocument'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didChange", "missing or non-object 'textDocument'");
 		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str =>
 		yield s;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didChange", "missing or non-string 'textDocument.uri'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didChange", "missing or non-string 'textDocument.uri'");
 		return;
 	};
 	const version: i64 = match (object_number(&text_doc, "version")) {
@@ -281,10 +274,8 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 	if (version != 0 && version < doc.version) {
 		const msg =
 			fmt::asprintf(
-
 				"textDocument/didChange: version regression for {} ({} < {}); ignoring stale change",
-				uri, version, doc.version,
-			)!;
+				uri, version, doc.version)!;
 		defer free(msg);
 		log_warning(s, msg);
 		return;
@@ -302,15 +293,13 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 		case let a: []json::value =>
 			yield a;
 		case =>
-			warn_invalid_notification(
-				s, "textDocument/didChange", "'contentChanges' must be an array",
-			);
+			warn_invalid_notification(s,
+				"textDocument/didChange", "'contentChanges' must be an array");
 			return;
 		};
 	case =>
-		warn_invalid_notification(
-			s, "textDocument/didChange", "missing 'contentChanges'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didChange", "missing 'contentChanges'");
 		return;
 	};
 
@@ -386,22 +375,18 @@ fn apply_content_change(
 		return;
 	};
 	const enc = position_encoding(s);
-	const start_byte =
-		analysis::position_to_byte(
-			analysis::bytes(&doc.buf), doc.buf.line_index, enc,
-			analysis::position {
-				line = range.start.line,
-				character = range.start.character,
-			},
-		);
-	const end_byte =
-		analysis::position_to_byte(
-			analysis::bytes(&doc.buf), doc.buf.line_index, enc,
-			analysis::position {
-				line = range.end.line,
-				character = range.end.character,
-			},
-		);
+	const start_byte = analysis::position_to_byte(analysis::bytes(&doc.buf),
+		doc.buf.line_index, enc,
+		analysis::position {
+			line = range.start.line,
+			character = range.start.character,
+		});
+	const end_byte = analysis::position_to_byte(analysis::bytes(&doc.buf),
+		doc.buf.line_index, enc,
+		analysis::position {
+			line = range.end.line,
+			character = range.end.character,
+		});
 	analysis::replace_range(&doc.buf, start_byte, end_byte, strings::toutf8(text));
 	invalidate_parse_cache(doc);
 };
@@ -417,27 +402,24 @@ export fn handle_did_close(s: *server, n: lsp::notification) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didClose", "missing or non-object params",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didClose", "missing or non-object params");
 		return;
 	};
 	const text_doc = match (object_field_object(&obj, "textDocument")) {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didClose", "missing or non-object 'textDocument'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didClose", "missing or non-object 'textDocument'");
 		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str =>
 		yield s;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didClose", "missing or non-string 'textDocument.uri'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didClose", "missing or non-string 'textDocument.uri'");
 		return;
 	};
 	if (!has_document(s, uri)) {
@@ -455,27 +437,24 @@ export fn handle_did_save(s: *server, n: lsp::notification) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didSave", "missing or non-object params",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didSave", "missing or non-object params");
 		return;
 	};
 	const text_doc = match (object_field_object(&obj, "textDocument")) {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didSave", "missing or non-object 'textDocument'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didSave", "missing or non-object 'textDocument'");
 		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str =>
 		yield s;
 	case void =>
-		warn_invalid_notification(
-			s, "textDocument/didSave", "missing or non-string 'textDocument.uri'",
-		);
+		warn_invalid_notification(s,
+			"textDocument/didSave", "missing or non-string 'textDocument.uri'");
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
@@ -518,18 +497,16 @@ export fn handle_will_save_wait_until(s: *server, r: lsp::request) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		reject_invalid_request(
-			s, r.id, r.method, "missing or non-object 'textDocument'",
-		);
+		reject_invalid_request(s,
+			r.id, r.method, "missing or non-object 'textDocument'");
 		return;
 	};
 	const uri = match (object_string(&text_doc, "uri")) {
 	case let s: str =>
 		yield s;
 	case void =>
-		reject_invalid_request(
-			s, r.id, r.method, "missing or non-string 'textDocument.uri'",
-		);
+		reject_invalid_request(s,
+			r.id, r.method, "missing or non-string 'textDocument.uri'");
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
@@ -619,10 +596,10 @@ fn compute_will_save_edits(s: *server, doc: *document) []text_edit = {
 
 	const enc = position_encoding(s);
 	const start_byte = if (s.config.format_trim_final_newlines) end else len(data);
-	const start_pos =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, start_byte);
-	const end_pos =
-		analysis::byte_to_position(data, doc.buf.line_index, enc, len(data));
+	const start_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, start_byte);
+	const end_pos = analysis::byte_to_position(data,
+		doc.buf.line_index, enc, len(data));
 	append(edits, text_edit {
 		range = lsp::range {
 			start = lsp::position {
@@ -685,10 +662,8 @@ fn check_open_capacity(s: *server, uri: str, incoming_bytes: size) bool = {
 	if (!replacing && len(s.documents) >= s.config.limits.max_open_documents) {
 		const msg =
 			fmt::asprintf(
-
 				"textDocument/didOpen: refusing to open {} (already {} documents open; cap {})",
-				uri, len(s.documents), s.config.limits.max_open_documents,
-			)!;
+				uri, len(s.documents), s.config.limits.max_open_documents)!;
 		defer free(msg);
 		log_warning(s, msg);
 		return false;
@@ -701,10 +676,8 @@ fn check_open_capacity(s: *server, uri: str, incoming_bytes: size) bool = {
 	if (total > s.config.limits.max_total_buffer_bytes) {
 		const msg =
 			fmt::asprintf(
-
 				"textDocument/didOpen: refusing to open {} ({} bytes would exceed total cap of {} bytes)",
-				uri, incoming_bytes, s.config.limits.max_total_buffer_bytes,
-			)!;
+				uri, incoming_bytes, s.config.limits.max_total_buffer_bytes)!;
 		defer free(msg);
 		log_warning(s, msg);
 		return false;
@@ -724,8 +697,7 @@ fn check_buffer_capacity(s: *server, uri: str) bool = {
 		const msg =
 			fmt::asprintf(
 				"textDocument/didChange: total buffer size {} exceeds cap {}; dropping {}",
-				total, s.config.limits.max_total_buffer_bytes, uri,
-			)!;
+				total, s.config.limits.max_total_buffer_bytes, uri)!;
 		defer free(msg);
 		log_warning(s, msg);
 		return false;
@@ -745,8 +717,8 @@ fn object_field_object(
 	key: str,
 ) (json::object | void) = lsp::json_obj(o, key);
 
-fn object_string(o: *json::object, key: str) (str | void) =
-	lsp::json_str(o, key);
+fn object_string(o: *json::object, key: str) (str | void) = lsp::json_str(o,
+	key);
 
-fn object_number(o: *json::object, key: str) (f64 | void) =
-	lsp::json_num(o, key);
+fn object_number(o: *json::object, key: str) (f64 | void) = lsp::json_num(o,
+	key);

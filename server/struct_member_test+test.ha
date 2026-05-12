@@ -228,9 +228,8 @@ use strings;
 
 	// Line 0: "fn f(p: point) void = { let _ = p.x; };"
 	// `x` at column 34.
-	nav_open(
-		&s, "file:///sm_caller.ha", "fn f(p: point) void = { let _ = p.x; };\\n",
-	);
+	nav_open(&s,
+		"file:///sm_caller.ha", "fn f(p: point) void = { let _ = p.x; };\\n");
 
 	const params =
 		`{"textDocument":{"uri":"file:///sm_caller.ha"},"position":{"line":0,"character":34}}`;

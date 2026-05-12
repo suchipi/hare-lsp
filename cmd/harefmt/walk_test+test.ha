@@ -118,15 +118,12 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	cleanup(root);
 	make_dir(root);
 	defer cleanup(root);
-	write_test_file(
-		strings::concat(root, "/keep.skip.ha")!, "fn k() void = void;\n",
-	);
-	write_test_file(
-		strings::concat(root, "/noise.skip.ha")!, "fn n() void = void;\n",
-	);
-	write_test_file(
-		strings::concat(root, "/.harefmtignore")!, "*.skip.ha\n!keep.skip.ha\n",
-	);
+	write_test_file(strings::concat(root, "/keep.skip.ha")!,
+		"fn k() void = void;\n");
+	write_test_file(strings::concat(root, "/noise.skip.ha")!,
+		"fn n() void = void;\n");
+	write_test_file(strings::concat(root, "/.harefmtignore")!,
+		"*.skip.ha\n!keep.skip.ha\n");
 
 	const abs = os::resolve(root);
 	const paths = walk_collect(abs, default_opts());
@@ -149,12 +146,10 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	make_dir(root);
 	defer cleanup(root);
 	make_dir(strings::concat(root, "/vendor")!);
-	write_test_file(
-		strings::concat(root, "/vendor/keep.ha")!, "fn k() void = void;\n",
-	);
-	write_test_file(
-		strings::concat(root, "/.harefmtignore")!, "vendor/\n!vendor/keep.ha\n",
-	);
+	write_test_file(strings::concat(root, "/vendor/keep.ha")!,
+		"fn k() void = void;\n");
+	write_test_file(strings::concat(root, "/.harefmtignore")!,
+		"vendor/\n!vendor/keep.ha\n");
 	write_test_file(strings::concat(root, "/top.ha")!, "fn t() void = void;\n");
 
 	const abs = os::resolve(root);
@@ -221,18 +216,14 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	defer cleanup(root);
 	make_dir(strings::concat(root, "/sub")!);
 	write_test_file(strings::concat(root, "/.harefmtignore")!, "*.tmp.ha\n");
-	write_test_file(
-		strings::concat(root, "/outer.tmp.ha")!, "fn a() void = void;\n",
-	);
-	write_test_file(
-		strings::concat(root, "/sub/.harefmtignore")!, "!keep.tmp.ha\n",
-	);
-	write_test_file(
-		strings::concat(root, "/sub/keep.tmp.ha")!, "fn k() void = void;\n",
-	);
-	write_test_file(
-		strings::concat(root, "/sub/other.tmp.ha")!, "fn o() void = void;\n",
-	);
+	write_test_file(strings::concat(root, "/outer.tmp.ha")!,
+		"fn a() void = void;\n");
+	write_test_file(strings::concat(root, "/sub/.harefmtignore")!,
+		"!keep.tmp.ha\n");
+	write_test_file(strings::concat(root, "/sub/keep.tmp.ha")!,
+		"fn k() void = void;\n");
+	write_test_file(strings::concat(root, "/sub/other.tmp.ha")!,
+		"fn o() void = void;\n");
 
 	const abs = os::resolve(root);
 	const paths = walk_collect(abs, default_opts());

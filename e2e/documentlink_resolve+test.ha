@@ -21,13 +21,10 @@ export fn main() void = void;
 	open_doc(&s, "file:///dlr.ha", sample);
 
 	// First fetch the bare links.
-	send(
-		&s,
+	send(&s,
 		strings::toutf8(
-
-			`{"jsonrpc":"2.0","id":1400,"method":"textDocument/documentLink","params":{"textDocument":{"uri":"file:///dlr.ha"}}}`,
-		),
-	);
+			`{"jsonrpc":"2.0","id":1400,"method":"textDocument/documentLink","params":{"textDocument":{"uri":"file:///dlr.ha"}}}`
+		));
 	const links_body = wait_for_response(&s, 1400.0);
 	defer free(links_body);
 	let links_v = json::loadstr(strings::fromutf8(links_body)!)!;
@@ -49,10 +46,8 @@ export fn main() void = void;
 	const data_v = *(json::get(&link0, "data") as *json::value);
 	const resolve_msg =
 		strings::concat(
-
 			`{"jsonrpc":"2.0","id":1401,"method":"documentLink/resolve","params":{"range":`,
-			json::dumpstr(range_v), `,"data":`, json::dumpstr(data_v), `}}`,
-		)!;
+			json::dumpstr(range_v), `,"data":`, json::dumpstr(data_v), `}}`)!;
 	defer free(resolve_msg);
 	send(&s, strings::toutf8(resolve_msg));
 

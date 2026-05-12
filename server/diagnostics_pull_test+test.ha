@@ -132,9 +132,9 @@ fn next_pull_msg(data: []u8) (json::value, size) = {
 		let url = "file:///a.ha";
 		if (i == 1) url = "file:///b.ha";
 		const open =
-			strings::concat(
-				`{"textDocument":{"uri":"`, url,
-				`","languageId":"hare","version":1,"text":"export fn ok() void = void;\n"}}`,
+			strings::concat(`{"textDocument":{"uri":"`,
+				url,
+				`","languageId":"hare","version":1,"text":"export fn ok() void = void;\n"}}`
 			)!;
 		defer free(open);
 		let pv = json::loadstr(open)!;

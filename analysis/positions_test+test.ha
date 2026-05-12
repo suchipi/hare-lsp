@@ -140,9 +140,7 @@ use strings;
 	const idx = build_line_index(text);
 	defer free(idx);
 	// Line 1 starts at offset 4. character 2 → offset 6 (the '\r').
-	const off =
-		position_to_byte(
-			text, idx, encoding::UTF8, position { line = 1, character = 2 },
-		);
+	const off = position_to_byte(text,
+		idx, encoding::UTF8, position { line = 1, character = 2 });
 	assert(off == 6);
 };

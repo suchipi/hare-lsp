@@ -83,11 +83,9 @@ export fn run_doctor() int = {
 		fmt::printfln("[OK] hare-lsp found at {}", p)!;
 	case void =>
 		fmt::println(
-
 			"[WARN] hare-lsp not on $PATH "
 			"(editors usually need this; "
-			"run `sudo make install` from the repo)",
-		)!;
+			"run `sudo make install` from the repo)")!;
 	};
 
 	// 3. Build the list of search roots. Prefer $HAREPATH; otherwise
@@ -112,8 +110,7 @@ export fn run_doctor() int = {
 	} else {
 		fmt::println(
 			"[WARN] HAREPATH not set; "
-			"falling back to compiled-in defaults",
-		)!;
+			"falling back to compiled-in defaults")!;
 		using_defaults = true;
 		for (let i = 0z; i < len(STDLIB_DEFAULTS); i += 1) {
 			append(entries, STDLIB_DEFAULTS[i])!;
@@ -146,11 +143,9 @@ export fn run_doctor() int = {
 		fmt::printfln("[OK] stdlib found in {}", p)!;
 	case void =>
 		fmt::println(
-
 			"[FAIL] no stdlib found on HAREPATH "
 			"(no entry contains core stdlib modules); "
-			"point HAREPATH at your Hare stdlib root",
-		)!;
+			"point HAREPATH at your Hare stdlib root")!;
 		failed = true;
 	};
 
@@ -159,20 +154,17 @@ export fn run_doctor() int = {
 	// requirement.
 	match (hare_json_root) {
 	case let p: str =>
-		fmt::printfln(
-			"[OK] hare-json found in {} (contains {})", p, HARE_JSON_MARKER,
-		)!;
+		fmt::printfln("[OK] hare-json found in {} (contains {})",
+			p, HARE_JSON_MARKER)!;
 	case void =>
 		fmt::printfln(
 			"[FAIL] hare-json not reachable from HAREPATH "
-			"(no entry contains {})", HARE_JSON_MARKER,
-		)!;
+			"(no entry contains {})",
+			HARE_JSON_MARKER)!;
 		fmt::println("       install with:")!;
 		fmt::println(
-
 			"         d=$(mktemp -d) && git clone "
-			"https://git.sr.ht/~sircmpwn/hare-json \"$d/hare-json\"",
-		)!;
+			"https://git.sr.ht/~sircmpwn/hare-json \"$d/hare-json\"")!;
 		fmt::println("         sudo make -C \"$d/hare-json\" install")!;
 		failed = true;
 	};
@@ -184,37 +176,34 @@ export fn run_doctor() int = {
 	case let s: str =>
 		if (len(s) == 0) {
 			fmt::println(
-
 				"[WARN] HARE_LSP_LOG_DIR is set but empty; "
-				"wire-protocol logging disabled",
-			)!;
+				"wire-protocol logging disabled")!;
 		} else if (!path_is_absolute(s)) {
 			fmt::printfln(
-
 				"[FAIL] HARE_LSP_LOG_DIR={} is not absolute; "
 				"editors run hare-lsp with cwd=/ and relative "
-				"paths will fail", s,
-			)!;
+				"paths will fail",
+				s)!;
 			failed = true;
 		} else if (!is_directory(s)) {
 			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not a "
-				"directory", s)!;
+				"directory",
+				s)!;
 			failed = true;
 		} else if (!is_writable_dir(s)) {
 			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not "
-				"writable", s)!;
+				"writable",
+				s)!;
 			failed = true;
 		} else {
-			fmt::printfln(
-				"[OK] HARE_LSP_LOG_DIR={} is absolute "
-				"and writable", s,
-			)!;
+			fmt::printfln("[OK] HARE_LSP_LOG_DIR={} is absolute "
+				"and writable",
+				s)!;
 		};
 	case void =>
 		fmt::println(
 			"[OK] HARE_LSP_LOG_DIR not set "
-			"(wire-protocol logging disabled)",
-		)!;
+			"(wire-protocol logging disabled)")!;
 	};
 
 	fmt::println()!;

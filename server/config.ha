@@ -141,9 +141,8 @@ export fn apply_configuration_response(s: *server, result: json::value) void = {
 	const old_ih_inferred = s.config.inlay_hints_inferred_types;
 	apply_settings(s, arr[0]);
 	apply_limits_to_indexes(s);
-	refresh_after_config_change(
-		s, old_debounce, old_enable_build, old_ih_params, old_ih_inferred,
-	);
+	refresh_after_config_change(s,
+		old_debounce, old_enable_build, old_ih_params, old_ih_inferred);
 };
 
 // Propagates the configurable max-entries cap into the live workspace
@@ -151,12 +150,10 @@ export fn apply_configuration_response(s: *server, result: json::value) void = {
 // takes effect prospectively. Lowering below current usage applies to
 // future inserts only; we don't proactively evict.
 fn apply_limits_to_indexes(s: *server) void = {
-	analysis::set_max_entries(
-		&s.workspace_index, s.config.limits.max_workspace_index_entries,
-	);
-	analysis::set_max_entries(
-		&s.stdlib_index, s.config.limits.max_workspace_index_entries,
-	);
+	analysis::set_max_entries(&s.workspace_index,
+		s.config.limits.max_workspace_index_entries);
+	analysis::set_max_entries(&s.stdlib_index,
+		s.config.limits.max_workspace_index_entries);
 };
 
 // Handles the workspace/didChangeConfiguration notification.
@@ -213,9 +210,8 @@ export fn handle_did_change_configuration(
 		case let p: *json::value =>
 			apply_settings(s, *p);
 			apply_limits_to_indexes(s);
-			refresh_after_config_change(
-				s, old_debounce, old_enable_build, old_ih_params, old_ih_inferred,
-			);
+			refresh_after_config_change(s,
+				old_debounce, old_enable_build, old_ih_params, old_ih_inferred);
 			return;
 		case => void;
 		};
@@ -223,9 +219,8 @@ export fn handle_did_change_configuration(
 	};
 	apply_settings(s, settings);
 	apply_limits_to_indexes(s);
-	refresh_after_config_change(
-		s, old_debounce, old_enable_build, old_ih_params, old_ih_inferred,
-	);
+	refresh_after_config_change(s,
+		old_debounce, old_enable_build, old_ih_params, old_ih_inferred);
 };
 
 // Re-publishes diagnostics and sends inlayHint/refresh when the
@@ -455,25 +450,18 @@ export fn apply_settings(s: *server, v: json::value) void = {
 	case let p: *json::value =>
 		match (*p) {
 		case let lobj: json::object =>
-			apply_limit_u64(
-				&lobj, "maxOpenDocuments", &s.config.limits.max_open_documents,
-			);
-			apply_limit_u64(
-				&lobj, "maxTotalBufferBytes", &s.config.limits.max_total_buffer_bytes,
-			);
-			apply_limit_u64(
-				&lobj, "maxPendingRequests", &s.config.limits.max_pending_requests,
-			);
-			apply_limit_u64(
-				&lobj, "maxCancelledIds", &s.config.limits.max_cancelled_ids,
-			);
-			apply_limit_u64(
-				&lobj, "maxDiagnosticsPerFile", &s.config.limits.max_diagnostics_per_file,
-			);
-			apply_limit_u64(
-				&lobj, "maxWorkspaceIndexEntries",
-				&s.config.limits.max_workspace_index_entries,
-			);
+			apply_limit_u64(&lobj,
+				"maxOpenDocuments", &s.config.limits.max_open_documents);
+			apply_limit_u64(&lobj,
+				"maxTotalBufferBytes", &s.config.limits.max_total_buffer_bytes);
+			apply_limit_u64(&lobj,
+				"maxPendingRequests", &s.config.limits.max_pending_requests);
+			apply_limit_u64(&lobj,
+				"maxCancelledIds", &s.config.limits.max_cancelled_ids);
+			apply_limit_u64(&lobj,
+				"maxDiagnosticsPerFile", &s.config.limits.max_diagnostics_per_file);
+			apply_limit_u64(&lobj,
+				"maxWorkspaceIndexEntries", &s.config.limits.max_workspace_index_entries);
 		case => void;
 		};
 	case => void;

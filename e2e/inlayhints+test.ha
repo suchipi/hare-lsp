@@ -72,9 +72,8 @@ use strings;
 	};
 	const file_path = strings::concat(mod_dir, "/m.ha")!;
 	defer free(file_path);
-	write_test_file(
-		file_path, "type my_alias = int;\nexport fn foo() my_alias = 0;\n",
-	);
+	write_test_file(file_path,
+		"type my_alias = int;\nexport fn foo() my_alias = 0;\n");
 
 	let s = spawn_session();
 	defer finish_session(&s);
@@ -94,9 +93,9 @@ use strings;
 	const req_tmpl =
 		`{"jsonrpc":"2.0","id":2210,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"`;
 	const req =
-		strings::concat(
-			req_tmpl, caller_uri,
-			`"},"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":0}}}}`,
+		strings::concat(req_tmpl,
+			caller_uri,
+			`"},"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":0}}}}`
 		)!;
 	defer free(req);
 	send(&s, strings::toutf8(req));

@@ -37,10 +37,8 @@ fn comp_test_cleanup(
 
 fn comp_open(s: *server, uri: str, text: str) void = {
 	const open =
-		strings::concat(
-			`{"textDocument":{"uri":"`, uri,
-			`","languageId":"hare","version":1,"text":"`, text, `"}}`,
-		)!;
+		strings::concat(`{"textDocument":{"uri":"`,
+			uri, `","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
@@ -168,9 +166,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn completion_includes_local_decls() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
-	comp_open(
-		&s, "file:///x.ha", "fn helper() void = void;\\nfn main() void = h\\n",
-	);
+	comp_open(&s,
+		"file:///x.ha", "fn helper() void = void;\\nfn main() void = h\\n");
 
 	const params =
 		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":18}}`;
@@ -201,10 +198,9 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn completion_function_has_snippet_and_sortText() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
-	comp_open(
-		&s, "file:///snip.ha",
-		"fn greet(name: str, age: int) void = void;\\nfn main() void = g\\n",
-	);
+	comp_open(&s,
+		"file:///snip.ha",
+		"fn greet(name: str, age: int) void = void;\\nfn main() void = g\\n");
 
 	const params =
 		`{"textDocument":{"uri":"file:///snip.ha"},"position":{"line":1,"character":18}}`;
