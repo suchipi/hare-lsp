@@ -29,10 +29,12 @@ use unix::signal;
 def BIN_PATH: str = "./hare-lsp";
 
 // Default deadline for any single recv. The server should respond within
-// milliseconds on a healthy machine; 5 seconds is generous and still much
-// faster than vscode-languageclient's own init timeout, so a regression
+// milliseconds on a healthy machine; 15 seconds is generous enough to
+// survive macOS scheduling stalls under load (dozens of concurrent
+// hare-lsp child processes during `make test`) while still much shorter
+// than vscode-languageclient's own init timeout, so a real regression
 // will surface here rather than in the editor.
-def RECV_TIMEOUT: time::duration = 5 * time::SECOND;
+def RECV_TIMEOUT: time::duration = 15 * time::SECOND;
 
 // Handles for an in-flight server process plus the pipes used to talk to it.
 export type session = struct {
@@ -249,4 +251,20 @@ fn find_content_length(headers: str) (size | void) = {
 			return;
 		};
 	};
+};
+
+// Sends a minimal `initialize` request with id=1 and waits for the
+// response, then sends `initialized`. Most e2e tests don't care about
+// the response body, so the bytes are discarded.
+fn do_init(s: *session) void = {
+	send(s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	free(wait_for_response(s, 1.0));
+	send(s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+};
+
+// Sends a textDocument/didOpen for the given URI with the given body.
+fn open_doc(s: *session, uri: str, body: str) void = {
+	const msg = build_did_open(uri, body);
+	defer free(msg);
+	send(s, strings::toutf8(msg));
 };

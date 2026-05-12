@@ -312,7 +312,15 @@ fn pending_index(s: *server, id: i64) int = {
 // Records a server-initiated request as pending. Caller should invoke this
 // whenever encode_request succeeds. The method string is duplicated so the
 // caller need not retain it.
+//
+// Bounded by [[MAX_PENDING_REQUESTS]]: when full, the oldest pending entry
+// is dropped. A client that never replies to outgoing requests otherwise
+// grows this slice without bound.
 export fn pending_remember(s: *server, id: i64, method: str) void = {
+	if (len(s.pending_requests) >= MAX_PENDING_REQUESTS) {
+		free(s.pending_requests[0].method);
+		delete(s.pending_requests[0]);
+	};
 	append(s.pending_requests, pending_request {
 		id = id,
 		method = strings::dup(method)!,
@@ -849,22 +857,34 @@ fn handle_shutdown(s: *server, r: lsp::request) void = {
 fn handle_cancel_request(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
 	case let v: json::value => yield v;
-	case void => return;
+	case void =>
+		warn_invalid_notification(s, "$/cancelRequest",
+			"missing params");
+		return;
 	};
 	const obj = match (params) {
 	case let o: json::object => yield o;
-	case => return;
+	case =>
+		warn_invalid_notification(s, "$/cancelRequest",
+			"params is not an object");
+		return;
 	};
 	const id_v = match (json::get(&obj, "id")) {
 	case let v: *json::value => yield *v;
-	case => return;
+	case =>
+		warn_invalid_notification(s, "$/cancelRequest",
+			"missing 'id' field");
+		return;
 	};
 	const id: lsp::id = match (id_v) {
 	case let f: f64 => yield f;
 	case let s: str => yield strings::dup(s)!;
-	case => return;
+	case =>
+		warn_invalid_notification(s, "$/cancelRequest",
+			"'id' must be a number or string");
+		return;
 	};
-	append(s.cancelled_ids, id)!;
+	record_cancellation(s, id);
 };
 
 fn handle_set_trace(s: *server, n: lsp::notification) void = {

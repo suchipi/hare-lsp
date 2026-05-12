@@ -177,29 +177,51 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	};
 	const body = data[start..end];
 
-	// For every workspace function entry, if its name appears in body
-	// (as a token), record an outgoing call.
-	let arr: []json::value = [];
-	let visited: [](str, str) = [];
-	defer free(visited);
+	// Collect candidate callee names from both the workspace index and
+	// the open documents' symbol indices so call hierarchy works even
+	// when no workspace has been indexed (e.g. a single open file with
+	// no rootUri).
+	let candidates: [](str, str) = []; // (short_name, uri)
+	defer free(candidates);
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const entry = &s.workspace_index.entries[i];
 		if (entry.kind != analysis::symbol_kind::FUNCTION) continue;
-		if (entry.uri == item_uri && entry.short_name == item_name) continue;
-		if (call_visited_has(visited, entry.uri, entry.short_name)) continue;
-		if (!body_contains_token(body, entry.short_name)) continue;
+		append(candidates, (entry.short_name, entry.uri))!;
+	};
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		const d = &s.documents[i];
+		const c = parse_of(d);
+		for (let j = 0z; j < len(c.idx.symbols); j += 1) {
+			const sym = &c.idx.symbols[j];
+			if (sym.kind != analysis::symbol_kind::FUNCTION) continue;
+			append(candidates, (sym.short_name, d.uri))!;
+		};
+	};
+
+	// Dedupe by (uri, name) and skip self (input item) precisely so two
+	// unrelated functions sharing a short name in different files both
+	// stay in the list.
+	let visited: [](str, str) = [];
+	defer free(visited);
+	let arr: []json::value = [];
+	for (let i = 0z; i < len(candidates); i += 1) {
+		const short_name = candidates[i].0;
+		const cand_uri = candidates[i].1;
+		if (cand_uri == item_uri && short_name == item_name) continue;
+		if (call_visited_has(visited, cand_uri, short_name)) continue;
+		if (!body_contains_token(body, short_name)) continue;
 
 		// Build "to" CallHierarchyItem.
 		let to = json::newobject();
-		json::set(&to, "name", entry.short_name: json::value)!;
+		json::set(&to, "name", short_name: json::value)!;
 		json::put(&to, "kind", 12: f64)!; // 12 = Function
-		json::set(&to, "uri", entry.uri: json::value)!;
+		json::set(&to, "uri", cand_uri: json::value)!;
 		json::put(&to, "range", zero_range())!;
 		json::put(&to, "selectionRange", zero_range())!;
 
 		// fromRanges: locations within `data` where the call appears.
 		let from_ranges: []json::value = [];
-		const t = strings::toutf8(entry.short_name);
+		const t = strings::toutf8(short_name);
 		let i = 0z;
 		for (i + len(t) <= len(body); i += 1) {
 			if (i > 0 && is_word_char(body[i - 1])) continue;
@@ -225,7 +247,7 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 		json::put(&outgoing, "to", to)!;
 		json::put(&outgoing, "fromRanges", from_ranges: json::value)!;
 		append(arr, outgoing: json::value)!;
-		append(visited, (entry.uri, entry.short_name))!;
+		append(visited, (cand_uri, short_name))!;
 	};
 	send_array_local(s, r.id, arr);
 };
