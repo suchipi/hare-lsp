@@ -118,6 +118,11 @@ Settings are read from the `hare` namespace. Defaults are in parentheses.
 | `inlayHints.parameterNames` | boolean | `true` | Show parameter-name hints at call sites. |
 | `inlayHints.inferredTypes` | boolean | `true` | Show inferred-type hints on `let`/`const`. |
 
+## Known limitations
+
+- **Workspace indexing is synchronous.** When a workspace folder is added (via `workspace/didChangeWorkspaceFolders` or the initial `initialize` scan) the server walks every `*.ha` file under the new root on the message-handling thread. For very large workspaces (tens of thousands of files) this blocks the dispatch loop, including `$/cancelRequest`. Smaller workspaces are unaffected. Background indexing with progress reporting is planned but not yet implemented.
+- **Resource caps.** The server refuses to grow past hard caps on open documents (1024), total open-buffer bytes (256 MiB), per-file diagnostics (1000; further parse errors are summarised in a single trailing diagnostic), in-flight server requests (4096), and workspace-index entries (1,000,000). Hitting any cap is logged via `window/logMessage`.
+
 ## License
 
 MPL-2.0 — same as Hare itself.
