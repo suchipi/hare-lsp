@@ -8,19 +8,22 @@ on:
 jobs:
   server:
     runs-on: ubuntu-24.04-arm
-    container: alpine:edge
-
     steps:
-      - name: Install build deps
-        run: apk add --no-cache git make musl-dev gcc bash hare hare-json
-
       - uses: actions/checkout@v4
 
-      - name: Build
-        run: make
-
-      - name: Test
-        run: make test
+      # GHA refuses to run JavaScript actions inside Alpine on arm64
+      # ("JavaScript Actions in Alpine containers are only supported on x64
+      # Linux runners"), so we can't use `container: alpine:edge`. Instead
+      # we run the build inside an Alpine container via `docker run`, which
+      # the host's docker handles fine on arm64.
+      - name: Build and test in Alpine
+        run: |
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine:edge sh -c '
+            set -eux
+            apk add --no-cache git make musl-dev gcc bash hare hare-json
+            make
+            make test
+          '
 
   vscode-extension:
     runs-on: ubuntu-24.04-arm
