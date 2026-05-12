@@ -498,8 +498,15 @@ export fn find_module(s: *server, ident: []str) ((str, module::srcset) | void) =
 		append(owned_parts, path)!;
 		append(parts, path)!;
 	};
-	append(parts, "/usr/local/src/hare/stdlib")!;
-	append(parts, "/usr/local/src/hare/third-party")!;
+	// Honor `hare.harepath` config / $HAREPATH / built-in defaults so
+	// the resolver works on installs that don't put stdlib under
+	// /usr/local/src/hare (e.g. Alpine packages at /usr/src/hare).
+	const stdlib_parts = stdlib_search_paths(s);
+	for (let i = 0z; i < len(stdlib_parts); i += 1) {
+		append(owned_parts, stdlib_parts[i])!;
+		append(parts, stdlib_parts[i])!;
+	};
+	free(stdlib_parts);
 	const harepath = strings::join(":", parts...)!;
 	defer free(harepath);
 

@@ -17,8 +17,12 @@ use strings;
 
 // Default search paths used when $HAREPATH isn't set in the server's env.
 // vscode-languageclient spawns us without inheriting the user's shell
-// rc-files, so we can't rely on $HAREPATH being present.
+// rc-files, so we can't rely on $HAREPATH being present. We try both
+// the source-install prefix and the /usr/src layout used by distro
+// packages (e.g. Alpine's `hare` apk).
 const STDLIB_DEFAULTS: [_]str = [
+	"/usr/src/hare/stdlib",
+	"/usr/src/hare/third-party",
 	"/usr/local/src/hare/stdlib",
 	"/usr/local/src/hare/third-party",
 ];

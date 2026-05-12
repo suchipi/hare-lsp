@@ -179,9 +179,12 @@ fn sym_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const rv = sym_skip_to_response(out, 11.0);
 	defer json::finish(rv);
 	const ro = *(json::get(&(rv as json::object), "result") as *json::value) as json::object;
-	// Should now have a `target` field starting with file:///usr/local/src/hare/stdlib/io/.
+	// Should now have a `target` field pointing at a .ha file inside
+	// the io stdlib module. The exact stdlib prefix varies by install
+	// (/usr/local/src/hare vs /usr/src/hare on distro packages).
 	const target = *(json::get(&ro, "target") as *json::value) as str;
-	assert(strings::hasprefix(target, "file:///usr/local/src/hare/stdlib/io/"));
+	assert(strings::hasprefix(target, "file://"));
+	assert(strings::contains(target, "/io/"));
 	assert(strings::hassuffix(target, ".ha"));
 };
 
