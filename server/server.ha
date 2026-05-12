@@ -225,6 +225,7 @@ export fn run(s: *server) int = {
 			// send may itself fail if the peer also closed its end.
 			send_error(s, void, lsp::PARSE_ERROR, lsp::strerror(e));
 			log_stderr_strerror(s, "transport error", lsp::strerror(e));
+			log_transport_context(s);
 			return EXIT_ERROR;
 		};
 
@@ -943,4 +944,62 @@ fn log_stderr(s: *server, msg: str) void = {
 
 fn log_stderr_strerror(s: *server, prefix: str, msg: str) void = {
 	slog_error(s, prefix, ":", msg);
+};
+
+// Cap on the diagnostic dump so a runaway header doesn't blow up the
+// log line. The longest legitimate LSP header block is well under this.
+def DIAG_HEADER_CAP: size = 512;
+
+// Dumps the partial header bytes captured by [[lsp::read]] during the
+// failing call. Emits both the byte count and a printable-escaped quote
+// so binary noise stays readable in the log. No-op when nothing was
+// captured (e.g. the error fired before any line was scanned).
+fn log_transport_context(s: *server) void = {
+	const ctx = lsp::last_header_bytes(&s.reader);
+	if (len(ctx) == 0) {
+		slog_error(s, "transport context: (no bytes captured)");
+		return;
+	};
+	const view = if (len(ctx) > DIAG_HEADER_CAP) {
+		yield ctx[..DIAG_HEADER_CAP];
+	} else {
+		yield ctx;
+	};
+	const quoted = quote_bytes_for_log(view);
+	defer free(quoted);
+	const suffix = if (len(ctx) > DIAG_HEADER_CAP) " (truncated)" else "";
+	slog_error(s, "transport context", len(ctx): uint, "bytes:",
+		quoted, suffix);
+};
+
+// Renders bytes as a printable string, escaping CR, LF, tab, backslash,
+// double-quote, and any non-printable bytes as \xNN. The result is
+// wrapped in double quotes. Caller frees.
+fn quote_bytes_for_log(data: []u8) str = {
+	let out: []u8 = [];
+	const hex: [16]u8 = ['0': u8, '1': u8, '2': u8, '3': u8, '4': u8,
+		'5': u8, '6': u8, '7': u8, '8': u8, '9': u8, 'a': u8, 'b': u8,
+		'c': u8, 'd': u8, 'e': u8, 'f': u8];
+	append(out, '"': u8)!;
+	for (let i = 0z; i < len(data); i += 1) {
+		const b = data[i];
+		if (b == '\r': u8) {
+			append(out, ['\\': u8, 'r': u8]...)!;
+		} else if (b == '\n': u8) {
+			append(out, ['\\': u8, 'n': u8]...)!;
+		} else if (b == '\t': u8) {
+			append(out, ['\\': u8, 't': u8]...)!;
+		} else if (b == '\\': u8) {
+			append(out, ['\\': u8, '\\': u8]...)!;
+		} else if (b == '"': u8) {
+			append(out, ['\\': u8, '"': u8]...)!;
+		} else if (b >= 0x20 && b < 0x7f) {
+			append(out, b)!;
+		} else {
+			append(out, ['\\': u8, 'x': u8,
+				hex[b >> 4], hex[b & 0xf]]...)!;
+		};
+	};
+	append(out, '"': u8)!;
+	return strings::fromutf8(out)!: str;
 };

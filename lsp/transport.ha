@@ -27,6 +27,11 @@ export type reader = struct {
 	max_body: size,
 	// Reusable buffer for the message body. Grown on demand; never shrunk.
 	body_buf: []u8,
+	// Captures the raw header bytes read during the most recent [[read]]
+	// call (including \r\n delimiters). Cleared at the start of every
+	// call; on transport-error return, callers can inspect via
+	// [[last_header_bytes]] to see what we did parse before the error.
+	diag_header: []u8,
 };
 
 // Wraps an [[io::handle]] in a reader that yields LSP message bodies.
@@ -37,6 +42,7 @@ export fn new_reader(src: *bufio::scanner) reader = reader {
 	src = src,
 	max_body = DEFAULT_MAX_BODY,
 	body_buf = [],
+	diag_header = [],
 };
 
 // Like [[new_reader]] but with a custom maximum body size.
@@ -44,12 +50,19 @@ export fn new_reader_with_limit(src: *bufio::scanner, max_body: size) reader = r
 	src = src,
 	max_body = max_body,
 	body_buf = [],
+	diag_header = [],
 };
 
 // Frees memory associated with a reader. Does not close the underlying handle.
 export fn finish_reader(r: *reader) void = {
 	free(r.body_buf);
+	free(r.diag_header);
 };
+
+// Returns the raw header bytes (including \r\n line endings) captured
+// during the most recent [[read]] call. Diagnostic only: useful when a
+// transport error returns to dump the partial header block to the log.
+export fn last_header_bytes(r: *reader) const []u8 = r.diag_header;
 
 // Reads the next LSP message body from the stream.
 //
@@ -66,6 +79,10 @@ export fn finish_reader(r: *reader) void = {
 // Headers other than Content-Length are accepted and ignored. The body itself
 // is not parsed here; callers feed it to a JSON parser.
 export fn read(r: *reader) ([]u8 | io::EOF | transport_error) = {
+	// Reset the diagnostic header capture for this call; the underlying
+	// storage is preserved so steady-state usage doesn't churn allocations.
+	r.diag_header = r.diag_header[..0];
+
 	let length: (size | void) = void;
 	for (true) {
 		const line = match (bufio::scan_string(r.src, "\r\n")) {
@@ -78,6 +95,12 @@ export fn read(r: *reader) ([]u8 | io::EOF | transport_error) = {
 		case utf8::invalid =>
 			return utf8::invalid;
 		};
+
+		// Capture the line + delimiter for diagnostics. This runs on
+		// every header line, success or failure; on success the buffer
+		// is overwritten by the next call.
+		append(r.diag_header, strings::toutf8(line)...)?;
+		append(r.diag_header, ['\r': u8, '\n': u8]...)?;
 
 		if (len(line) == 0) {
 			break; // end of headers
