@@ -8,11 +8,16 @@ DESTDIR =
 PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 
-THIRDPARTY = /usr/local/src/hare/third-party
+# Hare's install prefix varies: distro packages (e.g. Alpine's `hare`) lay
+# files down under /usr/src/hare, while a source build defaults to
+# /usr/local/src/hare. Prefer /usr/src when present; fall back to
+# /usr/local. Either can be overridden via the environment or command line.
+THIRDPARTY ?= $(if $(wildcard /usr/src/hare/third-party),/usr/src/hare/third-party,/usr/local/src/hare/third-party)
+STDLIB ?= $(if $(wildcard /usr/src/hare/stdlib),/usr/src/hare/stdlib,/usr/local/src/hare/stdlib)
 JSON_DIR = $(THIRDPARTY)/encoding/json
 
 # Project root must be on HAREPATH so `use lsp;` etc. resolve to ./lsp/.
-HAREPATH = $(PWD):$(THIRDPARTY):/usr/local/src/hare/stdlib
+HAREPATH = $(PWD):$(THIRDPARTY):$(STDLIB)
 
 all: check-deps hare-lsp
 
