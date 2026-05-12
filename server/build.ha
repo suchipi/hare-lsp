@@ -21,7 +21,6 @@ use io;
 use lsp;
 use os;
 use os::exec;
-use path;
 use strconv;
 use strings;
 use time;

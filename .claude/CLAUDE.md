@@ -60,6 +60,8 @@ Parser, buffer, indices, type queries. None of this depends on `lsp` or `server`
 - [analysis/workspace_index.ha](analysis/workspace_index.ha): flat name → entries table across all `*.ha` under each workspace root.
 - [analysis/positions.ha](analysis/positions.ha): translation between LSP positions (UTF-8 / UTF-16 / UTF-32) and byte offsets. The encoding is negotiated at `initialize`.
 - [analysis/resolver.ha](analysis/resolver.ha), [analysis/types.ha](analysis/types.ha), [analysis/type_walk.ha](analysis/type_walk.ha): name resolution and best-effort type-of-expression for hover, inlay hints, and type hierarchy.
+- [analysis/scope_graph.ha](analysis/scope_graph.ha): lexical scope graph for a parsed file. Lets references/rename bound their search to a binding's scope when the cursor resolves to a local.
+- [analysis/token_scan.ha](analysis/token_scan.ha): byte scanner that skips comments, strings, char literals, and raw strings. Used by references/rename's text scan, signature-help comma counting, and the formatter's brace-depth tracker.
 - [analysis/loc_fixup.ha](analysis/loc_fixup.ha): the Hare AST reports `loc.off` as a rune index; the LSP needs byte offsets. This module fixes those up.
 
 ### `server/` — feature handlers
@@ -88,6 +90,7 @@ If you need to vendor more stdlib (because it drops detail or aborts on partial 
 These are enforced; read them before doing nontrivial work:
 
 - [use-repo-tmp-dir.md](.claude/rules/use-repo-tmp-dir.md) — use `.tmp/` in the repo root, never `/tmp`.
+- [test-fixtures-and-tmp-dir.md](.claude/rules/test-fixtures-and-tmp-dir.md) — test inputs go in git; only test outputs and self-contained scratch belong in `.tmp/`.
 - [no-assumptions-in-answers.md](.claude/rules/no-assumptions-in-answers.md) — every factual claim must be checked, with a source link.
 - [understand-before-fixing.md](.claude/rules/understand-before-fixing.md) — read the code, trace execution, find the root cause; no stab-in-the-dark fixes.
 - [general-behavioral-guidelines.md](.claude/rules/general-behavioral-guidelines.md) — think before coding, simplicity first, surgical changes, goal-driven execution.

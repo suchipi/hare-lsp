@@ -12,7 +12,6 @@
 use fs;
 use io;
 use os;
-use path;
 use strings;
 
 // One indexed declaration in the workspace.

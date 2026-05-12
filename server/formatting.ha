@@ -12,7 +12,6 @@
 
 use analysis;
 use encoding::json;
-use fmt;
 use hare::ast;
 use hare::unparse;
 use io;

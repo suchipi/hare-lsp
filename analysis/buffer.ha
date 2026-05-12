@@ -7,7 +7,6 @@
 // well under the 1 ms budget for files up to several MB and has the virtue of
 // staying boringly simple. The interface allows a swap to a rope if needed.
 
-use encoding::utf8;
 use strings;
 
 // A document buffer.
@@ -112,11 +111,6 @@ export fn replace_range(b: *buffer, start: size, end: size, new_text: []u8) ssiz
 
 // Signed size for delta returns.
 export type ssize = i64;
-
-// Reports whether the underlying bytes are valid UTF-8.
-export fn is_valid_utf8(b: *buffer) bool = {
-	return utf8::validate(b.data) is void;
-};
 
 // Returns the number of lines in the buffer.
 export fn line_count(b: *buffer) size = len(b.line_index);

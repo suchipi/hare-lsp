@@ -13,7 +13,6 @@ use encoding::json;
 use fmt;
 use io;
 use lsp;
-use strings;
 
 // --- window/logMessage -----------------------------------------------
 
