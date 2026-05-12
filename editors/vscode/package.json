@@ -23,6 +23,41 @@
         "command": "hare-lsp.restart",
         "title": "Restart Hare LSP",
         "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openWebsite",
+        "title": "Open Hare Website",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openDocs",
+        "title": "Open Hare Documentation",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openTutorial",
+        "title": "Open Hare Tutorial",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openSpecification",
+        "title": "Open Hare Specification",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openStdlibDocs",
+        "title": "Open Hare Standard Library Docs",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openInstallGuide",
+        "title": "Open Hare Installation Guide",
+        "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.openStdlibFolder",
+        "title": "Open Hare stdlib in New Window",
+        "category": "Hare"
       }
     ],
     "languages": [
