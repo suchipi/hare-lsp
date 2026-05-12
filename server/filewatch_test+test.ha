@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 
+use analysis;
 use bufio;
 use encoding::json;
 use io;
@@ -86,6 +87,97 @@ fn fw_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 	defer { free(r.method); json::finish(dpv); };
 	handle_did_delete_files(&s, r);
 	assert(!has_document(&s, "file:///gone.ha"));
+};
+
+// Regression: workspace/didDeleteFiles must drop workspace_index entries
+// for the deleted path. Otherwise textDocument/references,
+// workspace/symbol, and the call/type hierarchies keep reporting
+// locations in a file the user has already removed. We can't rely on
+// the file watcher's didChangeWatchedFiles event arriving - it can
+// race with the file ops notification or be missing entirely when the
+// client hasn't registered a watcher.
+@test fn did_delete_files_drops_workspace_index_entry() void = {
+	let (s, scan, in_buf, out) = fw_test_server();
+	defer fw_test_cleanup(&s, scan, in_buf, out);
+
+	analysis::index_file(&s.workspace_index, "/repo/refs_target.ha",
+		strings::toutf8("export fn refs_target() void = void;\n"));
+	assert(len(analysis::lookup_by_short_name(
+		&s.workspace_index, "refs_target")) == 1);
+
+	const dl = `{"files":[{"uri":"file:///repo/refs_target.ha"}]}`;
+	let dpv = json::loadstr(dl)!;
+	const r = lsp::notification {
+		method = strings::dup("workspace/didDeleteFiles")!,
+		params = dpv,
+	};
+	defer { free(r.method); json::finish(dpv); };
+	handle_did_delete_files(&s, r);
+
+	assert(len(analysis::lookup_by_short_name(
+		&s.workspace_index, "refs_target")) == 0,
+		"didDeleteFiles must drop the workspace_index entries");
+	for (let i = 0z; i < len(s.workspace_index.indexed_files); i += 1) {
+		assert(s.workspace_index.indexed_files[i] != "/repo/refs_target.ha",
+			"didDeleteFiles must drop the indexed_files path");
+	};
+};
+
+// Regression: a directory URI with a trailing slash
+// (file:///repo/pkg/) decodes to a path ending in '/', which used to
+// produce a "//" prefix that prefix-matched no real paths and left
+// the index stale.
+@test fn did_delete_files_handles_directory_uri_with_trailing_slash() void = {
+	let (s, scan, in_buf, out) = fw_test_server();
+	defer fw_test_cleanup(&s, scan, in_buf, out);
+
+	analysis::index_file(&s.workspace_index, "/repo/pkg/a.ha",
+		strings::toutf8("export fn trail_a() void = void;\n"));
+
+	const dl = `{"files":[{"uri":"file:///repo/pkg/"}]}`;
+	let dpv = json::loadstr(dl)!;
+	const r = lsp::notification {
+		method = strings::dup("workspace/didDeleteFiles")!,
+		params = dpv,
+	};
+	defer { free(r.method); json::finish(dpv); };
+	handle_did_delete_files(&s, r);
+
+	assert(len(analysis::lookup_by_short_name(
+		&s.workspace_index, "trail_a")) == 0,
+		"trailing-slash directory URI must still drop entries under it");
+};
+
+// Regression: clients may fold a directory delete into a single
+// didDeleteFiles event whose URI names the deleted directory rather
+// than each .ha file inside it. Drop every entry under that prefix.
+@test fn did_delete_files_drops_entries_under_directory() void = {
+	let (s, scan, in_buf, out) = fw_test_server();
+	defer fw_test_cleanup(&s, scan, in_buf, out);
+
+	analysis::index_file(&s.workspace_index, "/repo/pkg/a.ha",
+		strings::toutf8("export fn pkg_a() void = void;\n"));
+	analysis::index_file(&s.workspace_index, "/repo/pkg/b.ha",
+		strings::toutf8("export fn pkg_b() void = void;\n"));
+	analysis::index_file(&s.workspace_index, "/repo/other.ha",
+		strings::toutf8("export fn other() void = void;\n"));
+
+	const dl = `{"files":[{"uri":"file:///repo/pkg"}]}`;
+	let dpv = json::loadstr(dl)!;
+	const r = lsp::notification {
+		method = strings::dup("workspace/didDeleteFiles")!,
+		params = dpv,
+	};
+	defer { free(r.method); json::finish(dpv); };
+	handle_did_delete_files(&s, r);
+
+	assert(len(analysis::lookup_by_short_name(
+		&s.workspace_index, "pkg_a")) == 0);
+	assert(len(analysis::lookup_by_short_name(
+		&s.workspace_index, "pkg_b")) == 0);
+	// Sibling file outside the deleted dir must survive.
+	assert(len(analysis::lookup_by_short_name(
+		&s.workspace_index, "other")) == 1);
 };
 
 // Regression: the file watcher's glob includes `**/*.s`, so the LSP
