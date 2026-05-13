@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 //
-// Synchronously runs `hare build` for a saved document and parses its
-// stderr into LSP diagnostics. We trigger this on didSave (not didChange)
-// to keep the server's main loop responsive — Hare's build can take
-// seconds on large modules and we have no async runtime in this thread.
-// The plan describes an async kill-and-restart variant; see TODOs.
+// Subprocess machinery for synchronously running `hare <subcmd>` and
+// parsing its stderr into LSP diagnostics. The didSave path drives
+// this through `run_dep_build_for_doc` in server/dep_build.ha, which
+// runs `hare build -t o` once per module in dep-graph order; this file
+// owns the shared spawn-capture-parse helper they invoke.
 //
 // The compiler error format is:
 //
@@ -49,41 +49,29 @@ export fn finish_build_diagnostics(d: []build_diagnostic) void = {
 	free(d);
 };
 
-// Runs `hare build` for the file at `file_path`. Returns parsed
-// diagnostics; the caller takes ownership and must call
-// [[finish_build_diagnostics]].
+// Spawns `hare_path` with the given `argv` (which already includes the
+// subcommand, e.g. `["build", "-t", "o", "./mod"]`), in `cwd`, drains
+// stderr with a `timeout_ms` budget, and parses the captured stderr
+// into LSP-shaped diagnostics. Caller takes ownership of the returned
+// slice via [[finish_build_diagnostics]].
 //
 // `hare_path` is the path to the `hare` binary (typically just "hare" so
-// PATH is consulted). Build tags are passed via -T <tag> for each tag.
-//
-// `cwd` is the working directory the child is spawned in and the base
-// used to resolve relative diagnostic paths. Callers should pass the
-// containing workspace root (not the file's directory) so a relative
-// `HARECACHE` like `.cache` doesn't drop a cache dir next to whatever
-// file the user just saved. An empty `cwd` leaves the child in our
-// own cwd.
-//
-// timeout_ms is the wall-clock deadline (in milliseconds) before the
-// subprocess is terminated and the partial output returned. Zero
-// disables the timeout (waits indefinitely). A hung build that
-// exceeds the deadline gets SIGTERM, then SIGKILL if it doesn't
-// promptly exit.
-export fn run_build(
+// PATH is consulted). `cwd` is the working directory the child is
+// spawned in and the base used to resolve relative diagnostic paths;
+// an empty `cwd` leaves the child in our own cwd. `harepath`, when
+// non-empty, is written to the child's `HAREPATH` env var so `use`
+// declarations resolve through the LSP-composed search path instead of
+// whatever the parent inherited; an empty string leaves `HAREPATH`
+// inherited. `timeout_ms` is the wall-clock deadline in milliseconds
+// before the subprocess is terminated with SIGTERM and the partial
+// output returned; zero disables the timeout.
+export fn spawn_hare_capture_stderr(
 	hare_path: str,
-	file_path: str,
+	argv: []str,
 	cwd: str,
-	tags: []str,
+	harepath: str,
 	timeout_ms: u32,
 ) []build_diagnostic = {
-	// Build the argument list: hare build <-T tag>... <file>
-	let argv: []str = [];
-	defer free(argv);
-	for (let i = 0z; i < len(tags); i += 1) {
-		append(argv, "-T")!;
-		append(argv, tags[i])!;
-	};
-	append(argv, file_path)!;
-
 	// Create a pipe for stderr.
 	const pipe_pair = match (unix::pipe()) {
 	case let p: (io::file, io::file) =>
@@ -93,7 +81,7 @@ export fn run_build(
 	};
 	const (read_fd, write_fd) = pipe_pair;
 
-	let cmd = match (exec::cmd(hare_path, build_args("build", argv)...)) {
+	let cmd = match (exec::cmd(hare_path, argv...)) {
 	case let c: exec::command =>
 		yield c;
 	case =>
@@ -104,6 +92,14 @@ export fn run_build(
 
 	if (len(cwd) > 0) {
 		exec::chdir(&cmd, cwd);
+	};
+	if (len(harepath) > 0) {
+		// Worst case (bad chars, OOM) the child inherits the
+		// parent's HAREPATH and the build either still works or
+		// reports a diagnostic the user can act on.
+		match (exec::setenv(&cmd, "HAREPATH", harepath)) {
+		case => void;
+		};
 	};
 
 	// Redirect child stderr -> write_fd. Also nullfd stdin/stdout so a
@@ -144,8 +140,6 @@ export fn run_build(
 	};
 	let timed_out = false;
 	for (true) {
-		// Compute remaining time as a poll timeout (in
-		// time::duration units; negative means indefinite).
 		const remaining: time::duration = if (timeout_ms == 0) {
 			yield poll::INDEF;
 		} else {
@@ -170,7 +164,6 @@ export fn run_build(
 			break;
 		};
 		if (n == 0) {
-			// timeout
 			timed_out = true;
 			break;
 		};
@@ -186,17 +179,11 @@ export fn run_build(
 	lsp::safe_close(read_fd);
 
 	if (timed_out) {
-		// SIGTERM. The defer below also waits, which reaps the
-		// zombie once the kernel delivers the signal.
 		match (exec::sig(proc, signal::sig::TERM)) {
 		case => void;
 		};
 	};
 
-	// Reap. peek + retry would let us escalate to KILL if TERM was
-	// ignored, but Hare's std::exec doesn't expose a wait-with-timeout;
-	// we accept the small risk of a wait hang here because the build
-	// is over once stderr closes.
 	match (exec::wait(&proc)) {
 	case => void;
 	};
@@ -208,14 +195,6 @@ export fn run_build(
 		return [];
 	};
 	return parse_compiler_output(text, cwd);
-};
-
-// Builds the argument list `[name, args...]`, used to splat for exec::cmd.
-fn build_args(name: str, args: []str) []str = {
-	let out: []str = alloc([], 1 + len(args))!;
-	append(out, name)!;
-	append(out, args...)!;
-	return out;
 };
 
 // Parses the compiler's stderr text into diagnostics. `cwd` (if non-empty)

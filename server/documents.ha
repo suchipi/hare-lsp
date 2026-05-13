@@ -48,6 +48,12 @@ export type document = struct {
 	// observes documents needs to lock or copy this pointer before
 	// the next mutation can free the underlying entry.
 	parse_cache: nullable *parse_cache_entry,
+	// Set of URIs the last build pass for this doc published
+	// diagnostics for. On the next pass any URI here that isn't in
+	// the new set gets an empty publishDiagnostics so previously-
+	// reported errors don't linger in the client after they've been
+	// fixed in source.
+	last_build_uris: []str,
 };
 
 // Owns a parse_result, the matching file_index, and the lexical scope
@@ -146,6 +152,7 @@ export fn finish_document(d: *document) void = {
 	free(d.prev_tokens);
 	free(d.prev_result_id);
 	finish_parse_cache(d.parse_cache);
+	strings::freeall(d.last_build_uris);
 };
 
 // --- handlers --------------------------------------------------------
@@ -212,6 +219,7 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 		last_publish_at = time::INSTANT_ZERO,
 		diagnostics_pending = false,
 		parse_cache = null,
+		last_build_uris = [],
 	};
 	upsert_document(s, doc);
 	const stored = match (find_document(s, uri)) {

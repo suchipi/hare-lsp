@@ -8,6 +8,9 @@
 
 use encoding::json;
 use fmt;
+use fs;
+use io;
+use os;
 use strings;
 
 @test fn e2e_pull_diagnostic_full_report_for_open_doc() void = {
@@ -122,6 +125,293 @@ use strings;
 			json::get(&r, "items") is *json::value,
 			"each report carries its items array"
 		);
+	};
+};
+
+// Reads frames until a publishDiagnostics for `uri` arrives, returning
+// the matching frame's body bytes. Caller takes ownership and must
+// free the slice. Aborts if no matching frame shows up within the
+// harness's recv budget.
+fn wait_for_publish_diagnostics(s: *session, uri: str) []u8 = {
+	for (let i = 0z; i < 50z; i += 1) {
+		const body = recv(s);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, `"method":"textDocument/publishDiagnostics"`) &&
+				strings::contains(text, uri)) {
+			return body;
+		};
+		free(body);
+	};
+	fmt::fatalf("e2e: never received publishDiagnostics for {}", uri);
+};
+
+fn write_didsave_file(path: str, body: str) void = {
+	const f = match (os::create(path, 0o644: fs::mode)) {
+	case let f: io::file =>
+		yield f;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot create {}: {}", path, fs::strerror(e));
+	};
+	defer io::close(f)!;
+	match (io::writeall(f, strings::toutf8(body))) {
+	case size => void;
+	case let e: io::error =>
+		fmt::fatalf("e2e: cannot write {}: {}", path, io::strerror(e));
+	};
+};
+
+// Library modules have no `main` function. `hare build <library-dir>`
+// (the default `-t bin`) would fail with "no main function defined";
+// the dep-build path uses `-t o` (object build) so library modules
+// type-check without that. Verifies the saved file's sibling-symbol
+// references resolve too, the same as the multifile-module case.
+@test fn e2e_didsave_library_module_no_unknown_object() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-didsave-library-mod")!;
+	defer free(root);
+	cleanup_didsave_root(root);
+	defer cleanup_didsave_root(root);
+
+	match (os::mkdirs(root, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
+	};
+	const helpers_path = strings::concat(root, "/helpers.ha")!;
+	defer free(helpers_path);
+	write_didsave_file(helpers_path, "export fn helper() int = 42;\n");
+	const lib_path = strings::concat(root, "/lib.ha")!;
+	defer free(lib_path);
+	// No `main` defined anywhere - this is a library module.
+	write_didsave_file(lib_path, "export fn use_helper() int = helper();\n");
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	init_with_workspace_folder(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const lib_uri = strings::concat("file://", lib_path)!;
+	defer free(lib_uri);
+	open_doc(&s, lib_uri, "export fn use_helper() int = helper();\n");
+	free(wait_for_publish_diagnostics(&s, lib_uri));
+
+	const save_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"`,
+			lib_uri, `"}}}`)!;
+	defer free(save_msg);
+	send(&s, strings::toutf8(save_msg));
+
+	const body = wait_for_publish_diagnostics(&s, lib_uri);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	assert(
+		!strings::contains(text, "Unknown object"),
+		"library-module didSave must not report Unknown object for sibling-file symbols"
+	);
+	assert(
+		!strings::contains(text, "no main function"),
+		"library-module didSave must not surface a missing-main error"
+	);
+};
+
+// Two-module workspace: `app/main.ha` does `use lib;` to reach a
+// symbol defined in `lib/x.ha`. didSave on app/main.ha must walk into
+// lib, build it first (with HAREPATH composed so `use lib` resolves),
+// then build app itself - no false "Unknown module" or "Unknown
+// object" errors.
+@test fn e2e_didsave_module_with_local_dep_builds_dep_first() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-didsave-local-dep")!;
+	defer free(root);
+	cleanup_didsave_root(root);
+	defer cleanup_didsave_root(root);
+
+	const app_dir = strings::concat(root, "/app")!;
+	defer free(app_dir);
+	const lib_dir = strings::concat(root, "/lib")!;
+	defer free(lib_dir);
+	match (os::mkdirs(app_dir, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", app_dir, fs::strerror(e));
+	};
+	match (os::mkdirs(lib_dir, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", lib_dir, fs::strerror(e));
+	};
+	const main_path = strings::concat(app_dir, "/main.ha")!;
+	defer free(main_path);
+	const lib_x_path = strings::concat(lib_dir, "/x.ha")!;
+	defer free(lib_x_path);
+	write_didsave_file(lib_x_path, "export fn provided() int = 7;\n");
+	write_didsave_file(main_path,
+		"use lib;\nexport fn main() void = { let _ = lib::provided(); };\n");
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	init_with_workspace_folder(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const main_uri = strings::concat("file://", main_path)!;
+	defer free(main_uri);
+	open_doc(&s, main_uri,
+		"use lib;\nexport fn main() void = { let _ = lib::provided(); };\n");
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	const save_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"`,
+			main_uri, `"}}}`)!;
+	defer free(save_msg);
+	send(&s, strings::toutf8(save_msg));
+
+	const body = wait_for_publish_diagnostics(&s, main_uri);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	assert(
+		!strings::contains(text, "Unknown object"),
+		"cross-module didSave must not report Unknown object"
+	);
+	assert(
+		!strings::contains(text, "Unknown module"),
+		"cross-module didSave must resolve `use lib` against the workspace folder"
+	);
+};
+
+// Module that does `use io;` with no local `io/` dir: the resolver
+// returns a path outside the workspace, the dep walker skips it as
+// external, and the build runs successfully against the stdlib's io
+// (resolved via the inherited HAREPATH).
+@test fn e2e_didsave_skips_stdlib_uses() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-didsave-stdlib-skip")!;
+	defer free(root);
+	cleanup_didsave_root(root);
+	defer cleanup_didsave_root(root);
+
+	match (os::mkdirs(root, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
+	};
+	const main_path = strings::concat(root, "/lib.ha")!;
+	defer free(main_path);
+	// `use strings;` resolves via HAREPATH to the stdlib's strings
+	// module. The dep walker must classify that as external (not
+	// under the workspace) and skip it; the build itself runs
+	// against the saved module with stdlib resolved via the
+	// inherited HAREPATH.
+	const body = "use strings;\nexport fn upper(s: str) str = strings::dup(s)!;\n";
+	write_didsave_file(main_path, body);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	init_with_workspace_folder(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const main_uri = strings::concat("file://", main_path)!;
+	defer free(main_uri);
+	open_doc(&s, main_uri, body);
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	const save_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"`,
+			main_uri, `"}}}`)!;
+	defer free(save_msg);
+	send(&s, strings::toutf8(save_msg));
+
+	const published = wait_for_publish_diagnostics(&s, main_uri);
+	defer free(published);
+	const text = strings::fromutf8(published)!;
+	// Stdlib modules resolve via HAREPATH; the dep walker must not
+	// fall over because there's no local `fmt/` or `io/` directory.
+	assert(
+		!strings::contains(text, "Unknown module"),
+		"stdlib uses must resolve via HAREPATH (the dep walker should treat them as external and skip)"
+	);
+};
+
+// Regression: once a sibling-file error is fixed and the user saves
+// again, the LSP must publish an empty diagnostics list for that
+// sibling URI so the editor stops showing the stale entry. The dep
+// walker compiles the whole module each save; without the stale-
+// clearing pass, the first save would publish errors for sibling.ha,
+// the second save would only publish for the saved file, and
+// sibling.ha's old errors would linger.
+@test fn e2e_didsave_clears_stale_diagnostics_for_sibling() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-didsave-stale-clear")!;
+	defer free(root);
+	cleanup_didsave_root(root);
+	defer cleanup_didsave_root(root);
+
+	match (os::mkdirs(root, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
+	};
+	const sibling_path = strings::concat(root, "/sibling.ha")!;
+	defer free(sibling_path);
+	const main_path = strings::concat(root, "/main.ha")!;
+	defer free(main_path);
+	// Start with sibling.ha broken: references an undefined symbol.
+	write_didsave_file(sibling_path, "export fn s() void = undefined_symbol();\n");
+	write_didsave_file(main_path, "export fn m() void = void;\n");
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	init_with_workspace_folder(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const main_uri = strings::concat("file://", main_path)!;
+	defer free(main_uri);
+	const sibling_uri = strings::concat("file://", sibling_path)!;
+	defer free(sibling_uri);
+
+	open_doc(&s, main_uri, "export fn m() void = void;\n");
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	// First save: sibling.ha is broken; the dep build should emit an
+	// "Unknown object" diagnostic for sibling.ha, and the LSP must
+	// publish to its URI (proves we tracked it for later clearing).
+	const save_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"`,
+			main_uri, `"}}}`)!;
+	defer free(save_msg);
+	send(&s, strings::toutf8(save_msg));
+	const sibling_initial = wait_for_publish_diagnostics(&s, sibling_uri);
+	defer free(sibling_initial);
+	const sibling_initial_text = strings::fromutf8(sibling_initial)!;
+	assert(
+		strings::contains(sibling_initial_text, "undefined_symbol"),
+		"first didSave should publish the sibling.ha build error"
+	);
+
+	// Fix sibling.ha on disk and save main.ha again. The next pass
+	// must publish an empty diagnostics list for sibling.ha so the
+	// editor drops the now-stale entry. The main.ha publish that
+	// also fires this round is fine; the wait helper drains past it
+	// looking for the sibling publish specifically.
+	write_didsave_file(sibling_path, "export fn s() void = void;\n");
+	send(&s, strings::toutf8(save_msg));
+
+	const sibling_cleared = wait_for_publish_diagnostics(&s, sibling_uri);
+	defer free(sibling_cleared);
+	const sibling_cleared_text = strings::fromutf8(sibling_cleared)!;
+	assert(
+		strings::contains(sibling_cleared_text, `"diagnostics":[]`),
+		"second didSave must publish empty diagnostics for the now-fixed sibling.ha"
+	);
+};
+
+fn cleanup_didsave_root(root: str) void = {
+	match (os::rmdirall(root)) {
+	case void => void;
+	case fs::error => void;
 	};
 };
 
