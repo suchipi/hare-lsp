@@ -198,12 +198,12 @@ Highlights:
 - **Workspace indexing is chunked, not concurrent.** Hare is
   single-threaded, so indexing runs cooperatively between LSP
   messages: each dispatch tick processes a small batch and yields
-  back. Progress is reported via `$/progress` and the job can be
-  cancelled with `window/workDoneProgress/cancel`. Caveat: a fully
-  idle editor (sending no messages) won't drive the job forward;
-  typing or a pull-diagnostics request unblocks it. Results from
-  `workspace/symbol` may carry `isIncomplete: true` while the job is
-  still draining.
+  back. The main loop also peeks at stdin with a zero-timeout poll
+  between batches, so background indexing keeps advancing even when
+  the editor is silent. Progress is reported via `$/progress` and the
+  job can be cancelled with `window/workDoneProgress/cancel`. Results
+  from `workspace/symbol` may carry `isIncomplete: true` while the
+  job is still draining.
 - **Inlay-hint types are best-effort.** Inferred types resolve
   literals, declared types, function-call return types, and follow
   type-alias chains up to `hare.inlayHints.inferredTypesMaxDepth`

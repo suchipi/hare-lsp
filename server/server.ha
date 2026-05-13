@@ -26,6 +26,13 @@ export type server = struct {
 	reader: lsp::reader,
 	// Output handle for outgoing messages (typically os::stdout).
 	out: io::handle,
+	// Underlying fd to poll for input readiness between index batches.
+	// `void` when no pollable fd is available (e.g. unit tests reading
+	// from a memio handle); the idle-drain loop then falls straight
+	// through to the blocking `lsp::read`. `cmd/hare_lsp/main.ha`
+	// passes `os::stdin_file` here so the server can advance background
+	// indexing while the client is silent.
+	poll_fd: (io::file | void),
 	// Process id reported by the client during initialize, if any. Used to
 	// auto-shut-down when the parent dies (per LSP spec).
 	client_pid: (i32 | void),
@@ -118,8 +125,16 @@ export def EXIT_ERROR: int = 1;
 
 // Constructs a new server bound to the given input scanner and output handle.
 // The scanner must outlive the server. Caller is responsible for finishing it.
-export fn new(reader_src: *bufio::scanner, out: io::handle) server = {
-	return new_with_reader(lsp::new_reader(reader_src), out);
+//
+// `poll_fd` is the underlying fd to peek between background-indexing batches
+// for input readiness; pass `void` if no pollable fd is available (e.g.
+// unit tests that read from a memio handle). See `input_ready`.
+export fn new(
+	reader_src: *bufio::scanner,
+	out: io::handle,
+	poll_fd: (io::file | void),
+) server = {
+	return new_with_reader(lsp::new_reader(reader_src), out, poll_fd);
 };
 
 // Like [[new]] but lets the caller override the LSP transport's max
@@ -130,16 +145,23 @@ export fn new(reader_src: *bufio::scanner, out: io::handle) server = {
 export fn new_with_max_body(
 	reader_src: *bufio::scanner,
 	out: io::handle,
+	poll_fd: (io::file | void),
 	max_body: size,
 ) server = {
-	return new_with_reader(lsp::new_reader_with_limit(reader_src, max_body), out);
+	return new_with_reader(lsp::new_reader_with_limit(reader_src, max_body), out,
+		poll_fd);
 };
 
-fn new_with_reader(reader: lsp::reader, out: io::handle) server = server {
+fn new_with_reader(
+	reader: lsp::reader,
+	out: io::handle,
+	poll_fd: (io::file | void),
+) server = server {
 	state = server_state::PRE_INIT,
 	trace = lsp::trace_value::OFF,
 	reader = reader,
 	out = out,
+	poll_fd = poll_fd,
 	client_pid = void,
 	next_request_id = 0,
 	next_progress_token = 0,
@@ -217,6 +239,16 @@ export fn finish(s: *server) void = {
 // the appropriate process exit code.
 export fn run(s: *server) int = {
 	for (s.state != server_state::EXITED) {
+		// Cooperative background work: drain index batches as long
+		// as there's a queued job and no incoming message is ready.
+		// `input_ready` polls with timeout 0, so this loop exits as
+		// soon as the client sends anything (or no work remains),
+		// at which point we fall through to the blocking
+		// [[lsp::read]] below.
+		for (len(s.pending_index_jobs) > 0 && !input_ready(s)) {
+			drain_index_job(s);
+		};
+
 		const body = match (lsp::read(&s.reader)) {
 		case let b: []u8 =>
 			yield b;
