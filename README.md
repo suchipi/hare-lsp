@@ -2,7 +2,7 @@
 
 A Language Server Protocol implementation for the [Hare programming language](https://harelang.org/), written in Hare itself. Targets Hare v0.26.0 and LSP 3.17.
 
-**Status:** Young but usable. Written with LLM assistance; please file issues.
+**Status:** Young but powerful. Written with LLM assistance; please file issues.
 
 ## Features
 
