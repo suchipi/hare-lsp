@@ -408,21 +408,21 @@ export fn apply_settings(s: *server, v: json::value) void = {
 
 	// "hover": {"useHtml": bool}
 	match (json::get(&o, "hover")) {
-		case let p: *json::value =>
-			match (*p) {
-			case let hobj: json::object =>
-				match (json::get(&hobj, "useHtml")) {
-				case let hp: *json::value =>
-					match (*hp) {
-					case let b: bool =>
-						s.config.hover_use_html = b;
-					case => void;
-					};
+	case let p: *json::value =>
+		match (*p) {
+		case let hobj: json::object =>
+			match (json::get(&hobj, "useHtml")) {
+			case let hp: *json::value =>
+				match (*hp) {
+				case let b: bool =>
+					s.config.hover_use_html = b;
 				case => void;
 				};
 			case => void;
 			};
 		case => void;
+		};
+	case => void;
 	};
 
 	// "inlayHints": {"parameterNames": bool, "inferredTypes": bool}

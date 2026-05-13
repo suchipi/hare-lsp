@@ -115,9 +115,11 @@ def HAREFMT_PATH: str = "./harefmt";
 	// either unreadable or unparseable: a `parse::subunit` regression
 	// that rejected all real input would otherwise look like a green
 	// pass with `checked = 0`.
-	assert(checked > 0,
+	assert(
+		checked > 0,
 		"AST roundtrip must check at least one file"
-		" (no files survived to the comparison step)");
+		" (no files survived to the comparison step)"
+	);
 };
 
 // Direct test of harefmt's normalization behavior on synthetic input.
@@ -158,8 +160,10 @@ export fn two() void = void;
 	// (multiple spaces) and `void  = void` (double space) which are
 	// not canonical. If output == input, either the formatter is a
 	// no-op or it failed silently.
-	assert(!bytes_equal_local(messy, formatted),
-		"harefmt must rewrite non-canonical whitespace");
+	assert(
+		!bytes_equal_local(messy, formatted),
+		"harefmt must rewrite non-canonical whitespace"
+	);
 
 	const formatted_str = strings::fromutf8(formatted)!;
 
@@ -171,14 +175,18 @@ export fn two() void = void;
 		"// trailing comment",
 	];
 	for (let i = 0z; i < len(required_comments); i += 1) {
-		assert(strings::contains(formatted_str, required_comments[i]),
-			"every comment in the input must survive harefmt");
+		assert(
+			strings::contains(formatted_str, required_comments[i]),
+			"every comment in the input must survive harefmt"
+		);
 	};
 
 	// At least one blank line (`\n\n`) must remain — otherwise the
 	// formatter collapsed all of the source's intentional spacing.
-	assert(strings::contains(formatted_str, "\n\n"),
-		"intentional blank-line separators between decls must be preserved");
+	assert(
+		strings::contains(formatted_str, "\n\n"),
+		"intentional blank-line separators between decls must be preserved"
+	);
 
 	// AST equivalence: the canonical unparsed form of input and output
 	// must match. Catches regressions that change tokens or structure.
@@ -196,8 +204,10 @@ export fn two() void = void;
 		fmt::fatalf("harefmt output failed to reparse");
 	};
 	defer free(after);
-	assert(before == after,
-		"harefmt must preserve AST across the rewrite of the synthetic input");
+	assert(
+		before == after,
+		"harefmt must preserve AST across the rewrite of the synthetic input"
+	);
 };
 
 fn bytes_equal_local(a: []u8, b: []u8) bool = {

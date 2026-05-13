@@ -8,8 +8,8 @@
 //
 // Each `ownership_for_*` helper returns an `analysis::ownership_fact`
 // whose `detail` the caller frees. `format_ownership_line` renders the
-// final line; it returns "" when the type doesn't carry ownership, so
-// callers can splice unconditionally.
+// final line; it returns "" when `fact.source == NONE` so callers can
+// splice unconditionally. Silence reads as "I don't know," not a guess.
 
 use analysis;
 use hare::ast;
@@ -18,35 +18,23 @@ use lsp;
 use memio;
 use strings;
 
-// Returns the Ownership-line markdown for `fact` and the rendered type.
-// Emits the line when either:
-//   - we have a positive signal (`fact.source != NONE`), so the user
-//     explicitly told us or a heuristic decided; or
-//   - the rendered type carries ownership semantics, in which case we
-//     emit "Ownership: unknown" to acknowledge we looked.
-// Returns "" only when the type doesn't carry ownership AND we have no
-// signal — silence reserved for "this question doesn't apply".
+// Returns the Ownership-line markdown for `fact`, or "" when we have no
+// signal (`fact.source == NONE`). The line is reserved for positive
+// answers; silence reads as "I don't know," not a guess.
 //
-// When `use_html` is true, the line is wrapped in `<small>` so HTML-aware
-// clients (VSCode) render it as fine print. Disable for clients that
-// don't render HTML in hover markdown (Neovim, Helix, Emacs default
-// renderers) via `hare.hover.useHtml = false`, which suppresses the
-// wrapper.
+// When `use_html` is true the line is wrapped in `<small>` so HTML-aware
+// clients (VSCode) render it as fine print. Disable via
+// `hare.hover.useHtml = false` for editors that don't render HTML in
+// hover markdown (Neovim, Helix, Emacs default renderers).
 //
 // Output forms (with `use_html = false`):
 //   "Ownership: owned (annotation)"
 //   "Ownership: owned (doc comment: ...)"
 //   "Ownership: borrowed (heuristic: ...)"
-//   "Ownership: unknown"
 //
 // Caller frees.
-fn format_ownership_line(
-	fact: analysis::ownership_fact,
-	type_str: str,
-	use_html: bool,
-) str = {
-	if (fact.source == analysis::ownership_source::NONE &&
-			!type_string_carries_ownership(type_str)) {
+fn format_ownership_line(fact: analysis::ownership_fact, use_html: bool) str = {
+	if (fact.source == analysis::ownership_source::NONE) {
 		return strings::dup("")!;
 	};
 	let buf = memio::dynamic();
@@ -54,11 +42,9 @@ fn format_ownership_line(
 	if (use_html) memio::concat(&buf, "<small>")!;
 	memio::concat(&buf, "Ownership: ")!;
 	memio::concat(&buf, kind_word(fact.kind))!;
-	if (fact.source != analysis::ownership_source::NONE) {
-		memio::concat(&buf, " (")!;
-		memio::concat(&buf, fact.detail)!;
-		memio::concat(&buf, ")")!;
-	};
+	memio::concat(&buf, " (")!;
+	memio::concat(&buf, fact.detail)!;
+	memio::concat(&buf, ")")!;
 	if (use_html) memio::concat(&buf, "</small>")!;
 	return strings::dup(memio::string(&buf)!)!;
 };
@@ -72,72 +58,6 @@ fn kind_word(k: analysis::ownership) str = {
 	case analysis::ownership::UNKNOWN =>
 		return "unknown";
 	};
-};
-
-// True if the bare type string `s` carries memory ownership semantics:
-// pointer (`*T`), nullable pointer (`nullable *T`), slice (`[]T`), or
-// `str`. Callers pass the bare type only (not a full hover signature);
-// each hover path computes the bare type via `rendered_type_for_decl`,
-// `bare_type_for_param`, or `bare_type_for_binding`.
-fn type_string_carries_ownership(s: str) bool = {
-	if (len(s) == 0) return false;
-	return tail_starts_ownership_type(trim_ascii_space(s));
-};
-
-// Scans the type tail for an ownership-carrying head token. We accept any
-// prefix that matches the leading characters of `*`, `[]`, `str`,
-// `nullable`, or `const *`/`const []` (since `const *T` is a Hare-valid
-// pointer-to-const).
-fn tail_starts_ownership_type(s: str) bool = {
-	let t = s;
-	for (true) {
-		t = trim_ascii_space(t);
-		if (len(t) == 0) return false;
-		const bytes = strings::toutf8(t);
-		if (bytes[0] == '*': u8) return true;
-		if (bytes[0] == '[': u8) {
-			if (len(bytes) >= 2 && bytes[1] == ']': u8) return true;
-			// `[N]T` is an array, not a slice — fixed-size arrays
-			// don't carry ownership.
-			return false;
-		};
-		if (strings::hasprefix(t, "str")) {
-			if (len(bytes) == 3) return true;
-			const after = bytes[3];
-			if (!is_ident_byte(after)) return true;
-			return false;
-		};
-		if (strings::hasprefix(t, "nullable")) {
-			t = strings::sub(t, len("nullable"), strings::end);
-			continue;
-		};
-		if (strings::hasprefix(t, "const")) {
-			const after_bytes = strings::toutf8(t);
-			if (len(after_bytes) > 5 && !is_ident_byte(after_bytes[5])) {
-				t = strings::sub(t, len("const"), strings::end);
-				continue;
-			};
-			return false;
-		};
-		return false;
-	};
-};
-
-fn trim_ascii_space(s: str) str = {
-	const bytes = strings::toutf8(s);
-	let start = 0z;
-	for (start < len(bytes)) {
-		const b = bytes[start];
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
-		start += 1;
-	};
-	let end = len(bytes);
-	for (end > start) {
-		const b = bytes[end - 1];
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
-		end -= 1;
-	};
-	return strings::sub(s, start, end);
 };
 
 // Ownership fact for a local-file symbol (cached from indexing).
@@ -322,8 +242,8 @@ fn ownership_for_param(
 };
 
 // Locates the binding/param node at `off` for the local-binding hover
-// path and returns the (ownership_fact, bare type_str) pair derived from
-// it. Returns (empty fact, "") if the cursor isn't on a local target.
+// path and returns the ownership_fact derived from it. Returns the empty
+// fact if the cursor isn't on a local target.
 //
 // Mirrors the same dispatch as `find_local_binding`: function parameter
 // first, then `let`/`const` bindings.
@@ -333,7 +253,7 @@ fn local_target_ownership(
 	su: *ast::subunit,
 	name: str,
 	off: size,
-) (analysis::ownership_fact, str) = {
+) analysis::ownership_fact = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
 		if (off < d.loc.start.off: size) continue;
@@ -349,9 +269,7 @@ fn local_target_ownership(
 		case let proto: ast::func_type =>
 			for (let j = 0z; j < len(proto.params); j += 1) {
 				if (proto.params[j].name != name) continue;
-				const t = bare_type_for_param(&proto.params[j]);
-				const fact = ownership_for_param(srv, doc, name, off);
-				return (fact, t);
+				return ownership_for_param(srv, doc, name, off);
 			};
 		case => void;
 		};
@@ -360,116 +278,12 @@ fn local_target_ownership(
 		case let body: *ast::expr =>
 			match (find_local_binding_node(su, name, off)) {
 			case let b: *ast::binding =>
-				const t = bare_type_for_binding(srv, doc, b);
-				const fact = ownership_for_local_binding(srv, doc, b);
-				return (fact, t);
+				return ownership_for_local_binding(srv, doc, b);
 			case void => void;
 			};
 		case null => void;
 		};
 		break;
 	};
-	return (analysis::empty_ownership_fact(), strings::dup("")!);
-};
-
-// Bare type string for an AST type node (e.g. "*int", "str"). Caller
-// frees. Returns "" on render error.
-fn bare_type_for_ast_type(t: *ast::_type) str = {
-	let buf = memio::dynamic();
-	defer lsp::safe_close(&buf);
-	match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
-	case size => void;
-	case =>
-		return strings::dup("")!;
-	};
-	return strings::dup(memio::string(&buf)!)!;
-};
-
-// Bare type string for a function parameter (e.g. "*int", "str").
-// Caller frees.
-fn bare_type_for_param(p: *ast::func_param) str = {
-	let buf = memio::dynamic();
-	defer lsp::safe_close(&buf);
-	match (unparse::_type(&buf, &unparse::syn_nowrap, p._type)) {
-	case size => void;
-	case =>
-		return strings::dup("")!;
-	};
-	return strings::dup(memio::string(&buf)!)!;
-};
-
-// Bare type string for a local `let`/`const` binding. Uses the declared
-// type if present; otherwise tries to infer from the init expression.
-// Falls back to "" if nothing useful is available. Caller frees.
-fn bare_type_for_binding(srv: *server, doc: *document, b: *ast::binding) str = {
-	match (b._type) {
-	case let t: *ast::_type =>
-		let buf = memio::dynamic();
-		defer lsp::safe_close(&buf);
-		match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
-		case size => void;
-		case =>
-			return strings::dup("")!;
-		};
-		return strings::dup(memio::string(&buf)!)!;
-	case null =>
-		match (infer_type_from_init(srv, doc, b.init)) {
-		case let t: str =>
-			return t;
-		case void =>
-			return strings::dup("")!;
-		};
-	};
-};
-
-// Rendered return-type string for a decl, used to decide whether to emit
-// an Ownership line. For a function returns the result type only; for a
-// global/const returns the declared type. Caller frees.
-fn rendered_type_for_decl(d: *ast::decl) str = {
-	match (d.decl) {
-	case let f: ast::decl_func =>
-		match (f.prototype.repr) {
-		case let proto: ast::func_type =>
-			let buf = memio::dynamic();
-			defer lsp::safe_close(&buf);
-			match (unparse::_type(&buf, &unparse::syn_nowrap, proto.result)) {
-			case size => void;
-			case =>
-				return strings::dup("")!;
-			};
-			return strings::dup(memio::string(&buf)!)!;
-		case =>
-			return strings::dup("")!;
-		};
-	case let g: ast::decl_global =>
-		match (g._type) {
-		case let t: *ast::_type =>
-			let buf = memio::dynamic();
-			defer lsp::safe_close(&buf);
-			match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
-			case size => void;
-			case =>
-				return strings::dup("")!;
-			};
-			return strings::dup(memio::string(&buf)!)!;
-		case null =>
-			return strings::dup("")!;
-		};
-	case let c: ast::decl_const =>
-		match (c._type) {
-		case let t: *ast::_type =>
-			let buf = memio::dynamic();
-			defer lsp::safe_close(&buf);
-			match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
-			case size => void;
-			case =>
-				return strings::dup("")!;
-			};
-			return strings::dup(memio::string(&buf)!)!;
-		case null =>
-			return strings::dup("")!;
-		};
-	case =>
-		return strings::dup("")!;
-	};
+	return analysis::empty_ownership_fact();
 };

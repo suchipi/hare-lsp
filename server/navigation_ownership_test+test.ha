@@ -130,8 +130,9 @@ fn nav_format_int(n: int) str = {
 		"// @owned\\nexport fn make() *int = alloc(0);\\n");
 	const v = hover_value(&s, out, "file:///own.ha", 1.0, 12.0, 202.0);
 	defer free(v);
-	// Bare @owned ignored on functions; falls through to no other signal.
-	assert(strings::contains(v, "Ownership: unknown"));
+	// Bare @owned ignored on functions; with no other signal, no Ownership
+	// line is rendered.
+	assert(!strings::contains(v, "Ownership:"));
 };
 
 @test fn hover_ownership_no_line_for_int_return() void = {
@@ -202,14 +203,14 @@ fn nav_format_int(n: int) str = {
 	assert(strings::contains(v, "alloc returns owned"));
 };
 
-@test fn hover_ownership_unknown_on_pointer_with_no_signal() void = {
+@test fn hover_ownership_no_line_on_pointer_with_no_signal() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 	const src = "export fn make() *int = alloc(0);\\n";
 	nav_open(&s, "file:///own.ha", src);
 	const v = hover_value(&s, out, "file:///own.ha", 0.0, 12.0, 209.0);
 	defer free(v);
-	// No annotation; workspace fn isn't in the stdlib table.
-	// Pointer return type still emits a line, but kind is UNKNOWN.
-	assert(strings::contains(v, "Ownership: unknown"));
+	// No annotation; workspace fn isn't in the stdlib table; no Layer-3
+	// match. We stay silent rather than rendering "unknown".
+	assert(!strings::contains(v, "Ownership:"));
 };
