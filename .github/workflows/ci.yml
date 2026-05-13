@@ -6,13 +6,31 @@ on:
   pull_request:
 
 jobs:
+  # Detect whether any non-markdown files changed. The build/test jobs key
+  # off this so docs-only PRs skip the expensive work, while the final
+  # `ci` job always runs and can be used as the required status check.
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - '!**/*.md'
+
   server:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # x64 free runners have 16 GB RAM; the arm64 partner runners only have
     # 8 GB, and qbe compiling the server module overruns that even with
     # -j1.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # We run the build inside a container based on alpine:edge rather
       # than using `container: alpine:edge` at the job level so
@@ -24,10 +42,10 @@ jobs:
       # the apk install layer entirely when alpine:edge's digest and
       # the package list are unchanged.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build cached test image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .github/docker
           tags: hare-lsp-ci:latest
@@ -48,11 +66,13 @@ jobs:
           '
 
   vscode-extension:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '24.15.0'
           cache: npm
@@ -75,3 +95,30 @@ jobs:
       - name: Typecheck and package
         working-directory: editors/vscode
         run: npm run package
+
+  # Single aggregator job that always runs. Use this as the required
+  # status check in branch protection: it passes when the real jobs
+  # succeed or were skipped (docs-only change), and fails if any of
+  # them failed or was cancelled.
+  ci:
+    if: always()
+    needs: [changes, server, vscode-extension]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check job results
+        run: |
+          set -eu
+          changes='${{ needs.changes.result }}'
+          server='${{ needs.server.result }}'
+          vscode='${{ needs.vscode-extension.result }}'
+          echo "changes=$changes server=$server vscode-extension=$vscode"
+          if [ "$changes" != "success" ]; then
+            echo "changes job did not succeed"
+            exit 1
+          fi
+          for r in "$server" "$vscode"; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "dependent job result: $r"; exit 1 ;;
+            esac
+          done
