@@ -263,6 +263,17 @@ fn compute_semantic_tokens(s: *server, data: []u8) []u32 = {
 	let lexer = lex::init(&scan, "<doc>", lex::flag::COMMENTS);
 	defer lex::finish(&lexer);
 
+	// hare::lex reports `tok.2.col` as a rune count with tab expansion
+	// (each tab advances to the next multiple of 8) and `tok.2.off` as
+	// a rune index. LSP wants positions in the negotiated encoding's
+	// code units, so translate every token's rune offset into a byte
+	// offset and run it through byte_to_position.
+	const r2b = analysis::build_rune_to_byte_table(data);
+	defer free(r2b);
+	const line_index = analysis::build_line_index(data);
+	defer free(line_index);
+	const enc = position_encoding(s);
+
 	let prev_line: u32 = 0;
 	let prev_col: u32 = 0;
 	for (true) {
@@ -274,10 +285,17 @@ fn compute_semantic_tokens(s: *server, data: []u8) []u32 = {
 		};
 		if (tok.0 == ltok::EOF) break;
 		const tt = classify_token(tok.0);
-		// LSP wants 0-based line/col; lex provides 1-based.
-		const line: u32 = tok.2.line: u32 - 1;
-		const col: u32 = tok.2.col: u32 - 1;
-		const length: u32 = token_length(tok);
+		const rune_off = tok.2.off: size;
+		const byte_off = if (rune_off < len(r2b)) r2b[rune_off] else len(data);
+		const pos = analysis::byte_to_position(data, line_index, enc, byte_off);
+		const line: u32 = pos.line;
+		const col: u32 = pos.character;
+		// LSP semantic tokens can't be multiline (per spec), so clip
+		// the token's source span at the next newline if one falls
+		// inside it (e.g. backtick raw strings with embedded newlines).
+		const byte_end_raw = byte_off + token_byte_len(data, byte_off, tok);
+		const byte_end = clip_to_line_end(data, byte_off, byte_end_raw);
+		const length: u32 = analysis::count_units(data[byte_off..byte_end], enc): u32;
 		if (length == 0) continue;
 		const delta_line = line - prev_line;
 		const delta_start = if (delta_line == 0) {
@@ -406,17 +424,101 @@ fn is_keyword(t: ltok) bool = {
 	};
 };
 
-// Returns the source length of a token in characters. We approximate by
-// re-rendering via lex::tokstr for tokens that carry no value, and using
-// the lexer's value length for names/literals.
-fn token_length(tok: lex::token) u32 = {
-	match (tok.1) {
-	case let s: str =>
-		return len(strings::toutf8(s)): u32;
-	case =>
-		const s = lex::tokstr(tok);
-		return len(s): u32;
+// Returns the byte length of the source representation of `tok` starting
+// at `byte_off` in `data`. Walks source bytes rather than relying on
+// `tok.1` (which holds the parsed value — escape-stripped string content
+// for LIT_STR, a u64 for integer constants, a rune for LIT_RCONST) or
+// `lex::tokstr` (which returns canonical names like "u8" or "iconst" for
+// literal tokens, not the source spelling).
+fn token_byte_len(data: []u8, byte_off: size, tok: lex::token) size = {
+	if (byte_off >= len(data)) return 0;
+	const b = data[byte_off];
+	// String / rune / raw-string literals are delimited; reuse the
+	// shared scanner that already handles escape sequences.
+	if (b == '"': u8 || b == '\'': u8 || b == '`': u8) {
+		return analysis::token_skip_noncode(data, byte_off, len(data)) - byte_off;
 	};
+	// Numeric literals: walk forward while the byte plausibly belongs.
+	// Covers hex/binary/octal digits, suffix letters (u8, f32, etc.),
+	// `.` for floats, and `e±N` / `p±N` exponent signs.
+	if (is_numeric_literal_kind(tok.0)) {
+		return scan_numeric_literal(data, byte_off);
+	};
+	// Names, keywords, operators, attributes: `lex::tokstr` returns
+	// the canonical spelling, which is byte-identical to source.
+	const s = lex::tokstr(tok);
+	const slen = len(strings::toutf8(s));
+	if (byte_off + slen > len(data)) return len(data) - byte_off;
+	return slen;
+};
+
+fn is_numeric_literal_kind(t: ltok) bool = {
+	switch (t) {
+	case ltok::LIT_U8,
+	ltok::LIT_U16,
+	ltok::LIT_U32,
+	ltok::LIT_U64,
+	ltok::LIT_I8,
+	ltok::LIT_I16,
+	ltok::LIT_I32,
+	ltok::LIT_I64,
+	ltok::LIT_UINT,
+	ltok::LIT_INT,
+	ltok::LIT_SIZE,
+	ltok::LIT_F32,
+	ltok::LIT_F64,
+	ltok::LIT_ICONST,
+	ltok::LIT_FCONST =>
+		return true;
+	case =>
+		return false;
+	};
+};
+
+fn scan_numeric_literal(data: []u8, byte_off: size) size = {
+	let end = byte_off;
+	for (end < len(data)) {
+		const c = data[end];
+		if (c >= '0': u8 && c <= '9': u8 || c >= 'a': u8 && c <= 'z': u8 ||
+				c >= 'A': u8 && c <= 'Z': u8 ||
+				c == '_': u8) {
+			end += 1;
+			continue;
+		};
+		if (c == '.': u8) {
+			// Accept `.` only when it's a float separator (next byte
+			// is a digit). Without this guard, `0..10` ranges and
+			// `1.method` field access get swallowed past the literal.
+			if (end + 1 < len(data) && data[end + 1] >= '0': u8 &&
+					data[end + 1] <= '9': u8) {
+				end += 1;
+				continue;
+			};
+			break;
+		};
+		if ((c == '+': u8 || c == '-': u8) && end > byte_off) {
+			const prev = data[end - 1];
+			if (prev == 'e': u8 || prev == 'E': u8 || prev == 'p': u8 ||
+					prev == 'P': u8) {
+				end += 1;
+				continue;
+			};
+		};
+		break;
+	};
+	if (end == byte_off) return 1;
+	return end - byte_off;
+};
+
+// LSP semantic tokens can't span newlines. Returns `byte_end` if no
+// newline falls inside [byte_off, byte_end); otherwise the offset of
+// the newline byte.
+fn clip_to_line_end(data: []u8, byte_off: size, byte_end: size) size = {
+	const end = if (byte_end > len(data)) len(data) else byte_end;
+	for (let i = byte_off; i < end; i += 1) {
+		if (data[i] == '\n': u8) return i;
+	};
+	return end;
 };
 
 fn send_tokens(s: *server, id: lsp::id, tokens: []u32) void = {

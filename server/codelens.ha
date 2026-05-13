@@ -283,6 +283,13 @@ type test_marker = struct {
 
 fn find_tests(data: []u8) []test_marker = {
 	let out: []test_marker = [];
+	// hare::lex reports `loc.off` as a rune index, but downstream
+	// callers (byte_to_position) treat offsets as bytes. Build the
+	// rune→byte table once so each captured @test offset can be
+	// translated. Without this, a file with multi-byte UTF-8 above an
+	// @test would place the "Run test" lens on the wrong line.
+	const r2b = analysis::build_rune_to_byte_table(data);
+	defer free(r2b);
 	let src = memio::fixed(data);
 	let scan = bufio::newscanner(&src);
 	defer bufio::finish(&scan);
@@ -298,7 +305,9 @@ fn find_tests(data: []u8) []test_marker = {
 		};
 		if (tok.0 == ltok::EOF) break;
 		if (tok.0 == ltok::ATTR_TEST) {
-			pending = tok.2.off: size;
+			const rune_off = tok.2.off: size;
+			const byte_off = if (rune_off < len(r2b)) r2b[rune_off] else len(data);
+			pending = byte_off;
 			continue;
 		};
 		// After @test we expect `fn <name>(...) ...`. The first NAME
