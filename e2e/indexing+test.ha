@@ -11,6 +11,7 @@ use encoding::json;
 use fmt;
 use fs;
 use os;
+use strconv;
 use strings;
 
 // Generates `count` Hare source files under `dir`, each declaring a
@@ -34,40 +35,151 @@ fn gen_index_workspace(label: str, count: size) str = {
 	return root;
 };
 
-// Drains messages until the indexing-completion log arrives, with a
-// generous cap so a stuck server fails the test promptly.
-fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
+// Drains messages until the `$/progress` `end` notification for the
+// workspace-indexing job arrives, then parses the file count out of its
+// `message` field. The server formats the message as
+// `<prefix> <count> file(s)` (with ` (cancelled)` appended if the job
+// was cancelled, see server/workspace_index_job.ha:finish_head_job).
+// Returns (count, cancelled). Fails the test if `max` messages drain
+// without the end notification.
+type index_end = struct {
+	count: size,
+	cancelled: bool,
+};
+
+fn drain_until_index_end(s: *session, max: size) index_end = {
 	for (let i = 0z; i < max; i += 1) {
 		const body = recv(s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed") &&
-				strings::contains(text, "file(s)")) return true;
+		let v = match (json::loadstr(text)) {
+		case let v: json::value =>
+			yield v;
+		case =>
+			continue;
+		};
+		defer json::finish(v);
+		const obj = match (v) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			continue;
+		};
+		const method = match (json::get(&obj, "method")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
+			};
+		case =>
+			continue;
+		};
+		if (method != "$/progress") continue;
+		const params = match (json::get(&obj, "params")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let o: json::object =>
+				yield o;
+			case =>
+				continue;
+			};
+		case =>
+			continue;
+		};
+		const value = match (json::get(&params, "value")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let o: json::object =>
+				yield o;
+			case =>
+				continue;
+			};
+		case =>
+			continue;
+		};
+		const kind = match (json::get(&value, "kind")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
+			};
+		case =>
+			continue;
+		};
+		if (kind != "end") continue;
+		const msg = match (json::get(&value, "message")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
+			};
+		case =>
+			continue;
+		};
+		return parse_index_end_message(msg);
 	};
-	return false;
+	fmt::fatalf("e2e: indexing did not emit $/progress end within {} messages",
+		max);
+};
+
+// Parses "<prefix> <count> file(s)[ (cancelled)]". Fails the test on
+// any unrecognised shape so a regression in the server's message
+// format surfaces as a test failure rather than a silent miss.
+fn parse_index_end_message(msg: str) index_end = {
+	const cancelled = strings::hassuffix(msg, " (cancelled)");
+	const trimmed = if (cancelled)
+		strings::sub(msg, 0, len(msg) - len(" (cancelled)"))
+		else msg;
+	const suffix = " file(s)";
+	if (!strings::hassuffix(trimmed, suffix)) {
+		fmt::fatalf("e2e: unexpected index end message: {}", msg);
+	};
+	const before_suffix = strings::sub(trimmed, 0, len(trimmed) - len(suffix));
+	const last_space = match (strings::rindex(before_suffix, ' ')) {
+	case let i: size =>
+		yield i;
+	case void =>
+		fmt::fatalf("e2e: index end message has no count token: {}", msg);
+	};
+	const count_str = strings::sub(before_suffix, last_space + 1, strings::end);
+	const count = match (strconv::stoz(count_str)) {
+	case let n: size =>
+		yield n;
+	case =>
+		fmt::fatalf("e2e: index end message count is not a number: {}", msg);
+	};
+	return index_end {
+		count = count,
+		cancelled = cancelled,
+	};
 };
 
 // A workspace of ~150 files exercises the chunked path: with batch size
 // 50 and 4 inline batches, the inline drain processes 200 files — so we
-// pick a count comfortably above the inline limit to ensure background
-// drains happen too.
+// pick a count comfortably below the inline limit to stay fast.
 @test fn e2e_indexing_chunked_indexes_large_workspace() void = {
-	// 150 files: above the per-tick batch of 50 but small enough to
-	// keep the test fast.
-	const root = gen_index_workspace("chunked", 150z);
+	const FILE_COUNT: size = 150z;
+	const root = gen_index_workspace("chunked", FILE_COUNT);
 	defer cleanup_crossmod_workspace(root);
 
 	let s = spawn_session();
 	defer finish_session(&s);
 	init_with_workspace_folder(&s, root);
 
-	// Eventually the server logs the completion. Allow up to 200
-	// messages to drain (progress notifications, config pulls,
-	// registrations) — a healthy server emits the completion well
-	// before that.
+	// Eventually the server emits `$/progress` `end` with the final
+	// count. Allow up to 200 messages to drain (begin, intermediate
+	// report frames, config pulls, registrations).
+	const result = drain_until_index_end(&s, 200z);
+	assert(!result.cancelled, "happy-path indexing must not report cancelled");
 	assert(
-		drain_until_indexed_with_cap(&s, 200z),
-		"large workspace must eventually finish indexing"
+		result.count == FILE_COUNT,
+		"indexing must report the exact workspace file count"
 	);
 
 	// After completion, workspace/symbol can find a deep-in-the-batch
@@ -81,44 +193,37 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	const result = *(json::get(&obj, "result") as *json::value);
-	// Response shape is either an array or a WorkspaceSymbolList
-	// with { items, isIncomplete }. Accept either; just confirm
-	// `f_140` appears.
-	let items: []json::value = [];
-	match (result) {
-	case let arr: []json::value =>
-		items = arr;
-	case let obj: json::object =>
-		match (json::get(&obj, "items")) {
-		case let p: *json::value =>
-			match (*p) {
-			case let arr: []json::value =>
-				items = arr;
-			case => void;
-			};
-		case => void;
-		};
-	case => void;
-	};
-	let found = false;
+	const result_v = *(json::get(&obj, "result") as *json::value);
+	const items = extract_symbol_items(result_v);
+	// Find `f_140` and verify its location points at file_140.ha so a
+	// regression that returned the right name but the wrong URI fails.
+	let found_uri: str = "";
 	for (let i = 0z; i < len(items); i += 1) {
 		const it = items[i] as json::object;
 		const name = *(json::get(&it, "name") as *json::value) as str;
-		if (name == "f_140") {
-			found = true;
-			break;
-		};
+		if (name != "f_140") continue;
+		const loc = *(json::get(&it, "location") as *json::value) as json::object;
+		found_uri = *(json::get(&loc, "uri") as *json::value) as str;
+		break;
 	};
-	assert(found, "deep file symbol must be reachable after indexing completes");
+	assert(
+		len(found_uri) > 0,
+		"deep file symbol must be reachable after indexing completes"
+	);
+	assert(
+		strings::hassuffix(found_uri, "/file_140.ha"),
+		"workspace/symbol must point f_140 at its source file"
+	);
 };
 
 // Cancelling the indexing progress token must stop further work and
-// leave the workspace partly indexed. We rely on the server emitting a
-// progress `begin` first, then we send `cancel`, then we drain until
-// the completion log. The reported count should be less than the total.
+// leave the workspace partly indexed. The inline drain plus the one
+// post-`initialized` background batch covers ~250 files; with 500
+// files in the workspace, at least 250 will still be queued when the
+// test sends `cancel`, so the cancel path is actually exercised.
 @test fn e2e_indexing_cancel_stops_job() void = {
-	const root = gen_index_workspace("cancel", 250z);
+	const TOTAL: size = 500z;
+	const root = gen_index_workspace("cancel", TOTAL);
 	defer cleanup_crossmod_workspace(root);
 
 	let s = spawn_session();
@@ -149,12 +254,38 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 	defer free(cancel);
 	send(&s, strings::toutf8(cancel));
 
-	// The server should still emit the completion log, with a count
-	// below the workspace total.
+	// The server should publish the end notification with a count
+	// strictly below the total and the cancelled flag set. Both are
+	// load-bearing: a regression that ignored the cancel would leave
+	// `cancelled` false (and `count` equal to TOTAL).
+	const result = drain_until_index_end(&s, 200z);
+	assert(result.cancelled, "end notification must report the job as cancelled");
 	assert(
-		drain_until_indexed_with_cap(&s, 200z),
-		"cancelled job must still publish a completion log"
+		result.count < TOTAL,
+		"cancelled indexing must report fewer files than the workspace total"
 	);
+};
+
+// workspace/symbol's response can be a bare array or a
+// WorkspaceSymbolList { items, isIncomplete }. Returns the items array
+// in either shape; an empty slice on anything else.
+fn extract_symbol_items(result: json::value) []json::value = {
+	match (result) {
+	case let arr: []json::value =>
+		return arr;
+	case let obj: json::object =>
+		match (json::get(&obj, "items")) {
+		case let p: *json::value =>
+			match (*p) {
+			case let arr: []json::value =>
+				return arr;
+			case => void;
+			};
+		case => void;
+		};
+	case => void;
+	};
+	return [];
 };
 
 // Tiny ad-hoc JSON extractor for `"token":"<value>"`. Avoids pulling in
