@@ -4,6 +4,8 @@ A Language Server Protocol implementation for the [Hare programming language](ht
 
 **Status:** Young but powerful. Should be suitable for daily driver use.
 
+This repository also includes a command-line hare code formatter, harefmt.
+
 ## Features
 
 - **Diagnostics** (push and pull): an in-process recovering parser produces diagnostics on every change. On save, `hare build` adds type-check errors. Toggle build via `diagnostics.enableBuild`.
@@ -161,21 +163,6 @@ Negation works the standard gitignore way:
 ### Standalone `gitignore` module
 
 The gitignore-style pattern parser and matcher used by `harefmt` lives in its own top-level Hare module at [`gitignore/`](gitignore/) (see [`gitignore/pattern.ha`](gitignore/pattern.ha) and [`gitignore/match.ha`](gitignore/match.ha)). It has no dependency on the rest of the project (just stdlib's `strings` and `fnmatch`) and exposes parsing, single-pattern matching, ordered-list evaluation (last-match-wins), and layered evaluation (outer-first for nested ignore files). Anyone who wants the same matching semantics in another Hare project can vendor the directory unchanged.
-
-## Known limitations
-
-These features work but have caveats worth knowing before relying on them:
-
-- **References & rename are partly textual.** Discovery is a textual workspace scan (comments, strings, char literals, and raw strings are skipped). The hits are then filtered semantically:
-  - Locals (`let` / `const` / `def` / `for` / `match` / function parameter) are bounded to the binding's lexical scope, so shadowing works correctly.
-  - Top-level decls re-resolve each candidate against its file's `use` list + workspace index, so unrelated decls sharing a short name in different modules are kept distinct. Hits in files that aren't workspace-indexed (stdlib, third-party off the workspace path) are dropped.
-  - **Fallback case:** if the cursor's own symbol can't be resolved against the workspace index (e.g. a buffer outside every workspace folder, or a fresh symbol not yet indexed), the filter is skipped and every textual hit is returned. In that mode a rename can rewrite same-named decls in unrelated modules — preview the edit before applying.
-- **Formatting requires a parseable file.** Full / range formatting only runs when the document parses cleanly. On-type re-indent still fires on unparseable files (it operates on whitespace only and never rewrites tokens), but full/range formatting returns no edits. This is intentional: a no-op format on a syntax error is a useful signal that the file doesn't parse.
-- **Workspace indexing is chunked, not concurrent.** Hare is single-threaded, so indexing runs cooperatively between LSP messages: each dispatch tick processes a small batch and yields back. The main loop also peeks at stdin with a zero-timeout poll between batches, so background indexing keeps advancing even when the editor is silent. Progress is reported via `$/progress` and the job can be cancelled with `window/workDoneProgress/cancel`. `workspace/symbol` results may carry `isIncomplete: true` while the job is still draining.
-- **Resource caps (configurable).** The server refuses to grow past caps on open documents, total open-buffer bytes, per-file diagnostics (excess collapses into a single trailing diagnostic), in-flight server requests, and workspace-index entries. All are tunable via `hare.limits.*` — raise the limit if your project needs it. Defaults are in the [Configuration](#configuration) table. Hitting any cap is logged via `window/logMessage`.
-  - **Transport body size is also capped, but configurable.** The LSP transport rejects messages larger than 32 MiB by default. Override via the `HARE_LSP_MAX_BODY_BYTES` environment variable when the client sends very large workspace edits. The cap is read at startup (before `initialize` arrives), which is why it's an env var rather than a setting.
-- **Inlay-hint types are best-effort.** Inferred types resolve literals, declared types, function-call return types, and follow type-alias chains up to `hare.inlayHints.inferredTypesMaxDepth` hops (default 10; cycles are guarded by a visited set). Complex inference (deeply chained field accesses, generic-shaped constructs) may show no hint rather than a wrong one.
-- **`workspace/symbol` and document links** resolve stdlib imports only when `HAREPATH` overlaps a workspace folder.
 
 ## License
 
