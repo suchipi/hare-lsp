@@ -11,11 +11,12 @@ A Language Server Protocol (LSP 3.17) implementation for the [Hare programming l
 The project is driven entirely by the [Makefile](Makefile). It pins `HAREPATH` to `$(PWD):$(THIRDPARTY):/usr/local/src/hare/stdlib` so that `use lsp;`, `use server;`, etc. resolve to the in-tree modules.
 
 - `make` — builds `./hare-lsp` (checks for `hare-json` at `/usr/local/src/hare/third-party/encoding/json/` first).
-- `make test` — builds the binary, then runs unit tests AND the e2e suite. The e2e tests spawn the actual `./hare-lsp` binary over OS pipes; they require the binary to exist, which is why `test` depends on `hare-lsp`.
+- `make test` — builds the binary, then runs unit tests AND the e2e suite. The e2e tests spawn the actual `./hare-lsp` binary over OS pipes; they require the binary to exist, which is why `test` depends on `hare-lsp`. This target does **not** run the VSCode extension's vitest suite, because users running hare-lsp from non-VSCode editors shouldn't need Node installed.
+- `make vscode-test` — runs the VSCode extension's vitest suite (TypeScript-side logic, currently the terminal-output parser that drives the test-status gutter). When you run `make test`, also run `make vscode-test` so the extension tests stay green — they cover code that ships from this repo even though they're gated separately.
 - `make clean` — removes `./hare-lsp`, `.cache/`, and the VSCode extension build artifacts.
 - `make vscode-install` — builds and installs the in-tree VSCode extension at [editors/vscode/](editors/vscode/).
 
-There is no separate lint step; rely on `hare build` errors and `make test`.
+There is no separate lint step; rely on `hare build` errors, `make test`, and `make vscode-test`.
 
 ### Running a single test
 

@@ -72,9 +72,12 @@ harefmt: $(HA_SOURCES)
 #
 # The e2e tests guard against regressions unit tests can't catch (e.g.
 # the buffered-stdout flush bug), so ./hare-lsp must exist before this
-# runs. vscode-test runs the VSCode extension's vitest suite (currently
-# the terminal-output parser, which gates the test-status gutter).
-test: hare-lsp harefmt .tmp/all-tests vscode-test
+# runs. The VSCode extension's vitest suite is intentionally NOT a
+# dependency of `make test`: many users of this repo run hare-lsp from
+# editors other than VSCode and shouldn't need Node installed to run
+# the hare-side test suite. Run `make vscode-test` (or `make test
+# vscode-test`) when working on extension code.
+test: hare-lsp harefmt .tmp/all-tests
 	@mkdir -p .cache .tmp
 	@rm -f .tmp/test-shard-*.log
 	@( .tmp/all-tests 'analysis::*' 'cmd::*' 'gitignore::*' 'lsp::*' 'server::*' > .tmp/test-shard-1-non-e2e.log  2>&1 ) & p1=$$!; \
