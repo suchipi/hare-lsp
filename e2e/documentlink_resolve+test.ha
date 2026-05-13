@@ -7,6 +7,7 @@
 
 use encoding::json;
 use fmt;
+use os;
 use strings;
 
 @test fn e2e_documentlink_resolve_fills_in_target() void = {
@@ -40,6 +41,14 @@ export fn main() void = void;
 		json::get(&link0, "target") is void,
 		"unresolved documentLink should not have target"
 	);
+	// `data` carries the import ident that documentLink/resolve keys
+	// off. Assert positively so a missing-data regression fails with a
+	// clean message rather than a tagged-union mismatch deeper in the
+	// test.
+	assert(
+		json::get(&link0, "data") is *json::value,
+		"unresolved documentLink must carry data for the resolve step"
+	);
 
 	// Build a resolve request from the original link.
 	const range_v = *(json::get(&link0, "range") as *json::value);
@@ -65,11 +74,59 @@ export fn main() void = void;
 		fmt::fatalf("e2e: resolved link missing target: {}", rtext);
 	};
 	assert(
-		strings::contains(target, "strings"),
-		"resolved target should reference the strings module"
-	);
-	assert(
 		strings::hasprefix(target, "file://"),
 		"resolved target should be a file:// URI"
+	);
+	// Strip scheme to a filesystem path. The resolver always emits an
+	// absolute path so we get one leading '/' after the prefix.
+	const path = strings::sub(target, len("file://"), strings::end);
+	assert(
+		strings::hassuffix(path, ".ha"),
+		"resolved target should point at a `.ha` file"
+	);
+	// The second-to-last path segment must be the module name. For
+	// `use strings;` that segment is `strings`; a substring scan over
+	// the whole path would also accept noise like `/home/strings_x/y.ha`.
+	const last_slash = match (strings::rindex(path, '/')) {
+	case let i: size =>
+		yield i;
+	case void =>
+		fmt::fatalf("e2e: resolved target has no path separator: {}", target);
+	};
+	const parent = strings::sub(path, 0, last_slash);
+	const parent_slash = match (strings::rindex(parent, '/')) {
+	case let i: size =>
+		yield i;
+	case void =>
+		fmt::fatalf("e2e: resolved target has only one path segment: {}", target);
+	};
+	const module_seg = strings::sub(parent, parent_slash + 1, strings::end);
+	assert(
+		module_seg == "strings",
+		"resolved target's parent directory must be the `strings` module"
+	);
+
+	// The resolver promises the file actually exists on disk - a
+	// regression that produced a stale or made-up path would break
+	// Ctrl-click navigation in the editor.
+	const exists = match (os::access(path, os::amode::F_OK)) {
+	case let b: bool =>
+		yield b;
+	case =>
+		yield false;
+	};
+	assert(exists, "resolved target must point at a real file on disk");
+
+	// The `range` from the bare link must be preserved by resolve -
+	// it positions the underline in the editor; a regression that
+	// dropped or mangled it would visually break Ctrl-click.
+	const range_after = *(json::get(&result, "range") as *json::value);
+	const before_dump = json::dumpstr(range_v);
+	defer free(before_dump);
+	const after_dump = json::dumpstr(range_after);
+	defer free(after_dump);
+	assert(
+		before_dump == after_dump,
+		"resolved documentLink must preserve the original range"
 	);
 };

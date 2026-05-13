@@ -50,6 +50,11 @@ export type workspace_index_job = struct {
 	done_msg_prefix: str,
 	// Whether the begin/report progress notifications have been sent.
 	begin_sent: bool,
+	// Set when a workDoneProgress/cancel arrived for this token. We
+	// stop processing further files but keep `cursor` at the real
+	// count so the end notification reflects how much actually got
+	// indexed.
+	cancelled: bool,
 };
 
 // Enqueues an index job covering every `*.ha` file reachable under any
@@ -117,6 +122,7 @@ export fn start_index_job(
 			title = title,
 			done_msg_prefix = done_msg_prefix,
 			begin_sent = false,
+			cancelled = false,
 		})!;
 	append(s.pending_index_jobs, job)!;
 	drain_index_job_inline(s, INDEX_INLINE_BATCHES);
@@ -128,7 +134,7 @@ export fn drain_index_job(s: *server) void = {
 	if (len(s.pending_index_jobs) == 0) return;
 	const job = s.pending_index_jobs[0];
 	drain_one_batch(s, job);
-	if (job.cursor >= len(job.paths)) {
+	if (job.cancelled || job.cursor >= len(job.paths)) {
 		finish_head_job(s);
 	};
 };
@@ -138,7 +144,7 @@ fn drain_index_job_inline(s: *server, max_batches: size) void = {
 		if (len(s.pending_index_jobs) == 0) return;
 		const job = s.pending_index_jobs[0];
 		drain_one_batch(s, job);
-		if (job.cursor >= len(job.paths)) {
+		if (job.cancelled || job.cursor >= len(job.paths)) {
 			finish_head_job(s);
 		};
 	};
@@ -150,7 +156,7 @@ fn drain_one_batch(s: *server, job: *workspace_index_job) void = {
 		job.begin_sent = true;
 	};
 	if (progress_is_cancelled(s, job.token)) {
-		job.cursor = len(job.paths);
+		job.cancelled = true;
 		return;
 	};
 	const limit = if (job.cursor + INDEX_BATCH_SIZE > len(job.paths))
@@ -171,7 +177,9 @@ fn drain_one_batch(s: *server, job: *workspace_index_job) void = {
 fn finish_head_job(s: *server) void = {
 	if (len(s.pending_index_jobs) == 0) return;
 	const job = s.pending_index_jobs[0];
-	const msg = fmt::asprintf("{} {} file(s)", job.done_msg_prefix, job.cursor)!;
+	const suffix = if (job.cancelled) " (cancelled)" else "";
+	const msg =
+		fmt::asprintf("{} {} file(s){}", job.done_msg_prefix, job.cursor, suffix)!;
 	defer free(msg);
 	if (job.begin_sent) {
 		progress_end(s, job.token, msg);
