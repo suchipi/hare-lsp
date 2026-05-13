@@ -74,16 +74,22 @@ use strings;
 	const args =
 		*(json::get(&command_obj, "arguments") as *json::value) as []json::value;
 	assert(len(args) == 2, "showReferences must receive [uri, position]");
+	const arg_uri = args[0] as str;
+	assert(
+		arg_uri == "file:///cl_anchor.ha",
+		"showReferences must target the lens's own document"
+	);
 	const pos_obj = args[1] as json::object;
 	const line = *(json::get(&pos_obj, "line") as *json::value) as f64;
 	const character = *(json::get(&pos_obj, "character") as *json::value) as f64;
 	// "export fn main()" — `main` begins at column 10 (UTF-16 chars):
-	// "export fn " is 10 characters. We accept any column past the `e`
-	// of `export` to catch the regression where the position was at 0.
+	// "export fn " is 10 characters. Anchor must land exactly on
+	// `main` so the references search is for the identifier and not
+	// for the leading `export` keyword (the original regression).
 	assert(line == 0.0, "main is declared on line 0");
 	assert(
-		character > 0.0,
-		"position must point at the identifier, not the start of `export`"
+		character == 10.0,
+		"position must point at the start of `main`, not at the `e` of `export`"
 	);
 };
 

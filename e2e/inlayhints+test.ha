@@ -14,17 +14,16 @@ use strings;
 	defer finish_session(&s);
 	do_init(&s);
 
-	// `let x = 1` lacks an explicit type; the server should emit a
-	// type-inference hint after the binding name.
-	const sample = `export fn main() void = {
-	let x = 1;
-	let _ = x;
-};
+	// Top-level `let g_x = 1` lacks an explicit type; the server
+	// should emit a type-inference hint after the binding name. We use
+	// a top-level let (rather than a body-local one) because the inlay
+	// scanner currently only walks subunit decls.
+	const sample = `let g_x = 1;
 `;
 	open_doc(&s, "file:///ih.ha", sample);
 
 	const req =
-		`{"jsonrpc":"2.0","id":2200,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///ih.ha"},"range":{"start":{"line":0,"character":0},"end":{"line":4,"character":0}}}}`;
+		`{"jsonrpc":"2.0","id":2200,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///ih.ha"},"range":{"start":{"line":0,"character":0},"end":{"line":2,"character":0}}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 2200.0);
@@ -34,20 +33,26 @@ use strings;
 	defer json::finish(v);
 	const obj = v as json::object;
 	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
-	// We accept the empty array — inferred-type hints inside function
-	// bodies aren't yet implemented for all cases. The wire path must
-	// return an array with valid hint shape if any.
+	// One hint: ": int" after `g_x`. A regression that emits nothing
+	// would render the editor with no type annotation for an obvious
+	// integer literal.
+	let saw_int_hint = false;
 	for (let i = 0z; i < len(arr); i += 1) {
 		const h = arr[i] as json::object;
-		assert(
-			json::get(&h, "position") is *json::value,
-			"each hint must include position"
-		);
-		assert(
-			json::get(&h, "label") is *json::value,
-			"each hint must include label"
-		);
+		const pos = *(json::get(&h, "position") as *json::value) as json::object;
+		const label = *(json::get(&h, "label") as *json::value) as str;
+		const line = *(json::get(&pos, "line") as *json::value) as f64;
+		const ch = *(json::get(&pos, "character") as *json::value) as f64;
+		// The hint anchors right after `g_x` (cols 0-3 then "let " = 4
+		// chars; name is 3 chars → insertion at column 7).
+		if (line == 0.0 && ch == 7.0 && strings::contains(label, "int")) {
+			saw_int_hint = true;
+		};
 	};
+	assert(
+		saw_int_hint,
+		"inferred-type hint for `let g_x = 1` must label it as int"
+	);
 };
 
 // With `hare.inlayHints.inferredTypesMaxDepth` >= 2, the hint for
@@ -155,8 +160,14 @@ use strings;
 		json::get(&obj, "error") is void,
 		"inlayHint/resolve passthrough must not error"
 	);
-	assert(
-		json::get(&obj, "result") is *json::value,
-		"inlayHint/resolve must include a result"
-	);
+	// Resolve is a passthrough — verify both required fields round-tripped
+	// rather than just confirming the field exists. A regression that
+	// returned null or `{}` would slip past a presence-only check.
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const label = *(json::get(&result, "label") as *json::value) as str;
+	assert(label == "x", "passthrough must preserve label");
+	const pos = *(json::get(&result, "position") as *json::value) as json::object;
+	const line = *(json::get(&pos, "line") as *json::value) as f64;
+	const ch = *(json::get(&pos, "character") as *json::value) as f64;
+	assert(line == 0.0 && ch == 0.0, "passthrough must preserve position");
 };
