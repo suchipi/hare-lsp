@@ -256,7 +256,9 @@
     "typecheck": "tsc --noEmit -p ./",
     "bundle": "node esbuild.js",
     "bundle:watch": "node esbuild.js --watch",
-    "package": "npm run typecheck && npm run bundle -- --production && vsce package --allow-missing-repository"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "npm run typecheck && npm run test && npm run bundle -- --production && vsce package --allow-missing-repository"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -266,6 +268,7 @@
     "@types/vscode": "^1.93.0",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
   }
 }
