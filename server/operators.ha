@@ -40,16 +40,24 @@ use strings;
 // Tries to send a hover response for an operator under the cursor.
 // Returns true if a response was sent.
 export fn try_send_operator_hover(
-	s: *server, r: lsp::request, doc: *document, data: []u8, off: size,
+	s: *server,
+	r: lsp::request,
+	doc: *document,
+	data: []u8,
+	off: size,
 ) bool = {
 	const found = match (operator_at(data, off)) {
-	case let v: (size, size, str) => yield v;
-	case void => return false;
+	case let v: (size, size, str) =>
+		yield v;
+	case void =>
+		return false;
 	};
 	const role = classify_op_role(data, found.0, found.2);
 	const (sig, docs) = match (lookup_operator(found.2, role)) {
-	case let v: (str, str) => yield v;
-	case void => return false;
+	case let v: (str, str) =>
+		yield v;
+	case void =>
+		return false;
 	};
 	defer free(sig);
 	defer free(docs);
@@ -64,10 +72,10 @@ export fn try_send_operator_hover(
 	json::put(&result, "contents", contents)!;
 
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(data, doc.buf.line_index,
-		enc, found.0);
-	const end_pos = analysis::byte_to_position(data, doc.buf.line_index,
-		enc, found.1);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		found.0);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		found.1);
 	let range = json::newobject();
 	let s_obj = json::newobject();
 	json::put(&s_obj, "line", start_pos.line: f64)!;
@@ -96,8 +104,7 @@ fn operator_at(data: []u8, off: size) ((size, size, str) | void) = {
 		// surface the prior token's tooltip.
 		if (scan < len(data)) {
 			const b = data[scan];
-			if (b != ' ': u8 && b != '\t': u8
-					&& b != '\n': u8 && b != '\r': u8) {
+			if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) {
 				return void;
 			};
 		};
@@ -140,11 +147,30 @@ fn operator_at(data: []u8, off: size) ((size, size, str) | void) = {
 
 fn is_op_byte(b: u8) bool = {
 	switch (b) {
-	case '+': u8, '-': u8, '*': u8, '/': u8, '%': u8,
-		'&': u8, '|': u8, '^': u8, '~': u8, '!': u8,
-		'<': u8, '>': u8, '=': u8, '?': u8, '.': u8,
-		'{': u8, '}': u8, ':': u8, '[': u8, ']': u8,
-		'(': u8, ')': u8, ';': u8, ',': u8 =>
+	case '+': u8,
+	'-': u8,
+	'*': u8,
+	'/': u8,
+	'%': u8,
+	'&': u8,
+	'|': u8,
+	'^': u8,
+	'~': u8,
+	'!': u8,
+	'<': u8,
+	'>': u8,
+	'=': u8,
+	'?': u8,
+	'.': u8,
+	'{': u8,
+	'}': u8,
+	':': u8,
+	'[': u8,
+	']': u8,
+	'(': u8,
+	')': u8,
+	';': u8,
+	',': u8 =>
 		return true;
 	case =>
 		return false;
@@ -163,26 +189,16 @@ type op_role = enum {
 	POSTFIX,
 	TYPE,
 	LABEL,
-
-	// `..` contexts
 	SLICE,
 	FOR_EACH_VALUE,
-
-	// `=>` contexts
 	CASE_ARROW,
 	FOR_ITERATOR,
-
-	// `...` contexts
 	VARIADIC_PARAM,
 	SPREAD,
 	ARRAY_EXPAND,
 	STRUCT_AUTOFILL,
-
-	// `.` contexts
 	FIELD_ACCESS,
 	TUPLE_INDEX,
-
-	// `{` / `}` contexts
 	FUNC_BODY,
 	COMPOUND_BLOCK,
 	STRUCT_BODY,
@@ -191,14 +207,10 @@ type op_role = enum {
 	MATCH_BODY,
 	SWITCH_BODY,
 	STRUCT_LITERAL,
-
-	// `[` / `]` contexts
 	INDEX_SLICE,
 	ARRAY_TYPE,
 	SLICE_TYPE,
 	ARRAY_LITERAL,
-
-	// `(` / `)` contexts
 	IF_HEADER,
 	FOR_HEADER,
 	MATCH_HEADER,
@@ -207,10 +219,24 @@ type op_role = enum {
 	PARAM_LIST,
 	TYPE_PARENS,
 	EXPR_PARENS,
-
-	// `;` contexts
 	TERMINATOR,
 };
+
+// `..` contexts
+
+// `=>` contexts
+
+// `...` contexts
+
+// `.` contexts
+
+// `{` / `}` contexts
+
+// `[` / `]` contexts
+
+// `(` / `)` contexts
+
+// `;` contexts
 
 // Returns (sig, docs) for the operator `name` in the given `role`.
 // Tries an exact (name, role) match first; falls back to (name, ANY).
@@ -219,14 +245,12 @@ fn lookup_operator(name: str, role: op_role) ((str, str) | void) = {
 	for (let i = 0z; i < len(operators); i += 1) {
 		if (operators[i].name != name) continue;
 		if (operators[i].role != role) continue;
-		return (strings::dup(operators[i].sig)!,
-			strings::dup(operators[i].docs)!);
+		return (strings::dup(operators[i].sig)!, strings::dup(operators[i].docs)!);
 	};
 	for (let i = 0z; i < len(operators); i += 1) {
 		if (operators[i].name != name) continue;
 		if (operators[i].role == op_role::ANY) {
-			return (strings::dup(operators[i].sig)!,
-				strings::dup(operators[i].docs)!);
+			return (strings::dup(operators[i].sig)!, strings::dup(operators[i].docs)!);
 		};
 	};
 	return void;
@@ -246,25 +270,25 @@ fn operator_known(name: str) bool = {
 fn classify_op_role(data: []u8, op_start: size, name: str) op_role = {
 	// `!`: postfix when it follows a value, prefix otherwise.
 	if (name == "!") {
-		return if (is_value_end_before(data, op_start))
-			op_role::POSTFIX else op_role::PREFIX;
+		return if (is_value_end_before(data,
+					op_start)) op_role::POSTFIX else op_role::PREFIX;
 	};
 	// `&`, `-`: binary when after a value, prefix otherwise.
 	if (name == "&" || name == "-") {
-		return if (is_value_end_before(data, op_start))
-			op_role::BINARY else op_role::PREFIX;
+		return if (is_value_end_before(data,
+					op_start)) op_role::BINARY else op_role::PREFIX;
 	};
 	// `*`: binary after a value; otherwise pointer-to in a type
 	// position, dereference in an expression position.
 	if (name == "*") {
 		if (is_value_end_before(data, op_start)) return op_role::BINARY;
-		return if (is_type_position(data, op_start))
-			op_role::TYPE else op_role::PREFIX;
+		return if (is_type_position(data,
+					op_start)) op_role::TYPE else op_role::PREFIX;
 	};
 	// `|`: tagged union member in a type position, bitwise OR otherwise.
 	if (name == "|") {
-		return if (is_type_position(data, op_start))
-			op_role::TYPE else op_role::BINARY;
+		return if (is_type_position(data,
+					op_start)) op_role::TYPE else op_role::BINARY;
 	};
 	// `:`: label prefix, cast expression, or type annotation.
 	if (name == ":") return classify_colon_role(data, op_start);
@@ -315,7 +339,8 @@ fn enclosing_bracket(data: []u8, target: size) (bracket_info | void) = {
 		const b = data[i];
 		if (b == '(': u8 || b == '[': u8 || b == '{': u8) {
 			append(stack, bracket_info {
-				pos = i, kind = b,
+				pos = i,
+				kind = b,
 			})!;
 		} else if (b == ')': u8 || b == ']': u8 || b == '}': u8) {
 			if (len(stack) > 0) {
@@ -331,14 +356,11 @@ fn enclosing_bracket(data: []u8, target: size) (bracket_info | void) = {
 // True if the byte/word immediately preceding `pos` (skipping
 // whitespace) is the identifier `keyword`, with a non-ident byte
 // before it.
-fn token_preceded_by_keyword(
-	data: []u8, pos: size, keyword: str,
-) bool = {
+fn token_preceded_by_keyword(data: []u8, pos: size, keyword: str) bool = {
 	let i = pos;
 	for (i > 0; i -= 1) {
 		const b = data[i - 1];
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8
-				&& b != '\r': u8) break;
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
 	};
 	if (i < len(keyword)) return false;
 	if (strings::fromutf8(data[i - len(keyword)..i])! != keyword) {
@@ -354,8 +376,7 @@ fn classify_double_dot_role(data: []u8, op_start: size) op_role = {
 	match (enclosing_bracket(data, op_start)) {
 	case let b: bracket_info =>
 		if (b.kind == '[': u8) return op_role::SLICE;
-		if (b.kind == '(': u8
-				&& token_preceded_by_keyword(data, b.pos, "for")) {
+		if (b.kind == '(': u8 && token_preceded_by_keyword(data, b.pos, "for")) {
 			return op_role::FOR_EACH_VALUE;
 		};
 	case void => void;
@@ -368,8 +389,7 @@ fn classify_double_dot_role(data: []u8, op_start: size) op_role = {
 fn classify_arrow_role(data: []u8, op_start: size) op_role = {
 	match (enclosing_bracket(data, op_start)) {
 	case let b: bracket_info =>
-		if (b.kind == '(': u8
-				&& token_preceded_by_keyword(data, b.pos, "for")) {
+		if (b.kind == '(': u8 && token_preceded_by_keyword(data, b.pos, "for")) {
 			return op_role::FOR_ITERATOR;
 		};
 	case void => void;
@@ -434,8 +454,7 @@ fn classify_lbrace_role(data: []u8, brace_pos: size) op_role = {
 	for (i > 0) {
 		i -= 1;
 		const b = data[i];
-		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8
-				|| b == '\r': u8) continue;
+		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8) continue;
 		if (b == '=': u8) {
 			if (i > 0 && data[i - 1] == '=': u8) {
 				return op_role::COMPOUND_BLOCK;
@@ -455,22 +474,22 @@ fn classify_lbrace_role(data: []u8, brace_pos: size) op_role = {
 			};
 			const word = strings::fromutf8(data[start..end])!;
 			switch (word) {
-			case "struct" => return op_role::STRUCT_BODY;
-			case "union" => return op_role::UNION_BODY;
-			case "enum" => return op_role::ENUM_BODY;
+			case "struct" =>
+				return op_role::STRUCT_BODY;
+			case "union" =>
+				return op_role::UNION_BODY;
+			case "enum" =>
+				return op_role::ENUM_BODY;
 			case =>
 				let j = start;
 				for (j > 0; j -= 1) {
 					const bb = data[j - 1];
-					if (bb != ' ': u8 && bb != '\t': u8
-							&& bb != '\n': u8
-							&& bb != '\r': u8) break;
+					if (bb != ' ': u8 && bb != '\t': u8 && bb != '\n': u8 &&
+							bb != '\r': u8) break;
 				};
 				if (j >= 4) {
-					const prev_word = strings::fromutf8(
-						data[j - 4..j])!;
-					const is_at_start = j == 4
-						|| !is_ident_byte(data[j - 5]);
+					const prev_word = strings::fromutf8(data[j - 4..j])!;
+					const is_at_start = j == 4 || !is_ident_byte(data[j - 5]);
 					if (prev_word == "enum" && is_at_start) {
 						return op_role::ENUM_BODY;
 					};
@@ -505,8 +524,7 @@ fn classify_lbrace_after_rparen(data: []u8, rparen_pos: size) op_role = {
 	let j = i;
 	for (j > 0; j -= 1) {
 		const b = data[j - 1];
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8
-				&& b != '\r': u8) break;
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
 	};
 	if (j == 0 || !is_ident_byte(data[j - 1])) return op_role::COMPOUND_BLOCK;
 	let end = j;
@@ -516,8 +534,10 @@ fn classify_lbrace_after_rparen(data: []u8, rparen_pos: size) op_role = {
 	};
 	const word = strings::fromutf8(data[start..end])!;
 	switch (word) {
-	case "match" => return op_role::MATCH_BODY;
-	case "switch" => return op_role::SWITCH_BODY;
+	case "match" =>
+		return op_role::MATCH_BODY;
+	case "switch" =>
+		return op_role::SWITCH_BODY;
 	case =>
 		return op_role::COMPOUND_BLOCK;
 	};
@@ -569,8 +589,8 @@ fn is_empty_bracket_pair(data: []u8, bracket_pos: size) bool = {
 	for (i < len(data); i += 1) {
 		const b = data[i];
 		if (b == ']': u8) return true;
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8
-				&& b != '\r': u8) return false;
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 &&
+				b != '\r': u8) return false;
 	};
 	return false;
 };
@@ -604,8 +624,7 @@ fn classify_lparen_role(data: []u8, paren_pos: size) op_role = {
 	let i = paren_pos;
 	for (i > 0; i -= 1) {
 		const b = data[i - 1];
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8
-				&& b != '\r': u8) break;
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
 	};
 	if (i == 0) {
 		// Start of file, weird; treat as expression parens.
@@ -620,25 +639,27 @@ fn classify_lparen_role(data: []u8, paren_pos: size) op_role = {
 		};
 		const word = strings::fromutf8(data[start..end])!;
 		switch (word) {
-		case "if" => return op_role::IF_HEADER;
-		case "for" => return op_role::FOR_HEADER;
-		case "match" => return op_role::MATCH_HEADER;
-		case "switch" => return op_role::SWITCH_HEADER;
+		case "if" =>
+			return op_role::IF_HEADER;
+		case "for" =>
+			return op_role::FOR_HEADER;
+		case "match" =>
+			return op_role::MATCH_HEADER;
+		case "switch" =>
+			return op_role::SWITCH_HEADER;
+		// Identifier - distinguish CALL from PARAM_LIST by
+		// looking for a `fn` keyword two tokens back.
+
 		case =>
-			// Identifier - distinguish CALL from PARAM_LIST by
-			// looking for a `fn` keyword two tokens back.
 			let j = start;
 			for (j > 0; j -= 1) {
 				const bb = data[j - 1];
-				if (bb != ' ': u8 && bb != '\t': u8
-						&& bb != '\n': u8
-						&& bb != '\r': u8) break;
+				if (bb != ' ': u8 && bb != '\t': u8 && bb != '\n': u8 &&
+						bb != '\r': u8) break;
 			};
 			if (j >= 2) {
-				const prev_word = strings::fromutf8(
-					data[j - 2..j])!;
-				const at_start = j == 2
-					|| !is_ident_byte(data[j - 3]);
+				const prev_word = strings::fromutf8(data[j - 2..j])!;
+				const at_start = j == 2 || !is_ident_byte(data[j - 3]);
 				if (prev_word == "fn" && at_start) {
 					return op_role::PARAM_LIST;
 				};
@@ -676,8 +697,7 @@ fn classify_rparen_role(data: []u8, rparen_pos: size) op_role = {
 fn classify_semicolon_role(data: []u8, semi_pos: size) op_role = {
 	match (enclosing_bracket(data, semi_pos)) {
 	case let b: bracket_info =>
-		if (b.kind == '(': u8
-				&& token_preceded_by_keyword(data, b.pos, "for")) {
+		if (b.kind == '(': u8 && token_preceded_by_keyword(data, b.pos, "for")) {
 			return op_role::FOR_HEADER;
 		};
 	case void => void;
@@ -734,8 +754,7 @@ fn is_label_colon(data: []u8, op_start: size) bool = {
 	for (i > 0) {
 		i -= 1;
 		const b = data[i];
-		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8
-				|| b == '\r': u8) continue;
+		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8) continue;
 		if (b == '{': u8) return true;
 		if (!is_ident_byte(b)) return false;
 		let end = i + 1;
@@ -745,8 +764,7 @@ fn is_label_colon(data: []u8, op_start: size) bool = {
 		};
 		const word = strings::fromutf8(data[start..end])!;
 		switch (word) {
-		case "for", "match", "switch",
-			"break", "continue", "yield" =>
+		case "for", "match", "switch", "break", "continue", "yield" =>
 			return true;
 		case =>
 			return false;
@@ -769,8 +787,7 @@ fn is_complex_expr_end_before(data: []u8, op_start: size) bool = {
 		switch (b) {
 		case ')': u8, ']': u8, '}': u8, '?': u8, '!': u8 =>
 			return true;
-		case =>
-			void;
+		case => void;
 		};
 		if (b >= '0': u8 && b <= '9': u8) return true;
 		return false;
@@ -795,8 +812,7 @@ fn classify_colon_by_ident_context(data: []u8, op_start: size) op_role = {
 	};
 	for (i > 0; i -= 1) {
 		const b = data[i - 1];
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8
-				&& b != '\r': u8) break;
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
 	};
 	if (i == 0) return op_role::TYPE;
 	const b = data[i - 1];
@@ -804,13 +820,20 @@ fn classify_colon_by_ident_context(data: []u8, op_start: size) op_role = {
 	case '=': u8 =>
 		if (i >= 2 && data[i - 2] == '=': u8) return op_role::TYPE;
 		return op_role::BINARY;
-	case '+': u8, '-': u8, '*': u8, '/': u8, '%': u8,
-		'^': u8, '~': u8, '<': u8, '>': u8, '?': u8 =>
+	case '+': u8,
+	'-': u8,
+	'*': u8,
+	'/': u8,
+	'%': u8,
+	'^': u8,
+	'~': u8,
+	'<': u8,
+	'>': u8,
+	'?': u8 =>
 		return op_role::BINARY;
 	case '(': u8, ',': u8, '{': u8 =>
 		return op_role::TYPE;
-	case =>
-		void;
+	case => void;
 	};
 	if (!is_ident_byte(b)) return op_role::TYPE;
 	let kw_end = i;
@@ -846,8 +869,7 @@ fn is_value_end_before(data: []u8, op_start: size) bool = {
 			for (word_start > 0; word_start -= 1) {
 				if (!is_ident_byte(data[word_start - 1])) break;
 			};
-			const word = strings::fromutf8(
-				data[word_start..word_end])!;
+			const word = strings::fromutf8(data[word_start..word_end])!;
 			if (is_keyword_not_value(word)) return false;
 		};
 		return true;
@@ -860,8 +882,7 @@ fn is_value_end_before(data: []u8, op_start: size) bool = {
 // position — i.e. the previous token does NOT end a value expression.
 fn is_keyword_not_value(word: str) bool = {
 	switch (word) {
-	case "return", "yield", "defer", "else", "case",
-		"as", "is", "nullable" =>
+	case "return", "yield", "defer", "else", "case", "as", "is", "nullable" =>
 		return true;
 	case =>
 		return false;
@@ -890,8 +911,10 @@ fn is_value_end_byte(b: u8) bool = {
 fn is_type_position(data: []u8, op_start: size) bool = {
 	if (prev_token_is_type_marker(data, op_start)) return true;
 	const lp = match (enclosing_paren_pos(data, op_start)) {
-	case let p: size => yield p;
-	case void => return false;
+	case let p: size =>
+		yield p;
+	case void =>
+		return false;
 	};
 	return prev_token_is_type_marker(data, lp);
 };
@@ -903,12 +926,14 @@ fn prev_token_is_type_marker(data: []u8, pos: size) bool = {
 	for (i > 0) {
 		i -= 1;
 		const b = data[i];
-		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8
-				|| b == '\r': u8) continue;
+		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8) continue;
 		switch (b) {
-		case ':': u8 => return true;
-		case '*': u8 => return true;
-		case ']': u8 => return true;
+		case ':': u8 =>
+			return true;
+		case '*': u8 =>
+			return true;
+		case ']': u8 =>
+			return true;
 		case '=': u8 =>
 			return is_type_alias_eq(data, i);
 		case =>
@@ -942,16 +967,14 @@ fn is_type_alias_eq(data: []u8, eq_pos: size) bool = {
 	let i = eq_pos;
 	for (i > 0; i -= 1) {
 		const b = data[i - 1];
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8
-				&& b != '\r': u8) break;
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
 	};
 	for (i > 0; i -= 1) {
 		if (!is_ident_byte(data[i - 1])) break;
 	};
 	for (i > 0; i -= 1) {
 		const b = data[i - 1];
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8
-				&& b != '\r': u8) break;
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
 	};
 	if (i < 4) return false;
 	if (strings::fromutf8(data[i - 4..i])! != "type") return false;
@@ -996,8 +1019,6 @@ type operator_entry = struct {
 };
 
 const operators: [_]operator_entry = [
-	// --- logical binary ----------------------------------------
-
 	operator_entry {
 		name = "||",
 		role = op_role::ANY,
@@ -1026,9 +1047,6 @@ const operators: [_]operator_entry = [
 			"Short-circuits: if `a` is `false`, `b` is not "
 			"evaluated. Yields `bool`. Left-associative.",
 	},
-
-	// --- equality / ordering -----------------------------------
-
 	operator_entry {
 		name = "==",
 		role = op_role::ANY,
@@ -1080,9 +1098,6 @@ const operators: [_]operator_entry = [
 			"**Operator.** Greater-than-or-equal ordering. "
 			"Yields `bool`. Left-associative.",
 	},
-
-	// --- bitwise -----------------------------------------------
-
 	operator_entry {
 		name = "|",
 		role = op_role::BINARY,
@@ -1132,9 +1147,6 @@ const operators: [_]operator_entry = [
 			"lvalue and yields a pointer (`*T`) to it. Binds "
 			"tighter than any binary operator.",
 	},
-
-	// --- shift -------------------------------------------------
-
 	operator_entry {
 		name = "<<",
 		role = op_role::ANY,
@@ -1156,9 +1168,6 @@ const operators: [_]operator_entry = [
 			"`a` it is arithmetic (preserves the sign bit). "
 			"Left-associative.",
 	},
-
-	// --- additive ----------------------------------------------
-
 	operator_entry {
 		name = "+",
 		role = op_role::ANY,
@@ -1185,9 +1194,6 @@ const operators: [_]operator_entry = [
 			"negating the minimum representable value is "
 			"undefined (the result is not representable).",
 	},
-
-	// --- multiplicative ----------------------------------------
-
 	operator_entry {
 		name = "*",
 		role = op_role::BINARY,
@@ -1237,9 +1243,6 @@ const operators: [_]operator_entry = [
 			"floating-point operands; use a library routine "
 			"such as `math::fmod` for that. Left-associative.",
 	},
-
-	// --- unary prefix ------------------------------------------
-
 	operator_entry {
 		name = "!",
 		role = op_role::PREFIX,
@@ -1257,9 +1260,6 @@ const operators: [_]operator_entry = [
 			"integer operands. Binds tighter than any binary "
 			"operator.",
 	},
-
-	// --- postfix ------------------------------------------------
-
 	operator_entry {
 		name = "!",
 		role = op_role::POSTFIX,
@@ -1284,9 +1284,6 @@ const operators: [_]operator_entry = [
 			"yields the non-error component. Binds tighter "
 			"than any prefix or binary operator.",
 	},
-
-	// --- assignment --------------------------------------------
-
 	operator_entry {
 		name = "=",
 		role = op_role::ANY,
@@ -1416,9 +1413,6 @@ const operators: [_]operator_entry = [
 			"shift: `a >>= b` is equivalent to `a = a >> b` "
 			"with `a` evaluated once. Yields `void`.",
 	},
-
-	// --- syntactic markers -------------------------------------
-
 	operator_entry {
 		name = "..",
 		role = op_role::SLICE,
@@ -1506,9 +1500,6 @@ const operators: [_]operator_entry = [
 			"loop body. The loop ends when the call yields "
 			"`done`.",
 	},
-
-	// --- punctuation -------------------------------------------
-
 	operator_entry {
 		name = ".",
 		role = op_role::FIELD_ACCESS,
@@ -2098,3 +2089,24 @@ const operators: [_]operator_entry = [
 			"construct.",
 	},
 ];
+// --- logical binary ----------------------------------------
+
+// --- equality / ordering -----------------------------------
+
+// --- bitwise -----------------------------------------------
+
+// --- shift -------------------------------------------------
+
+// --- additive ----------------------------------------------
+
+// --- multiplicative ----------------------------------------
+
+// --- unary prefix ------------------------------------------
+
+// --- postfix ------------------------------------------------
+
+// --- assignment --------------------------------------------
+
+// --- syntactic markers -------------------------------------
+
+// --- punctuation -------------------------------------------

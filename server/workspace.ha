@@ -60,8 +60,7 @@ export fn workspace_root_for_path(s: *server, file_path: str) str = {
 		};
 		const prefix = strings::concat(dir, "/")!;
 		defer free(prefix);
-		const matched = strings::hasprefix(file_path, prefix)
-			|| file_path == dir;
+		const matched = strings::hasprefix(file_path, prefix) || file_path == dir;
 		if (matched && len(dir) > len(best)) {
 			free(best);
 			best = dir;
