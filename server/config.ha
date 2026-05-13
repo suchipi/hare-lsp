@@ -49,16 +49,13 @@ export type config = struct {
 	inlay_hints_inferred_types: bool,
 	// Max recursion depth for inferred-type hints. 0 disables anything
 	// beyond literals + declared types; higher values follow function-
-	// call return types, identifier bindings, and type aliases. The
-	// server clamps the effective value at [[INLAY_DEPTH_HARD_MAX]] to
-	// guard against pathological lookups.
+	// call return types, identifier bindings, and type aliases. Alias
+	// chains are also cycle-guarded by visited-set tracking in
+	// [[follow_alias_chain]], so an unbounded value won't loop.
 	inlay_hints_inferred_types_max_depth: u32,
 	// Configurable resource caps. See [[limits]] / [[default_limits]].
 	limits: limits,
 };
-
-// Absolute ceiling on `inlay_hints_inferred_types_max_depth`.
-export def INLAY_DEPTH_HARD_MAX: u32 = 16;
 
 // Indent style for formatter output.
 export type indent_style = enum {
@@ -80,7 +77,7 @@ export fn default_config() config = config {
 	format_insert_final_newline = true,
 	inlay_hints_parameter_names = true,
 	inlay_hints_inferred_types = true,
-	inlay_hints_inferred_types_max_depth = 3,
+	inlay_hints_inferred_types_max_depth = 10,
 	limits = default_limits(),
 };
 
@@ -431,11 +428,7 @@ export fn apply_settings(s: *server, v: json::value) void = {
 				match (*ip) {
 				case let f: f64 =>
 					if (f >= 0.0) {
-						let n: u32 = f: u32;
-						if (n > INLAY_DEPTH_HARD_MAX) {
-							n = INLAY_DEPTH_HARD_MAX;
-						};
-						s.config.inlay_hints_inferred_types_max_depth = n;
+						s.config.inlay_hints_inferred_types_max_depth = f: u32;
 					};
 				case => void;
 				};

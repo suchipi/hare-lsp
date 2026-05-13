@@ -53,7 +53,7 @@ use strings;
 // With `hare.inlayHints.inferredTypesMaxDepth` >= 2, the hint for
 // `let x = foo()` where foo returns an aliased type should unwrap the
 // alias chain instead of stopping at the alias name. Default depth is
-// 3, so we don't need to set it explicitly.
+// 10, so we don't need to set it explicitly.
 @test fn e2e_inlay_hint_follows_alias_chain() void = {
 	// Fixture: a workspace folder with `type my_alias = int; fn foo()
 	// my_alias = 0;` so the call return type and the alias are both

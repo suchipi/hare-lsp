@@ -3,16 +3,23 @@
 //
 // References, prepareRename, and rename.
 //
-// Two-tier strategy:
+// Discovery is a textual workspace scan: scan_text_for_ident_offsets_in_range
+// finds every ident-token whose text matches the target. Comments, strings,
+// char literals, and raw strings are skipped via token_skip_noncode so prose
+// matches don't produce false positives. Hits are then filtered:
+//
 //   - If the cursor resolves to a local binding (let / const / def / for /
 //     match / function parameter), the search is bounded to that binding's
 //     lexical scope via scope_local_binding. Shadowing works correctly: a
 //     `let foo` inside one function won't pull in a same-named global.
-//   - For top-level decls the workspace is scanned textually for matching
-//     ident tokens. Comments, strings, char literals, and raw strings are
-//     skipped via token_skip_noncode so prose matches don't produce false
-//     positives. Two unrelated top-level idents with the same name in
-//     different modules are still indistinguishable; see the "Known
+//   - For top-level decls each hit is re-resolved against its own file's
+//     `use` list + workspace index via hit_resolves_to (see
+//     reference_filter.ha), so unrelated decls sharing a short name in
+//     different modules are kept distinct.
+//   - Fallback: when the cursor's own symbol can't be resolved against the
+//     workspace index (expected_entry_for_cursor returns void), the filter
+//     is skipped and every textual hit is returned. A rename in that mode
+//     can rewrite same-named decls in unrelated modules; see the "Known
 //     limitations" sections of README.md and docs/features.md.
 
 use analysis;

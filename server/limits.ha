@@ -12,9 +12,8 @@
 // something has gone wrong.
 //
 // Caps are configurable at runtime via `hare.limits.*` settings (see
-// [[apply_settings]]); the analysis-side
-// `analysis::MAX_INDEX_ENTRIES` is a hard ceiling the configurable
-// value cannot exceed.
+// [[apply_settings]]); whatever the user sets is what the server
+// enforces, with no additional non-configurable ceiling.
 // Runtime-configurable resource caps. Populated from `hare.limits.*`
 // settings; defaults via [[default_limits]].
 export type limits = struct {
