@@ -128,7 +128,10 @@ use strings;
 
 	assert(read(&r) is bad_header);
 	const captured = last_header_bytes(&r);
-	assert(bytes::equal(captured, strings::toutf8(input)));
+	// diag_header captures lines as <line>\n (CR stripped), so build
+	// the expected dump by replacing each \r\n with \n.
+	const expected = "Content-Type: foo\nX-Trace: deadbeef\n\n";
+	assert(bytes::equal(captured, strings::toutf8(expected)));
 };
 
 @test fn last_header_bytes_resets_between_calls() void = {
@@ -143,13 +146,50 @@ use strings;
 
 	const body = read(&r) as []u8;
 	assert(bytes::equal(body, strings::toutf8("{}")));
-	// On success the captured block is the headers we just consumed.
+	// On success the captured block is the headers we just consumed,
+	// each as <line>\n (CR stripped).
 	assert(bytes::equal(last_header_bytes(&r),
-		strings::toutf8("Content-Length: 2\r\n\r\n")));
+		strings::toutf8("Content-Length: 2\n\n")));
 
 	assert(read(&r) is bad_header);
 	assert(bytes::equal(last_header_bytes(&r),
-		strings::toutf8("Content-Type: foo\r\n\r\n")));
+		strings::toutf8("Content-Type: foo\n\n")));
+};
+
+// Reading two LSP messages back to back where the first message's body
+// ends exactly at the boundary between bytes that the bufio scanner
+// will fetch in separate underlying reads. This guards against a class
+// of stdlib bug where reading multi-byte delimiters could miss a
+// delimiter that straddles the read-ahead boundary; the transport
+// switched to single-byte LF reads precisely to avoid that.
+@test fn read_back_to_back_long_first_message() void = {
+	let buf = memio::dynamic();
+	defer io::close(&buf)!;
+	// Build a first body that's well over the bufio default BUFSZ
+	// (4096) so the second message's header has to be fetched in a
+	// later read-ahead. A body of ~5000 ASCII bytes is plenty.
+	let big: []u8 = [];
+	defer free(big);
+	append(big, '"': u8)!;
+	for (let i = 0z; i < 5000; i += 1) {
+		append(big, 'x': u8)!;
+	};
+	append(big, '"': u8)!;
+	write(&buf, big)!;
+	write(&buf, strings::toutf8(`{"after":1}`))!;
+
+	let src = memio::fixed(memio::buffer(&buf));
+	let scan = bufio::newscanner(&src);
+	defer bufio::finish(&scan);
+	let r = new_reader(&scan);
+	defer finish_reader(&r);
+
+	const first = read(&r) as []u8;
+	assert(len(first) == len(big));
+	assert(first[0] == '"': u8 && first[len(first) - 1] == '"': u8);
+
+	const second = read(&r) as []u8;
+	assert(bytes::equal(second, strings::toutf8(`{"after":1}`)));
 };
 
 @test fn write_emits_framing() void = {

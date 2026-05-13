@@ -78,6 +78,15 @@ export fn last_header_bytes(r: *reader) const []u8 = r.diag_header;
 //
 // Headers other than Content-Length are accepted and ignored. The body itself
 // is not parsed here; callers feed it to a JSON parser.
+//
+// Header lines are read with a single-byte delimiter (LF) and any trailing
+// CR is stripped. Reading with a two-byte delimiter via
+// `bufio::scan_string("\r\n")` was previously found to be unreliable: if the
+// scanner's read-ahead buffer fills exactly between the CR and the LF of a
+// line terminator, `scan_bytes` misses the delimiter (its post-readahead
+// re-scan starts at the first new byte rather than backing off by
+// `len(delim)-1`), which causes lines to be merged. Reading with LF avoids
+// that whole class of bug because there's no boundary to straddle.
 export fn read(r: *reader) ([]u8 | io::EOF | transport_error) = {
 	// Reset the diagnostic header capture for this call; the underlying
 	// storage is preserved so steady-state usage doesn't churn allocations.
@@ -85,7 +94,7 @@ export fn read(r: *reader) ([]u8 | io::EOF | transport_error) = {
 
 	let length: (size | void) = void;
 	for (true) {
-		const line = match (bufio::scan_string(r.src, "\r\n")) {
+		const raw = match (bufio::scan_line(r.src)) {
 		case let s: const str =>
 			yield s;
 		case io::EOF =>
@@ -96,11 +105,17 @@ export fn read(r: *reader) ([]u8 | io::EOF | transport_error) = {
 			return utf8::invalid;
 		};
 
+		// Strip a single trailing CR if present so callers see the
+		// header value without its line ending.
+		const line = strings::rtrim(raw, '\r');
+
 		// Capture the line + delimiter for diagnostics. This runs on
 		// every header line, success or failure; on success the buffer
-		// is overwritten by the next call.
+		// is overwritten by the next call. Capture the LF too so the
+		// dump still shows where each header line ended; we do not
+		// re-add the CR because it was stripped above.
 		append(r.diag_header, strings::toutf8(line)...)?;
-		append(r.diag_header, ['\r': u8, '\n': u8]...)?;
+		append(r.diag_header, '\n': u8)?;
 
 		if (len(line) == 0) {
 			break; // end of headers

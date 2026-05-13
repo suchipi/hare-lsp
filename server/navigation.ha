@@ -68,6 +68,10 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		yield match (attr_at(data, off)) {
 		case let r: (size, size) => yield r;
 		case void =>
+			// Last resort: an operator token like `||` or `&`.
+			if (try_send_operator_hover(s, r, doc, data, off)) {
+				return;
+			};
 			send_null(s, r.id);
 			return;
 		};
