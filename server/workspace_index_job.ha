@@ -10,18 +10,19 @@
 //
 //   1. Discovery (synchronous, cheap): walk the directory tree and
 //      collect file paths into a [[workspace_index_job]].
-//   2. Indexing (chunked): every dispatch tick, [[drain_index_job]]
-//      processes a small batch (default ~50 files) and yields back to
-//      the main loop. Progress is reported via `$/progress` and the
-//      job can be cancelled with `window/workDoneProgress/cancel`.
+//   2. Indexing (chunked): [[drain_index_job]] processes a small batch
+//      (default ~50 files) and yields back to the main loop. Progress
+//      is reported via `$/progress` and the job can be cancelled with
+//      `window/workDoneProgress/cancel`.
 //
 // Jobs are queued in `server.pending_index_jobs` and drained FIFO so
 // workspace and stdlib indexing can coexist without contending for the
-// same target index. The trade-off: indexing only advances when the
-// client sends a message. Real editors send `didChange`/pull-diagnostics
-// frequently enough that large workspaces still finish in seconds,
-// while small workspaces finish inline inside the original triggering
-// handler (see [[INDEX_INLINE_BATCHES]]).
+// same target index. The main loop drives batches in two situations:
+// after every dispatched message (so a busy editor amortizes indexing
+// across its traffic), and via `input_ready` between blocking reads (so
+// a quiet editor still makes progress while waiting for the next
+// message). Small workspaces finish inline inside the original
+// triggering handler (see [[INDEX_INLINE_BATCHES]]).
 
 use analysis;
 use fmt;

@@ -93,9 +93,8 @@
         "inferredTypesMaxDepth": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 16,
-          "default": 3,
-          "description": "Maximum recursion depth for inferred-type hints. 0 disables inference beyond declared types + literals; higher values follow function-call return types, identifier bindings, and type aliases. The server caps the effective value at 16 to prevent pathological lookups."
+          "default": 10,
+          "description": "Maximum recursion depth for inferred-type hints. 0 disables inference beyond declared types + literals; higher values follow function-call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe."
         }
       }
     },
@@ -138,7 +137,7 @@
           "type": "integer",
           "minimum": 1,
           "default": 1000000,
-          "description": "Maximum number of workspace-index entries. Hard-capped at 1000000 regardless of the configured value."
+          "description": "Maximum number of workspace-index entries. Whatever you configure is what the server enforces; there is no additional non-configurable ceiling."
         }
       }
     }

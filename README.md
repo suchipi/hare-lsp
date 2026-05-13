@@ -81,13 +81,13 @@ Settings are read from the `hare` namespace.
 | `format.insertFinalNewline` | boolean | `true` | Ensure a trailing newline. |
 | `inlayHints.parameterNames` | boolean | `true` | Show parameter-name hints at call sites. |
 | `inlayHints.inferredTypes` | boolean | `true` | Show inferred-type hints on `let`/`const`. |
-| `inlayHints.inferredTypesMaxDepth` | number | `3` | Max recursion depth for inferred-type hints; follows call return types, identifier bindings, and type aliases. Hard-capped at 16. |
+| `inlayHints.inferredTypesMaxDepth` | number | `10` | Max recursion depth for inferred-type hints; follows call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe. |
 | `limits.maxOpenDocuments` | number | `1024` | Cap on open documents. |
 | `limits.maxTotalBufferBytes` | number | `268435456` | Cap on summed open-buffer bytes (256 MiB). |
 | `limits.maxPendingRequests` | number | `4096` | Cap on in-flight server-initiated requests. |
 | `limits.maxCancelledIds` | number | `256` | Cap on cancelled request ids retained. |
 | `limits.maxDiagnosticsPerFile` | number | `1000` | Cap on diagnostics published per file. Excess collapses into a single trailing diagnostic. |
-| `limits.maxWorkspaceIndexEntries` | number | `1000000` | Cap on workspace-index entries (also the absolute hard ceiling). |
+| `limits.maxWorkspaceIndexEntries` | number | `1000000` | Cap on workspace-index entries. Raise it if your workspace has more than ~1M decls. |
 
 The canonical JSON Schema for these settings is checked in at [editors/vscode/schemas/hare-settings.schema.json](editors/vscode/schemas/hare-settings.schema.json). Editor integrations and external tooling should treat that document as the source of truth.
 
@@ -97,6 +97,7 @@ The canonical JSON Schema for these settings is checked in at [editors/vscode/sc
 | --- | --- |
 | `HARE_LSP_LOG_DIR` | Absolute directory to tee the wire-protocol stream into `hare-lsp-{in,out,err}.log`. Useful for diagnosing handshake or framing issues. |
 | `HARE_LSP_LOG_LEVEL` | Minimum stderr-log severity. One of `debug`, `info`, `warn`, `error`. Defaults to `info`. |
+| `HARE_LSP_MAX_BODY_BYTES` | Override the LSP transport's max request body size (default 32 MiB). Read at startup because the cap applies before `initialize` arrives. |
 
 ## `harefmt`: standalone formatter CLI
 
@@ -159,12 +160,15 @@ The gitignore-style pattern parser and matcher used by `harefmt` lives in its ow
 
 These features work but have caveats worth knowing before relying on them:
 
-- **References & rename are partly textual.** When the cursor resolves to a local binding (`let` / `const` / `def` / `for` / `match` / function parameter), the search is bounded to that binding's lexical scope, so shadowing works correctly. For top-level decls the workspace is still scanned textually: comments, strings, and char literals are skipped, but two unrelated top-level identifiers with the same name in different modules are indistinguishable. Renaming a top-level symbol may rewrite same-named decls elsewhere.
-- **Formatting requires a parseable file.** Full / range formatting only runs when the document parses cleanly. If there are syntax errors, on-type re-indent still fires (it operates on whitespace only and never rewrites tokens), but full/range formatting returns no edits. Save the file in a parseable state to format.
-- **Workspace indexing is synchronous.** When a workspace folder is added (via `workspace/didChangeWorkspaceFolders` or the initial `initialize` scan) the server walks every `*.ha` file under the new root on the message-handling thread. For very large workspaces (tens of thousands of files) this blocks the dispatch loop, including `$/cancelRequest`. Smaller workspaces are unaffected. Background indexing with progress reporting is planned but not yet implemented.
-- **Resource caps.** The server refuses to grow past hard caps on open documents (1024), total open-buffer bytes (256 MiB), per-file diagnostics (1000; further parse errors are summarised in a single trailing diagnostic), in-flight server requests (4096), and workspace-index entries (1,000,000). Hitting any cap is logged via `window/logMessage`.
-- **Type hierarchy is name-based.** `typeHierarchy/supertypes` and `subtypes` match by short identifier name across the workspace. Two unrelated types with the same short name in different modules will appear linked.
-- **Inlay-hint types are best-effort.** Inferred types resolve literals, declared types, and simple expressions; complex inference (generic instantiations, deeply chained calls) may show no hint rather than a wrong one.
+- **References & rename are partly textual.** Discovery is a textual workspace scan (comments, strings, char literals, and raw strings are skipped). The hits are then filtered semantically:
+  - Locals (`let` / `const` / `def` / `for` / `match` / function parameter) are bounded to the binding's lexical scope, so shadowing works correctly.
+  - Top-level decls re-resolve each candidate against its file's `use` list + workspace index, so unrelated decls sharing a short name in different modules are kept distinct. Hits in files that aren't workspace-indexed (stdlib, third-party off the workspace path) are dropped.
+  - **Fallback case:** if the cursor's own symbol can't be resolved against the workspace index (e.g. a buffer outside every workspace folder, or a fresh symbol not yet indexed), the filter is skipped and every textual hit is returned. In that mode a rename can rewrite same-named decls in unrelated modules — preview the WorkspaceEdit before applying.
+- **Formatting requires a parseable file.** Full / range formatting only runs when the document parses cleanly. On-type re-indent still fires on unparseable files (it operates on whitespace only and never rewrites tokens), but full/range formatting returns no edits. This is intentional: a no-op format on a syntax error is a useful signal that the file doesn't parse.
+- **Workspace indexing is chunked, not concurrent.** Hare is single-threaded, so indexing runs cooperatively between LSP messages: each dispatch tick processes a small batch and yields back. The main loop also peeks at stdin with a zero-timeout poll between batches, so background indexing keeps advancing even when the editor is silent. Progress is reported via `$/progress` and the job can be cancelled with `window/workDoneProgress/cancel`. `workspace/symbol` results may carry `isIncomplete: true` while the job is still draining.
+- **Resource caps.** The server refuses to grow past caps on open documents, total open-buffer bytes, per-file diagnostics (excess collapses into a single trailing diagnostic), in-flight server requests, and workspace-index entries. All are tunable via `hare.limits.*` with no additional non-configurable ceiling — raise the limit if your workload needs it. Defaults are in the [Configuration](#configuration) table. Hitting any cap is logged via `window/logMessage`.
+- **Inlay-hint types are best-effort.** Inferred types resolve literals, declared types, function-call return types, and follow type-alias chains up to `hare.inlayHints.inferredTypesMaxDepth` hops (default 10; cycles are guarded by a visited set). Complex inference (deeply chained field accesses, generic-shaped constructs) may show no hint rather than a wrong one. Only top-level `let` / `const` decls are scanned today; bindings inside function bodies aren't covered yet.
+- **Transport body size limit.** The LSP transport rejects messages larger than 32 MiB by default. Override via the `HARE_LSP_MAX_BODY_BYTES` environment variable when the client sends very large workspace edits. The cap is read at startup (before `initialize` arrives), which is why it's an env var rather than a setting.
 - **`workspace/symbol` and document links** resolve stdlib imports only when `HAREPATH` overlaps a workspace folder.
 
 ## License

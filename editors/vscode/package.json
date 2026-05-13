@@ -207,10 +207,9 @@
           },
           "hare.inlayHints.inferredTypesMaxDepth": {
             "type": "number",
-            "default": 3,
+            "default": 10,
             "minimum": 0,
-            "maximum": 16,
-            "description": "Maximum recursion depth for inferred-type hints. 0 disables inference beyond declared types + literals; higher values follow function-call return types, identifier bindings, and type aliases. Capped at 16."
+            "description": "Maximum recursion depth for inferred-type hints. 0 disables inference beyond declared types + literals; higher values follow function-call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe."
           },
           "hare.limits.maxOpenDocuments": {
             "type": "number",
@@ -246,7 +245,7 @@
             "type": "number",
             "default": 1000000,
             "minimum": 1,
-            "description": "Maximum workspace-index entries. Hard-capped at 1000000."
+            "description": "Maximum workspace-index entries. Whatever you configure is what the server enforces; there is no additional non-configurable ceiling."
           }
         }
       }

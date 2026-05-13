@@ -64,7 +64,7 @@ use strings;
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	// Start with two folders.
@@ -108,7 +108,7 @@ use strings;
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	const reqs: []registration_request = [
@@ -136,7 +136,7 @@ use strings;
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	const reqs: []registration_request = [
@@ -165,7 +165,7 @@ use strings;
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	const params =
@@ -198,7 +198,7 @@ use strings;
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	const params = `{"rootUri":"file:///legacy","capabilities":{}}`;
@@ -229,7 +229,7 @@ use strings;
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	const params =
@@ -265,7 +265,7 @@ use strings;
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	const params = `{"capabilities":{}}`;
@@ -294,7 +294,7 @@ use strings;
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	// Set up two folders on disk, each with a .ha file declaring a symbol.
@@ -373,7 +373,7 @@ fn wsfx_rm(path: str) void = {
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	// Index one fake entry.
@@ -413,7 +413,7 @@ fn wsfx_rm(path: str) void = {
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	// Write a real file, index it, then delete it on disk and ask
@@ -442,7 +442,7 @@ fn wsfx_rm(path: str) void = {
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	// Manually inject 250 entries to exceed the 200 cap.

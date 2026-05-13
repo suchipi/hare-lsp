@@ -36,16 +36,39 @@ use strings;
 
 	send(&s, buf);
 
-	// Expect a PARSE_ERROR response, OR an EOF (server may close
-	// after replying since transport state is unrecoverable).
+	// The server must reply with a structured JSON-RPC error envelope
+	// before tearing down the transport. The id is null (we never got
+	// far enough to parse the request), the code is PARSE_ERROR
+	// (-32700), and the message is a non-empty string describing why
+	// the body was rejected.
 	const body = recv(&s);
 	defer free(body);
 	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
 	assert(
-		strings::contains(text, "too large") ||
-		strings::contains(text, "PARSE_ERROR") ||
-		strings::contains(text, `"code":-32700`),
-		"oversized request must be rejected with a transport error"
+		field(&obj, "jsonrpc") as str == "2.0",
+		"oversized-request response must have jsonrpc 2.0"
+	);
+	match (field(&obj, "id")) {
+	case json::_null => void;
+	case =>
+		fmt::fatalf("oversized-request response id should be null, got: {}", text);
+	};
+	const err = field(&obj, "error") as json::object;
+	assert(
+		field(&err, "code") as f64 == -32700.0,
+		"oversized request must yield JSON-RPC PARSE_ERROR (-32700)"
+	);
+	const msg = field(&err, "message") as str;
+	assert(len(msg) > 0, "PARSE_ERROR response must include a message");
+	// The transport reports oversize bodies with this prose. The
+	// substring lives inside error.message so a wire reorder or an
+	// extra field elsewhere doesn't accidentally satisfy the check.
+	assert(
+		strings::contains(msg, "too large"),
+		"PARSE_ERROR message must explain the body was too large"
 	);
 };
 
@@ -67,23 +90,55 @@ use strings;
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
 	// After `initialized`, the server issues workspace/configuration.
-	// Find that request and reply with the limits override.
+	// Find that request, verify its shape, and reply with the limits
+	// override.
 	let saw_config_request = false;
 	for (let i = 0z; i < 20z && !saw_config_request; i += 1) {
 		const body = recv(&s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, `"method":"workspace/configuration"`)) {
-			const id = extract_request_id(text);
-			defer free(id);
-			const reply =
-				fmt::asprintf(
-					`{{"jsonrpc":"2.0","id":{},"result":[{{"limits":{{"maxOpenDocuments":2}}}}]}}`,
-					id)!;
-			defer free(reply);
-			send(&s, strings::toutf8(reply));
-			saw_config_request = true;
+		let v = json::loadstr(text)!;
+		defer json::finish(v);
+		const obj = match (v) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			continue;
 		};
+		const method = match (json::get(&obj, "method")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
+			};
+		case =>
+			continue;
+		};
+		if (method != "workspace/configuration") continue;
+		// Pin the params shape so a regression that emits a malformed
+		// configuration request (no items, wrong section) is caught here
+		// rather than silently servicing a wrong-section response.
+		const params = field(&obj, "params") as json::object;
+		const items = field(&params, "items") as []json::value;
+		assert(
+			len(items) >= 1,
+			"workspace/configuration must request at least one item"
+		);
+		const item0 = items[0] as json::object;
+		assert(
+			field(&item0, "section") as str == "hare",
+			"workspace/configuration must request the 'hare' section"
+		);
+		const id = field(&obj, "id") as f64;
+		const reply =
+			fmt::asprintf(
+				`{{"jsonrpc":"2.0","id":{},"result":[{{"limits":{{"maxOpenDocuments":2}}}}]}}`,
+				id: i64)!;
+		defer free(reply);
+		send(&s, strings::toutf8(reply));
+		saw_config_request = true;
 	};
 	assert(
 		saw_config_request,
@@ -97,16 +152,49 @@ use strings;
 	// Open a third; this should produce a window/logMessage warning.
 	open_doc(&s, "file:///c.ha", "fn c() void = void;\n");
 
-	// Read until we see the warning log (or time out).
+	// Read until we see the refusal warning for c.ha. Along the way,
+	// fail if we ever see a refusal for a.ha or b.ha (which would
+	// indicate the cap was misapplied — e.g. cap=2 silently treated as
+	// cap=0). Drains a generous frame budget so a slow CI doesn't flake.
 	let saw_warning = false;
-	for (let i = 0z; i < 20z; i += 1) {
+	for (let i = 0z; i < 40z && !saw_warning; i += 1) {
 		const body = recv(&s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "refusing to open") &&
-				strings::contains(text, "file:///c.ha")) {
+		let v = json::loadstr(text)!;
+		defer json::finish(v);
+		const obj = match (v) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			continue;
+		};
+		const method = match (json::get(&obj, "method")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
+			};
+		case =>
+			continue;
+		};
+		if (method != "window/logMessage") continue;
+		const params = field(&obj, "params") as json::object;
+		const ty = field(&params, "type") as f64;
+		const msg = field(&params, "message") as str;
+		// type 2 = Warning per the LSP MessageType enum. A regression
+		// that downgraded the severity to Log/Info would silently
+		// disappear in editors that filter by warning threshold; pin
+		// the value here.
+		if (ty != 2.0) continue;
+		if (strings::contains(msg, "file:///a.ha") ||
+				strings::contains(msg, "file:///b.ha")) {
+			fmt::fatalf("e2e: unexpected refusal warning for a/b within cap=2: {}", msg);
+		};
+		if (strings::contains(msg, "file:///c.ha")) {
 			saw_warning = true;
-			break;
 		};
 	};
 	assert(saw_warning, "third didOpen with cap=2 must produce a refusal warning");
@@ -149,26 +237,4 @@ fn spawn_session_with_env(key: str, value: str) session = {
 		stdout = out_r,
 		read_buf = [],
 	};
-};
-
-// Tiny extractor for a JSON-RPC `"id":NNN` integer field from a raw
-// message string. Returns the value as a string so it can be
-// re-substituted into a response template.
-fn extract_request_id(text: str) str = {
-	const needle = `"id":`;
-	const start = match (strings::index(text, needle)) {
-	case let i: size =>
-		yield i + len(needle);
-	case void =>
-		return strings::dup("0")!;
-	};
-	const tail = strings::sub(text, start, strings::end);
-	// IDs are emitted as bare numbers; consume digits.
-	const bytes = strings::toutf8(tail);
-	let end: size = 0;
-	for (end < len(bytes); end += 1) {
-		const b = bytes[end];
-		if (b < '0': u8 || b > '9': u8) break;
-	};
-	return strings::dup(strings::sub(tail, 0, end))!;
 };

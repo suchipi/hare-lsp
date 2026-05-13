@@ -117,12 +117,16 @@ export fn main() void = {
 	// Body cap: defaults to 32 MiB; overridable via env var for clients
 	// that send very large workspace edits. Must be set here because the
 	// reader is constructed before `initialize` arrives.
+	// Pass `os::stdin_file` (the unbuffered, pollable fd 0) so the
+	// server can peek between background-indexing batches and advance
+	// the workspace index while the client is silent. The wrapped tee
+	// stream above is not pollable; the raw fd is.
 	const max_body = read_max_body_env();
 	let s = match (max_body) {
 	case let n: size =>
-		yield server::new_with_max_body(&scan, out_handle, n);
+		yield server::new_with_max_body(&scan, out_handle, os::stdin_file, n);
 	case void =>
-		yield server::new(&scan, out_handle);
+		yield server::new(&scan, out_handle, os::stdin_file);
 	};
 	defer server::finish(&s);
 

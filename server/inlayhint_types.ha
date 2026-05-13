@@ -33,7 +33,7 @@ export fn infer_let_type_deep(
 	doc: *document,
 	init: *ast::expr,
 ) (str | void) = {
-	const max_depth = effective_inlay_depth(s);
+	const max_depth = s.config.inlay_hints_inferred_types_max_depth;
 	if (max_depth == 0) return void;
 	const first = match (infer_type_from_init(s, doc, init)) {
 	case let label: str =>
@@ -43,13 +43,6 @@ export fn infer_let_type_deep(
 	};
 	if (max_depth <= 1) return first;
 	return follow_alias_chain(s, first, max_depth - 1);
-};
-
-// Clamps the user-configured depth to [[INLAY_DEPTH_HARD_MAX]].
-fn effective_inlay_depth(s: *server) u32 = {
-	const n = s.config.inlay_hints_inferred_types_max_depth;
-	if (n > INLAY_DEPTH_HARD_MAX) return INLAY_DEPTH_HARD_MAX;
-	return n;
 };
 
 // Given a type label (e.g. "result"), tries to unwrap it as an alias up

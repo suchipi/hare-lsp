@@ -151,13 +151,13 @@ Highlights:
 | `hare.format.insertFinalNewline` | `true` | Ensure trailing newline. |
 | `hare.inlayHints.parameterNames` | `true` | Param-name hints at call sites. |
 | `hare.inlayHints.inferredTypes` | `true` | Inferred-type hints on `let` / `const`. |
-| `hare.inlayHints.inferredTypesMaxDepth` | `3` | Max recursion depth for inferred-type hints; follows call return types and type aliases. Hard-capped at 16. |
+| `hare.inlayHints.inferredTypesMaxDepth` | `10` | Max recursion depth for inferred-type hints; follows call return types and type aliases. Cycles are guarded by a visited set, so larger values are safe. |
 | `hare.limits.maxOpenDocuments` | `1024` | Cap on open documents. |
 | `hare.limits.maxTotalBufferBytes` | `268435456` | Cap on summed open-buffer bytes (256 MiB). |
 | `hare.limits.maxPendingRequests` | `4096` | Cap on in-flight server-initiated requests. |
 | `hare.limits.maxCancelledIds` | `256` | Cap on cancelled request ids retained. |
 | `hare.limits.maxDiagnosticsPerFile` | `1000` | Cap on diagnostics published per file. |
-| `hare.limits.maxWorkspaceIndexEntries` | `1000000` | Cap on workspace-index entries (also the absolute hard ceiling). |
+| `hare.limits.maxWorkspaceIndexEntries` | `1000000` | Cap on workspace-index entries. Raise it if your workspace has more than ~1M decls. |
 
 ## Environment
 
@@ -198,17 +198,18 @@ Highlights:
 - **Workspace indexing is chunked, not concurrent.** Hare is
   single-threaded, so indexing runs cooperatively between LSP
   messages: each dispatch tick processes a small batch and yields
-  back. Progress is reported via `$/progress` and the job can be
-  cancelled with `window/workDoneProgress/cancel`. Caveat: a fully
-  idle editor (sending no messages) won't drive the job forward;
-  typing or a pull-diagnostics request unblocks it. Results from
-  `workspace/symbol` may carry `isIncomplete: true` while the job is
-  still draining.
+  back. The main loop also peeks at stdin with a zero-timeout poll
+  between batches, so background indexing keeps advancing even when
+  the editor is silent. Progress is reported via `$/progress` and the
+  job can be cancelled with `window/workDoneProgress/cancel`. Results
+  from `workspace/symbol` may carry `isIncomplete: true` while the
+  job is still draining.
 - **Inlay-hint types are best-effort.** Inferred types resolve
   literals, declared types, function-call return types, and follow
   type-alias chains up to `hare.inlayHints.inferredTypesMaxDepth`
-  hops (default 3, hard cap 16). Complex inference (deeply chained
-  field accesses, generic-shaped constructs) may show no hint rather
+  hops (default 10; cycles are guarded by a visited set, so larger
+  values are safe). Complex inference (deeply chained field accesses,
+  generic-shaped constructs) may show no hint rather
   than a wrong one. Only top-level `let` / `const` decls are scanned
   today; bindings inside function bodies aren't covered yet.
 - **Body size limit.** The LSP transport rejects messages larger than
@@ -216,10 +217,9 @@ Highlights:
   environment variable when the client sends very large workspace
   edits. The cap must be set before `initialize` arrives, which is
   why it's an env var rather than a setting.
-- **Resource caps are configurable but bounded.** All caps (open
-  documents, total buffer bytes, in-flight requests, cancelled ids,
-  diagnostics per file, workspace-index entries) are tunable via
-  `hare.limits.*`. The workspace-index entry count has an absolute
-  ceiling of 1,000,000 regardless of the configured value. Lowering a
-  cap below current usage applies prospectively; the server does not
-  proactively evict.
+- **Resource caps are configurable.** All caps (open documents, total
+  buffer bytes, in-flight requests, cancelled ids, diagnostics per
+  file, workspace-index entries) are tunable via `hare.limits.*` with
+  no additional non-configurable ceiling — raise a limit if your
+  workload needs it. Lowering a cap below current usage applies
+  prospectively; the server does not proactively evict.

@@ -41,10 +41,17 @@ def NVIM_SENTINEL_TMP: str = ".tmp/hare-lsp-nvim-pty-sentinel.tmp";
 //      `require('hare-lsp')` resolves to editors/nvim/lua/hare-lsp.
 //   2. Points the plugin at the in-tree `./hare-lsp` binary so the
 //      test doesn't depend on a global install.
-//   3. Registers an `LspAttach` autocmd that writes a sentinel file
-//      containing "ATTACHED:<client-name>" and quits.
-//   4. Sets a deferred fallback that writes "TIMEOUT" and quits if
-//      no LspAttach fires within the budget.
+//   3. Registers an `LspAttach` autocmd that, on attach, issues a
+//      synchronous `textDocument/hover` through the plugin and writes
+//      a sentinel reflecting whether the round trip succeeded.
+//   4. Sets a deferred fallback that writes "TIMEOUT" and quits if no
+//      LspAttach fires within the budget.
+//
+// Sentinel values:
+//   ATTACHED:<client-name>          attach + hover round-trip succeeded
+//   HOVER_FAILED:<client>:<reason>  attached but the hover request errored
+//   REQUIRE_FAILED:<err>            require('hare-lsp') threw
+//   TIMEOUT                         neither attach nor failure within budget
 //
 // The sentinel is written to a temp path and renamed into place so
 // the test never observes a partial file.
@@ -78,6 +85,34 @@ vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(args)
     local client = vim.lsp.get_client_by_id(args.data.client_id)
     local name = client and client.name or "?"
+    if name ~= "hare-lsp" then return end
+    -- Confirm the plugin can actually round-trip a request. Position
+    -- 0:11 lands on "main" in the test buffer; the LSP server has to
+    -- be alive and parsing the document for a non-error response.
+    local params = {
+      textDocument = { uri = vim.uri_from_bufnr(args.buf) },
+      position = { line = 0, character = 11 },
+    }
+    local result, err = vim.lsp.buf_request_sync(
+      args.buf, "textDocument/hover", params, 5000)
+    if err or not result then
+      write_sentinel("HOVER_FAILED:" .. name .. ":" .. tostring(err))
+      vim.defer_fn(function() vim.cmd("qa!") end, 50)
+      return
+    end
+    local entry = result[args.data.client_id]
+    if not entry then
+      write_sentinel("HOVER_FAILED:" .. name .. ":no_response_from_client")
+      vim.defer_fn(function() vim.cmd("qa!") end, 50)
+      return
+    end
+    -- Newer neovim uses .error, older versions .err; tolerate both.
+    local entry_err = entry.error or entry.err
+    if entry_err then
+      write_sentinel("HOVER_FAILED:" .. name .. ":" .. tostring(entry_err))
+      vim.defer_fn(function() vim.cmd("qa!") end, 50)
+      return
+    end
     write_sentinel("ATTACHED:" .. name)
     vim.defer_fn(function() vim.cmd("qa!") end, 50)
   end,
@@ -185,6 +220,12 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 	const _ = os::remove(NVIM_SENTINEL_PATH);
 	const _ = os::remove(NVIM_SENTINEL_TMP);
 
+	if (strings::hasprefix(sentinel, "HOVER_FAILED:")) {
+		// Attach succeeded but the synchronous hover did not round
+		// trip through the plugin. The sentinel carries the underlying
+		// error so the failure mode is visible in CI output.
+		fmt::fatalf("e2e: hover round trip through plugin failed: {}", sentinel);
+	};
 	if (!strings::hasprefix(sentinel, "ATTACHED:")) {
 		fmt::fatalf("e2e: expected ATTACHED sentinel, got: {}", sentinel);
 	};
