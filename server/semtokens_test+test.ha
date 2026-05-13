@@ -87,6 +87,167 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	abort("response not found");
 };
 
+@test fn semantic_tokens_position_with_leading_tab() void = {
+	// Regression: hare::lex reports `col` as a rune index with tab
+	// expansion (each tab advances to the next multiple of 8). The
+	// original semtokens code passed `tok.2.col - 1` straight through
+	// as the LSP character offset, so the first token after a leading
+	// tab was reported at character 8 instead of character 1.
+	let (s, scan, in_buf, out) = st_test_server();
+	defer st_test_cleanup(&s, scan, in_buf, out);
+	st_open(&s, "file:///t.ha", "\\tlet x = 1;\\n");
+
+	const params = `{"textDocument":{"uri":"file:///t.ha"}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 10.0,
+		method = strings::dup("textDocument/semanticTokens/full")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_semantic_tokens_full(&s, r);
+	const v = st_skip_to_response(out, 10.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const data_arr =
+		*(json::get(&result, "data") as *json::value) as []json::value;
+	// First token (let): (deltaLine, deltaStart, length, type, mods).
+	assert(len(data_arr) >= 5, "expected at least one token tuple");
+	assert(data_arr[0] as f64 == 0.0, "first token on line 0");
+	assert(
+		data_arr[1] as f64 == 1.0,
+		"expected `let` at character 1 (after tab), not tab-expanded column"
+	);
+};
+
+@test fn semantic_tokens_numeric_literal_has_source_length() void = {
+	// Regression: token_length used to fall back to lex::tokstr for
+	// tokens whose `tok.1` wasn't a str. For LIT_ICONST that returns
+	// "iconst" (6 chars), so `123` was reported with length 6 instead
+	// of 3. Similar bug for u8/f32/rconst suffixes and rune literals.
+	let (s, scan, in_buf, out) = st_test_server();
+	defer st_test_cleanup(&s, scan, in_buf, out);
+	st_open(&s, "file:///t.ha", "let x = 123;\\n");
+
+	const params = `{"textDocument":{"uri":"file:///t.ha"}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 20.0,
+		method = strings::dup("textDocument/semanticTokens/full")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_semantic_tokens_full(&s, r);
+	const v = st_skip_to_response(out, 20.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const data_arr =
+		*(json::get(&result, "data") as *json::value) as []json::value;
+	// Tokens: let, x, =, 123, ; → 5 tuples × 5 entries = 25.
+	assert(len(data_arr) >= 25, "expected at least five token tuples");
+	// 4th token is `123` (LIT_ICONST). Tuple starts at index 15;
+	// length field is at offset 2.
+	const length_123 = data_arr[15 + 2] as f64;
+	assert(length_123 == 3.0, "expected `123` length to be 3 source bytes");
+};
+
+@test fn semantic_tokens_rune_literal_has_source_length() void = {
+	// Source: `let r = 'a';` — `'a'` is LIT_RCONST. Old token_length
+	// returned lex::tokstr length = "rconst" = 6 instead of 3.
+	let (s, scan, in_buf, out) = st_test_server();
+	defer st_test_cleanup(&s, scan, in_buf, out);
+	st_open(&s, "file:///t.ha", "let r = 'a';\\n");
+
+	const params = `{"textDocument":{"uri":"file:///t.ha"}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 21.0,
+		method = strings::dup("textDocument/semanticTokens/full")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_semantic_tokens_full(&s, r);
+	const v = st_skip_to_response(out, 21.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const data_arr =
+		*(json::get(&result, "data") as *json::value) as []json::value;
+	// 4th token is `'a'`; length at index 15 + 2 = 17.
+	assert(len(data_arr) >= 25);
+	const length_a = data_arr[15 + 2] as f64;
+	assert(length_a == 3.0, "expected `'a'` length to be 3 source bytes");
+};
+
+@test fn semantic_tokens_string_literal_has_source_length() void = {
+	// Source: `let s = "hi";` — `"hi"` is LIT_STR. Old token_length
+	// returned tok.1 byte length (2: "hi" without quotes); the correct
+	// source span is 4 (including the quotes).
+	let (s, scan, in_buf, out) = st_test_server();
+	defer st_test_cleanup(&s, scan, in_buf, out);
+	st_open(&s, "file:///t.ha", "let s = \\\"hi\\\";\\n");
+
+	const params = `{"textDocument":{"uri":"file:///t.ha"}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 22.0,
+		method = strings::dup("textDocument/semanticTokens/full")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_semantic_tokens_full(&s, r);
+	const v = st_skip_to_response(out, 22.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const data_arr =
+		*(json::get(&result, "data") as *json::value) as []json::value;
+	// 4th token is `"hi"`; length at index 15 + 2 = 17.
+	assert(len(data_arr) >= 25);
+	const length_str = data_arr[15 + 2] as f64;
+	assert(length_str == 4.0, "expected `\"hi\"` length to be 4 source bytes");
+};
+
+@test fn semantic_tokens_numeric_does_not_eat_range_dots() void = {
+	// Regression: scan_numeric_literal accepted `.` even when not
+	// followed by a digit, so `0..10` was swallowed as a single token
+	// (length 5) instead of `0`, `..`, `10`.
+	let (s, scan, in_buf, out) = st_test_server();
+	defer st_test_cleanup(&s, scan, in_buf, out);
+	st_open(&s, "file:///t.ha", "let r = 0..10;\\n");
+
+	const params = `{"textDocument":{"uri":"file:///t.ha"}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 23.0,
+		method = strings::dup("textDocument/semanticTokens/full")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_semantic_tokens_full(&s, r);
+	const v = st_skip_to_response(out, 23.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const data_arr =
+		*(json::get(&result, "data") as *json::value) as []json::value;
+	// Tokens: let, r, =, 0, .., 10, ; → 7 tuples × 5 entries = 35.
+	assert(len(data_arr) >= 35, "expected at least seven token tuples");
+	// 4th token `0` (LIT_ICONST), length at offset 15 + 2.
+	const len_zero = data_arr[15 + 2] as f64;
+	assert(len_zero == 1.0, "expected `0` length to be 1 source byte");
+	// 6th token `10`, length at offset 25 + 2.
+	const len_ten = data_arr[25 + 2] as f64;
+	assert(len_ten == 2.0, "expected `10` length to be 2 source bytes");
+};
+
 @test fn semantic_tokens_full_includes_result_id() void = {
 	let (s, scan, in_buf, out) = st_test_server();
 	defer st_test_cleanup(&s, scan, in_buf, out);
