@@ -32,11 +32,12 @@ export type config = struct {
 	// Whether to surface `hare build` (type-check) diagnostics in addition
 	// to in-process parse diagnostics. Defaults to true.
 	enable_build_diagnostics: bool,
-	// Maximum wall-clock milliseconds to wait for a `hare build`
-	// subprocess to finish before SIGTERM'ing it. A hung build (deep
-	// macro recursion, deadlocked test, etc.) would otherwise block
-	// the entire LSP main loop indefinitely. Defaults to 60000 (60s);
-	// set to 0 to disable the timeout.
+	// Maximum wall-clock milliseconds for the whole didSave build
+	// pass — the dep walker may spawn `hare build -t o` once per
+	// local module, and this budget is shared across all of them.
+	// When the deadline elapses mid-walk, the current subprocess is
+	// SIGTERM'd and remaining modules are skipped. Defaults to 60000
+	// (60s); set to 0 to disable the deadline (waits indefinitely).
 	build_timeout_ms: u32,
 	// Format options.
 	format_indent_style: indent_style,

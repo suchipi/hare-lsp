@@ -26,16 +26,22 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 	let parse_arr = parse_diagnostics_for_doc(s, doc);
 
 	if (!s.config.enable_build_diagnostics) {
+		// User just toggled build diagnostics off — any URIs we
+		// published for in previous passes (sibling files in the
+		// module, transitive deps) would otherwise linger in the
+		// client forever. Clear them once, then drop the tracking
+		// set.
+		clear_stale_build_uris(s, doc, [doc.uri]);
 		publish_diagnostics(s, doc.uri, doc.version, parse_arr);
 		return;
 	};
 
-	const file_path = uri_to_path(doc.uri);
-	defer free(file_path);
-	const cwd = spawn_cwd_for_path(s, file_path);
-	defer free(cwd);
-	let build_diags = run_build(s.config.hare_path, file_path, cwd, s.config.tags,
-		s.config.build_timeout_ms);
+	// Walk the saved module's dep graph and run `hare build -t o`
+	// per module, leaves first. See server/dep_build.ha for the
+	// detailed rationale (handles library modules with no main and
+	// cross-module references uniformly, without relying on the
+	// project's build system).
+	const build_diags = run_dep_build_for_doc(s, doc);
 	defer finish_build_diagnostics(build_diags);
 
 	// Group build diagnostics by URI.
@@ -73,6 +79,17 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 		};
 	};
 
+	// Build the set of URIs we're about to publish to. doc.uri is
+	// always in it (parse diags publish even without a build hit).
+	// Used below to clear stale publishes from a previous pass that
+	// this pass no longer touches.
+	let current_uris: []str = [];
+	append(current_uris, strings::dup(doc.uri)!)!;
+	for (let i = 0z; i < len(by_uri); i += 1) {
+		if (i: int == doc_uri_bucket) continue;
+		append(current_uris, strings::dup(by_uri[i].0)!)!;
+	};
+
 	if (doc_uri_bucket >= 0) {
 		let merged = parse_arr;
 		const idx = doc_uri_bucket: size;
@@ -102,6 +119,33 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 		by_uri[i].1 = [];
 		publish_diagnostics(s, by_uri[i].0, ver, bucket);
 	};
+
+	// Clear lingering diagnostics on URIs the previous pass
+	// published to but this pass didn't, then remember the new set.
+	clear_stale_build_uris(s, doc, current_uris);
+	doc.last_build_uris = current_uris;
+};
+
+// For every URI in `doc.last_build_uris` not in `keep`, publishes an
+// empty diagnostics list so the client drops the stale entries. Then
+// frees the old `last_build_uris` and leaves the field empty — the
+// caller is responsible for assigning the new tracking set (or
+// leaving it empty if no build pass happened).
+fn clear_stale_build_uris(s: *server, doc: *document, keep: []str) void = {
+	for (let i = 0z; i < len(doc.last_build_uris); i += 1) {
+		const prev = doc.last_build_uris[i];
+		if (str_in_uri_slice(keep, prev)) continue;
+		publish_diagnostics(s, prev, 0, []);
+	};
+	strings::freeall(doc.last_build_uris);
+	doc.last_build_uris = [];
+};
+
+fn str_in_uri_slice(slice: []str, needle: str) bool = {
+	for (let i = 0z; i < len(slice); i += 1) {
+		if (slice[i] == needle) return true;
+	};
+	return false;
 };
 
 fn find_or_create_uri_bucket(by_uri: *[](str, []json::value), uri: str) size = {
