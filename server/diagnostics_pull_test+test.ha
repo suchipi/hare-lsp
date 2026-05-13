@@ -10,7 +10,9 @@ use memio;
 use strconv;
 use strings;
 
-fn pull_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn pull_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -18,7 +20,12 @@ fn pull_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) 
 	return (s, scan, in_buf, out);
 };
 
-fn pull_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn pull_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -52,13 +59,17 @@ fn next_pull_msg(data: []u8) (json::value, size) = {
 	defer pull_test_cleanup(&s, scan, in_buf, out);
 
 	// Open a file with a syntax error.
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn bad( = void;\n"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn bad( = void;\n"}}`;
 	let pv = json::loadstr(open)!;
 	const open_n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(open_n.method); json::finish(pv); };
+	defer {
+		free(open_n.method);
+		json::finish(pv);
+	};
 	handle_did_open(&s, open_n);
 
 	// Issue a textDocument/diagnostic request.
@@ -106,7 +117,8 @@ fn next_pull_msg(data: []u8) (json::value, size) = {
 	const data = memio::buffer(out);
 	const (v, _) = next_pull_msg(data);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	assert(len(items) == 0);
 };
@@ -119,15 +131,20 @@ fn next_pull_msg(data: []u8) (json::value, size) = {
 	for (let i = 0z; i < 2; i += 1) {
 		let url = "file:///a.ha";
 		if (i == 1) url = "file:///b.ha";
-		const open = strings::concat(`{"textDocument":{"uri":"`,
-			url, `","languageId":"hare","version":1,"text":"export fn ok() void = void;\n"}}`)!;
+		const open =
+			strings::concat(`{"textDocument":{"uri":"`, url,
+				`","languageId":"hare","version":1,"text":"export fn ok() void = void;\n"}}`
+			)!;
 		defer free(open);
 		let pv = json::loadstr(open)!;
 		const n = lsp::notification {
 			method = strings::dup("textDocument/didOpen")!,
 			params = pv,
 		};
-		defer { free(n.method); json::finish(pv); };
+		defer {
+			free(n.method);
+			json::finish(pv);
+		};
 		handle_did_open(&s, n);
 	};
 
@@ -152,7 +169,8 @@ fn next_pull_msg(data: []u8) (json::value, size) = {
 	};
 	const (v, _) = next_pull_msg(data[off..]);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	assert(len(items) == 2);
 	for (let i = 0z; i < len(items); i += 1) {

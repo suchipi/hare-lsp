@@ -90,7 +90,8 @@ export fn parse_recover(text: []u8, path: str) parse_result = {
 		const tok = match (parse::peek(&lexer)) {
 		case let t: lex::token =>
 			yield t;
-		case void => break;
+		case void =>
+			break;
 		case let e: parse::error =>
 			record_error(&res, e);
 			resync_to_decl(&lexer);
@@ -115,9 +116,9 @@ export fn parse_recover(text: []u8, path: str) parse_result = {
 		};
 	};
 
-	res.completely_failed = len(res.subunit.imports) == 0
-		&& len(res.subunit.decls) == 0
-		&& len(res.errors) > 0;
+	res.completely_failed =
+		len(res.subunit.imports) == 0 && len(res.subunit.decls) == 0 &&
+		len(res.errors) > 0;
 	// hare::lex stores `loc.off` as a rune index, but every
 	// downstream consumer (byte_to_position, source slicing,
 	// documentLink, etc.) treats it as a byte offset. Translate
@@ -201,11 +202,21 @@ fn resync_to_decl(lexer: *lex::lexer) void = {
 
 fn is_decl_boundary(t: ltok) bool = {
 	switch (t) {
-	case ltok::EXPORT, ltok::STATIC, ltok::LET, ltok::CONST,
-	     ltok::DEF, ltok::TYPE, ltok::FN, ltok::USE,
-	     ltok::ATTR_FINI, ltok::ATTR_INIT, ltok::ATTR_PACKED,
-	     ltok::ATTR_SYMBOL, ltok::ATTR_TEST, ltok::ATTR_THREADLOCAL,
-	     ltok::ATTR_UNDEFINED =>
+	case ltok::EXPORT,
+	ltok::STATIC,
+	ltok::LET,
+	ltok::CONST,
+	ltok::DEF,
+	ltok::TYPE,
+	ltok::FN,
+	ltok::USE,
+	ltok::ATTR_FINI,
+	ltok::ATTR_INIT,
+	ltok::ATTR_PACKED,
+	ltok::ATTR_SYMBOL,
+	ltok::ATTR_TEST,
+	ltok::ATTR_THREADLOCAL,
+	ltok::ATTR_UNDEFINED =>
 		return true;
 	case =>
 		return false;

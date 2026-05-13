@@ -17,20 +17,17 @@ use strings;
 // unique top-level function. Returns the directory path.
 fn gen_index_workspace(label: str, count: size) str = {
 	const cwd = os::getcwd();
-	const root = strings::concat(cwd, "/.tmp/e2e-indexing-",
-		label)!;
+	const root = strings::concat(cwd, "/.tmp/e2e-indexing-", label)!;
 	cleanup_crossmod_workspace(root);
 	match (os::mkdirs(root, 0o755: fs::mode)) {
 	case void => void;
 	case let e: fs::error =>
-		fmt::fatalf("e2e: cannot mkdir {}: {}", root,
-			fs::strerror(e));
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
 	};
 	for (let i = 0z; i < count; i += 1) {
 		const path = fmt::asprintf("{}/file_{}.ha", root, i)!;
 		defer free(path);
-		const body = fmt::asprintf("export fn f_{}() int = {};\n",
-			i, i)!;
+		const body = fmt::asprintf("export fn f_{}() int = {};\n", i, i)!;
 		defer free(body);
 		write_test_file(path, body);
 	};
@@ -68,12 +65,15 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 	// messages to drain (progress notifications, config pulls,
 	// registrations) — a healthy server emits the completion well
 	// before that.
-	assert(drain_until_indexed_with_cap(&s, 200z),
-		"large workspace must eventually finish indexing");
+	assert(
+		drain_until_indexed_with_cap(&s, 200z),
+		"large workspace must eventually finish indexing"
+	);
 
 	// After completion, workspace/symbol can find a deep-in-the-batch
 	// symbol. Pick file index 140 (after the inline batches).
-	const req = `{"jsonrpc":"2.0","id":1730,"method":"workspace/symbol","params":{"query":"f_140"}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":1730,"method":"workspace/symbol","params":{"query":"f_140"}}`;
 	send(&s, strings::toutf8(req));
 	const body = wait_for_response(&s, 1730.0);
 	defer free(body);
@@ -87,12 +87,14 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 	// `f_140` appears.
 	let items: []json::value = [];
 	match (result) {
-	case let arr: []json::value => items = arr;
+	case let arr: []json::value =>
+		items = arr;
 	case let obj: json::object =>
 		match (json::get(&obj, "items")) {
 		case let p: *json::value =>
 			match (*p) {
-			case let arr: []json::value => items = arr;
+			case let arr: []json::value =>
+				items = arr;
 			case => void;
 			};
 		case => void;
@@ -103,7 +105,10 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 	for (let i = 0z; i < len(items); i += 1) {
 		const it = items[i] as json::object;
 		const name = *(json::get(&it, "name") as *json::value) as str;
-		if (name == "f_140") { found = true; break; };
+		if (name == "f_140") {
+			found = true;
+			break;
+		};
 	};
 	assert(found, "deep file symbol must be reachable after indexing completes");
 };
@@ -135,19 +140,21 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 		};
 		free(body);
 	};
-	assert(len(token) > 0,
-		"server must emit $/progress begin before completion");
+	assert(len(token) > 0, "server must emit $/progress begin before completion");
 
-	const cancel = fmt::asprintf(
-		`{{"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{{"token":"{}"}}}}`,
-		token)!;
+	const cancel =
+		fmt::asprintf(
+			`{{"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{{"token":"{}"}}}}`,
+			token)!;
 	defer free(cancel);
 	send(&s, strings::toutf8(cancel));
 
 	// The server should still emit the completion log, with a count
 	// below the workspace total.
-	assert(drain_until_indexed_with_cap(&s, 200z),
-		"cancelled job must still publish a completion log");
+	assert(
+		drain_until_indexed_with_cap(&s, 200z),
+		"cancelled job must still publish a completion log"
+	);
 };
 
 // Tiny ad-hoc JSON extractor for `"token":"<value>"`. Avoids pulling in
@@ -155,13 +162,17 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 fn extract_progress_token(text: str) str = {
 	const needle = `"token":"`;
 	const start = match (strings::index(text, needle)) {
-	case let i: size => yield i + len(needle);
-	case void => return "";
+	case let i: size =>
+		yield i + len(needle);
+	case void =>
+		return "";
 	};
 	const tail = strings::sub(text, start, strings::end);
 	const end = match (strings::index(tail, '"')) {
-	case let i: size => yield i;
-	case void => return "";
+	case let i: size =>
+		yield i;
+	case void =>
+		return "";
 	};
 	return strings::dup(strings::sub(tail, 0, end))!;
 };

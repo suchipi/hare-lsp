@@ -12,7 +12,9 @@ use os;
 use strconv;
 use strings;
 
-fn sym_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn sym_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -20,7 +22,12 @@ fn sym_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) =
 	return (s, scan, in_buf, out);
 };
 
-fn sym_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn sym_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -30,15 +37,19 @@ fn sym_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, o
 };
 
 fn sym_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -102,8 +113,10 @@ fn sym_stdlib_module_prefix(module: str) str = {
 		const candidate = strings::concat(candidates[i], "/", module)!;
 		defer free(candidate);
 		const ok = match (os::stat(candidate)) {
-		case let st: fs::filestat => yield fs::isdir(st.mode);
-		case => yield false;
+		case let st: fs::filestat =>
+			yield fs::isdir(st.mode);
+		case =>
+			yield false;
 		};
 		if (ok) {
 			root = candidates[i];
@@ -117,7 +130,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 @test fn document_symbol_lists_all_decls() void = {
 	let (s, scan, in_buf, out) = sym_test_server();
 	defer sym_test_cleanup(&s, scan, in_buf, out);
-	sym_open(&s, "file:///x.ha", "fn a() void = void;\\nfn b() void = void;\\ntype c = int;\\n");
+	sym_open(&s, "file:///x.ha",
+		"fn a() void = void;\\nfn b() void = void;\\ntype c = int;\\n");
 
 	const params = `{"textDocument":{"uri":"file:///x.ha"}}`;
 	let pv = json::loadstr(params)!;
@@ -131,7 +145,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	handle_document_symbol(&s, r);
 	const v = sym_skip_to_response(out, 1.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) == 3);
 };
 
@@ -153,14 +168,16 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	handle_folding_range(&s, r);
 	const v = sym_skip_to_response(out, 2.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) >= 1);
 };
 
 @test fn document_link_returns_imports() void = {
 	let (s, scan, in_buf, out) = sym_test_server();
 	defer sym_test_cleanup(&s, scan, in_buf, out);
-	sym_open(&s, "file:///x.ha", "use io;\\nuse strings;\\n\\nexport fn main() void = void;\\n");
+	sym_open(&s, "file:///x.ha",
+		"use io;\\nuse strings;\\n\\nexport fn main() void = void;\\n");
 
 	const params = `{"textDocument":{"uri":"file:///x.ha"}}`;
 	let pv = json::loadstr(params)!;
@@ -174,7 +191,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	handle_document_link(&s, r);
 	const v = sym_skip_to_response(out, 3.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) == 2);
 };
 
@@ -196,7 +214,9 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	handle_document_link(&s, list_req);
 	const list_v = sym_skip_to_response(out, 10.0);
 	defer json::finish(list_v);
-	const list_arr = *(json::get(&(list_v as json::object), "result") as *json::value) as []json::value;
+	const list_arr =
+		*(json::get(&(list_v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(list_arr) >= 1);
 	// The first link should have a data field carrying ["io"].
 	const first = list_arr[0] as json::object;
@@ -216,7 +236,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	handle_document_link_resolve(&s, resolve_req);
 	const rv = sym_skip_to_response(out, 11.0);
 	defer json::finish(rv);
-	const ro = *(json::get(&(rv as json::object), "result") as *json::value) as json::object;
+	const ro =
+		*(json::get(&(rv as json::object), "result") as *json::value) as json::object;
 	// Should now have a `target` field pointing at a .ha file inside
 	// the io stdlib module. Build the expected prefix from $HAREPATH so
 	// the assertion is install-layout agnostic.
@@ -232,7 +253,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	defer sym_test_cleanup(&s, scan, in_buf, out);
 	sym_open(&s, "file:///x.ha", "fn target() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":4}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -244,7 +266,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	handle_document_highlight(&s, r);
 	const v = sym_skip_to_response(out, 4.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(result) >= 1);
 };
 
@@ -255,7 +278,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	sym_open(&s, "file:///sel.ha", "fn target() void = void;\\n\\n");
 
 	// Cursor on the 't' of "target".
-	const params = `{"textDocument":{"uri":"file:///sel.ha"},"positions":[{"line":0,"character":4}]}`;
+	const params =
+		`{"textDocument":{"uri":"file:///sel.ha"},"positions":[{"line":0,"character":4}]}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -267,7 +291,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	handle_selection_range(&s, r);
 	const v = sym_skip_to_response(out, 50.0);
 	defer json::finish(v);
-	const arr = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const arr =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(arr) == 1);
 	// Walk the parent chain — should be at least 3 deep (ident → line/decl → file).
 	let depth = 0u32;
@@ -277,7 +302,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 		match (json::get(&cur, "parent")) {
 		case let p: *json::value =>
 			cur = *p as json::object;
-		case void => break;
+		case void =>
+			break;
 		};
 	};
 	assert(depth >= 3);

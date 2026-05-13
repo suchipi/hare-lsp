@@ -19,7 +19,11 @@ fn test_server(out: io::handle) (server, *bufio::scanner, *memio::stream) = {
 	return (s, scan, in_buf);
 };
 
-fn finish_test_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream) void = {
+fn finish_test_server(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -60,7 +64,9 @@ fn next_framed(data: []u8) (json::value, size) = {
 	const (v, _) = next_framed(memio::buffer(&out));
 	defer json::finish(v);
 	const o = v as json::object;
-	assert(*(json::get(&o, "method") as *json::value) as str == "window/logMessage");
+	assert(
+		*(json::get(&o, "method") as *json::value) as str == "window/logMessage"
+	);
 	const params = *(json::get(&o, "params") as *json::value) as json::object;
 	assert(*(json::get(&params, "type") as *json::value) as f64 == 3.0);
 	assert(*(json::get(&params, "message") as *json::value) as str == "hello");
@@ -77,7 +83,9 @@ fn next_framed(data: []u8) (json::value, size) = {
 	const (v, _) = next_framed(memio::buffer(&out));
 	defer json::finish(v);
 	const o = v as json::object;
-	assert(*(json::get(&o, "method") as *json::value) as str == "window/showMessage");
+	assert(
+		*(json::get(&o, "method") as *json::value) as str == "window/showMessage"
+	);
 	const params = *(json::get(&o, "params") as *json::value) as json::object;
 	assert(*(json::get(&params, "type") as *json::value) as f64 == 1.0);
 };
@@ -129,7 +137,8 @@ fn next_framed(data: []u8) (json::value, size) = {
 	let (s, scan, in_buf) = test_server(&out);
 	defer finish_test_server(&s, scan, in_buf);
 
-	const id_v = show_message_request(&s, lsp::message_type::INFO, "pick", ["A", "B"]);
+	const id_v = show_message_request(&s, lsp::message_type::INFO, "pick",
+		["A", "B"]);
 	const id = id_v as i64;
 	assert(id == 0);
 	assert(len(s.pending_requests) == 1);
@@ -139,9 +148,13 @@ fn next_framed(data: []u8) (json::value, size) = {
 	const (v, _) = next_framed(memio::buffer(&out));
 	defer json::finish(v);
 	const o = v as json::object;
-	assert(*(json::get(&o, "method") as *json::value) as str == "window/showMessageRequest");
+	assert(
+		*(json::get(&o,
+			"method") as *json::value) as str == "window/showMessageRequest"
+	);
 	const params = *(json::get(&o, "params") as *json::value) as json::object;
-	const actions = *(json::get(&params, "actions") as *json::value) as []json::value;
+	const actions =
+		*(json::get(&params, "actions") as *json::value) as []json::value;
 	assert(len(actions) == 2);
 	const a0 = actions[0] as json::object;
 	assert(*(json::get(&a0, "title") as *json::value) as str == "A");
@@ -167,8 +180,10 @@ fn next_framed(data: []u8) (json::value, size) = {
 	defer json::finish(v1);
 	off += off1;
 	const o1 = v1 as json::object;
-	assert(*(json::get(&o1, "method") as *json::value) as str ==
-		"window/workDoneProgress/create");
+	assert(
+		*(json::get(&o1,
+			"method") as *json::value) as str == "window/workDoneProgress/create"
+	);
 
 	// Message 2: $/progress {kind: "begin", title: "Indexing"}
 	const (v2, off2) = next_framed(data[off..]);

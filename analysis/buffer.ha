@@ -67,13 +67,18 @@ export fn replace_all(b: *buffer, text: []u8) void = {
 // Returns the difference in length: new_text_len - (end - start).
 //
 // If start > end or end > len(buffer), the range is clamped.
-export fn replace_range(b: *buffer, start: size, end: size, new_text: []u8) ssize = {
+export fn replace_range(
+	b: *buffer,
+	start: size,
+	end: size,
+	new_text: []u8,
+) ssize = {
 	let s = if (start > len(b.data)) len(b.data) else start;
 	let e = if (end > len(b.data)) len(b.data) else end;
 	if (s > e) s = e;
 
 	const old_len = e - s;
-	const delta = (len(new_text): ssize) - (old_len: ssize);
+	const delta = len(new_text): ssize - old_len: ssize;
 
 	if (delta == 0) {
 		// Same-size replacement: just overwrite in place.
@@ -94,7 +99,7 @@ export fn replace_range(b: *buffer, start: size, end: size, new_text: []u8) ssiz
 		b.data[s..s + len(new_text)] = new_text[..];
 	} else {
 		// Shrinking: write new bytes, then shift suffix left, then trim.
-		const shrink = (-delta): size;
+		const shrink = -delta: size;
 		b.data[s..s + len(new_text)] = new_text[..];
 		// Shift suffix [e..total] left by shrink.
 		const total = len(b.data);

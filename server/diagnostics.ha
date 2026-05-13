@@ -32,8 +32,10 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 
 	const file_path = uri_to_path(doc.uri);
 	defer free(file_path);
-	let build_diags = run_build(s.config.hare_path, file_path, s.config.tags,
-		s.config.build_timeout_ms);
+	const cwd = spawn_cwd_for_path(s, file_path);
+	defer free(cwd);
+	let build_diags = run_build(s.config.hare_path, file_path, cwd,
+		s.config.tags, s.config.build_timeout_ms);
 	defer finish_build_diagnostics(build_diags);
 
 	// Group build diagnostics by URI.
@@ -90,8 +92,10 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 		// Look up version for this URI if it's an open document.
 		const other_doc = find_document(s, by_uri[i].0);
 		const ver = match (other_doc) {
-		case let p: *document => yield p.version;
-		case null => yield 0i64;
+		case let p: *document =>
+			yield p.version;
+		case null =>
+			yield 0i64;
 		};
 		// Hand off ownership of the inner slice.
 		const bucket = by_uri[i].1;
@@ -141,16 +145,17 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 			character = start.character + 1,
 		};
 		let d = json::newobject();
-		json::put(&d, "range", encode_range(lsp::range {
-			start = lsp::position {
-				line = start.line,
-				character = start.character,
-			},
-			end = lsp::position {
-				line = end.line,
-				character = end.character,
-			},
-		}))!;
+		json::put(&d, "range",
+			encode_range(lsp::range {
+					start = lsp::position {
+						line = start.line,
+						character = start.character,
+					},
+					end = lsp::position {
+						line = end.line,
+						character = end.character,
+					},
+				}))!;
 		json::put(&d, "severity", severity_for(e.message))!;
 		json::set(&d, "source", "hare-lsp/parse": json::value)!;
 		json::set(&d, "code", "parse-error": json::value)!;
@@ -159,25 +164,25 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 		append(arr, d: json::value)!;
 	};
 	if (total > limit) {
-		const eof_pos = analysis::byte_to_position(data, idx, enc,
-			len(data));
+		const eof_pos = analysis::byte_to_position(data, idx, enc, len(data));
 		let d = json::newobject();
-		json::put(&d, "range", encode_range(lsp::range {
-			start = lsp::position {
-				line = eof_pos.line,
-				character = eof_pos.character,
-			},
-			end = lsp::position {
-				line = eof_pos.line,
-				character = eof_pos.character,
-			},
-		}))!;
+		json::put(&d, "range",
+			encode_range(lsp::range {
+					start = lsp::position {
+						line = eof_pos.line,
+						character = eof_pos.character,
+					},
+					end = lsp::position {
+						line = eof_pos.line,
+						character = eof_pos.character,
+					},
+				}))!;
 		json::put(&d, "severity", severity_for("diagnostics truncated"))!;
 		json::set(&d, "source", "hare-lsp/parse": json::value)!;
 		json::set(&d, "code", "diagnostics-truncated": json::value)!;
-		const msg = fmt::asprintf(
-			"({} more parse errors not shown; {} of {} reported)",
-			total - limit, limit, total)!;
+		const msg =
+			fmt::asprintf("({} more parse errors not shown; {} of {} reported)",
+				total - limit, limit, total)!;
 		json::set(&d, "message", msg: json::value)!;
 		free(msg);
 		append(arr, d: json::value)!;
@@ -198,7 +203,7 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 // error severity.
 fn severity_for(message: str) f64 = {
 	if (strings::contains(message, "unused") ||
-		strings::contains(message, "unreachable")) {
+			strings::contains(message, "unreachable")) {
 		return 2.0;
 	};
 	return 1.0;
@@ -224,21 +229,20 @@ fn unused_import_diagnostics(s: *server, doc: *document) []json::value = {
 		const idx = unused[i];
 		const imp = &pr.subunit.imports[idx];
 		const (rm_start, rm_end) = import_removal_range(data, imp);
-		const sp = analysis::byte_to_position(data, line_idx, enc,
-			rm_start);
-		const ep = analysis::byte_to_position(data, line_idx, enc,
-			rm_end);
+		const sp = analysis::byte_to_position(data, line_idx, enc, rm_start);
+		const ep = analysis::byte_to_position(data, line_idx, enc, rm_end);
 		let d = json::newobject();
-		json::put(&d, "range", encode_range(lsp::range {
-			start = lsp::position {
-				line = sp.line,
-				character = sp.character,
-			},
-			end = lsp::position {
-				line = ep.line,
-				character = ep.character,
-			},
-		}))!;
+		json::put(&d, "range",
+			encode_range(lsp::range {
+					start = lsp::position {
+						line = sp.line,
+						character = sp.character,
+					},
+					end = lsp::position {
+						line = ep.line,
+						character = ep.character,
+					},
+				}))!;
 		json::put(&d, "severity", 4.0: f64)!;
 		json::set(&d, "source", "hare-lsp": json::value)!;
 		json::set(&d, "code", "unused-import": json::value)!;
@@ -267,9 +271,12 @@ def DIAG_TAG_UNNECESSARY: f64 = 1.0;
 // the producer (parser or compiler) to carry secondary source
 // locations alongside each diagnostic, which neither does today. A
 // future revision can plumb that through when the structure exists.
-export fn apply_unnecessary_tag_if_match(d: *json::object, message: str) void = {
+export fn apply_unnecessary_tag_if_match(
+	d: *json::object,
+	message: str,
+) void = {
 	if (strings::contains(message, "unused") ||
-		strings::contains(message, "unreachable")) {
+			strings::contains(message, "unreachable")) {
 		let tags: []json::value = [];
 		append(tags, DIAG_TAG_UNNECESSARY: json::value)!;
 		json::put(d, "tags", tags: json::value)!;
@@ -321,31 +328,33 @@ export fn clear_diagnostics(s: *server, uri: str) void = {
 };
 
 // --- pull-model diagnostics -----------------------------------------
-
 // Handles textDocument/diagnostic. The client wants the current diagnostic
 // state for a single document.
 export fn handle_textdocument_diagnostic(s: *server, r: lsp::request) void = {
 	const obj = match (params_object_diag(r.params)) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case void =>
-		send_diag_full([], r);
 		send_to_client(s, r.id, full_report([]));
 		return;
 	};
 	const text_doc = match (object_field_object_diag(&obj, "textDocument")) {
-	case let o: json::object => yield o;
+	case let o: json::object =>
+		yield o;
 	case void =>
 		send_to_client(s, r.id, full_report([]));
 		return;
 	};
 	const uri = match (object_string_diag(&text_doc, "uri")) {
-	case let s: str => yield s;
+	case let s: str =>
+		yield s;
 	case void =>
 		send_to_client(s, r.id, full_report([]));
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_to_client(s, r.id, full_report([]));
 		return;
@@ -411,13 +420,17 @@ fn send_to_client(s: *server, id: lsp::id, result: json::value) void = {
 	};
 };
 
-// Stub for the future async write — unused for now.
-fn send_diag_full(_items: []json::value, _r: lsp::request) void = void;
-
 // Thin aliases over the shared lsp::json_* helpers.
-fn params_object_diag(p: (json::value | void)) (json::object | void) =
-	lsp::params_object(p);
-fn object_field_object_diag(o: *json::object, key: str) (json::object | void) =
-	lsp::json_obj(o, key);
-fn object_string_diag(o: *json::object, key: str) (str | void) =
-	lsp::json_str(o, key);
+fn params_object_diag(
+	p: (json::value | void),
+) (json::object | void) = lsp::params_object(p);
+
+fn object_field_object_diag(
+	o: *json::object,
+	key: str,
+) (json::object | void) = lsp::json_obj(o, key);
+
+fn object_string_diag(
+	o: *json::object,
+	key: str,
+) (str | void) = lsp::json_str(o, key);

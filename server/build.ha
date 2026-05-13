@@ -56,6 +56,13 @@ export fn finish_build_diagnostics(d: []build_diagnostic) void = {
 // `hare_path` is the path to the `hare` binary (typically just "hare" so
 // PATH is consulted). Build tags are passed via -T <tag> for each tag.
 //
+// `cwd` is the working directory the child is spawned in and the base
+// used to resolve relative diagnostic paths. Callers should pass the
+// containing workspace root (not the file's directory) so a relative
+// `HARECACHE` like `.cache` doesn't drop a cache dir next to whatever
+// file the user just saved. An empty `cwd` leaves the child in our
+// own cwd.
+//
 // timeout_ms is the wall-clock deadline (in milliseconds) before the
 // subprocess is terminated and the partial output returned. Zero
 // disables the timeout (waits indefinitely). A hung build that
@@ -64,6 +71,7 @@ export fn finish_build_diagnostics(d: []build_diagnostic) void = {
 export fn run_build(
 	hare_path: str,
 	file_path: str,
+	cwd: str,
 	tags: []str,
 	timeout_ms: u32,
 ) []build_diagnostic = {
@@ -78,25 +86,24 @@ export fn run_build(
 
 	// Create a pipe for stderr.
 	const pipe_pair = match (unix::pipe()) {
-	case let p: (io::file, io::file) => yield p;
-	case => return [];
+	case let p: (io::file, io::file) =>
+		yield p;
+	case =>
+		return [];
 	};
 	const (read_fd, write_fd) = pipe_pair;
 
 	let cmd = match (exec::cmd(hare_path, build_args("build", argv)...)) {
-	case let c: exec::command => yield c;
+	case let c: exec::command =>
+		yield c;
 	case =>
 		lsp::safe_close(read_fd);
 		lsp::safe_close(write_fd);
 		return [];
 	};
 
-	// Determine the working directory: the directory containing file_path.
-	// For files without a directory part (relative), we leave dir unset so
-	// the child runs in our cwd.
-	const dir = dirname(file_path);
-	if (len(dir) > 0) {
-		exec::chdir(&cmd, dir);
+	if (len(cwd) > 0) {
+		exec::chdir(&cmd, cwd);
 	};
 
 	// Redirect child stderr -> write_fd. Also nullfd stdin/stdout so a
@@ -106,7 +113,8 @@ export fn run_build(
 	exec::addfile(&cmd, os::stdin_file, exec::nullfd)!;
 
 	const proc = match (exec::start(&cmd)) {
-	case let p: exec::process => yield p;
+	case let p: exec::process =>
+		yield p;
 	case =>
 		lsp::safe_close(read_fd);
 		lsp::safe_close(write_fd);
@@ -130,8 +138,7 @@ export fn run_build(
 		yield time::instant { sec = 0, nsec = 0 };
 	};
 	const deadline_abs = if (timeout_ms > 0) {
-		yield time::add(deadline,
-			(timeout_ms: i64) * time::MILLISECOND);
+		yield time::add(deadline, timeout_ms: i64 * time::MILLISECOND);
 	} else {
 		yield time::instant { sec = 0, nsec = 0 };
 	};
@@ -149,14 +156,18 @@ export fn run_build(
 			timed_out = true;
 			break;
 		};
-		let pfds: [1]poll::pollfd = [poll::pollfd {
-			fd = read_fd,
-			events = poll::event::POLLIN: i16,
-			revents = 0,
-		}];
+		let pfds: [1]poll::pollfd = [
+			poll::pollfd {
+				fd = read_fd,
+				events = poll::event::POLLIN: i16,
+				revents = 0,
+			},
+		];
 		const n = match (poll::poll(pfds[..], remaining)) {
-		case let n: uint => yield n;
-		case poll::error => break;
+		case let n: uint =>
+			yield n;
+		case poll::error =>
+			break;
 		};
 		if (n == 0) {
 			// timeout
@@ -191,10 +202,12 @@ export fn run_build(
 	};
 
 	const text = match (strings::fromutf8(buf)) {
-	case let s: str => yield s;
-	case => return [];
+	case let s: str =>
+		yield s;
+	case =>
+		return [];
 	};
-	return parse_compiler_output(text, dir);
+	return parse_compiler_output(text, cwd);
 };
 
 // Builds the argument list `[name, args...]`, used to splat for exec::cmd.
@@ -203,17 +216,6 @@ fn build_args(name: str, args: []str) []str = {
 	append(out, name)!;
 	append(out, args...)!;
 	return out;
-};
-
-// Returns the directory portion of `file_path`, or "" if there is none.
-fn dirname(file_path: str) str = {
-	const idx = strings::rindex(file_path, '/');
-	match (idx) {
-	case let i: size =>
-		return strings::sub(file_path, 0, i);
-	case void =>
-		return "";
-	};
 };
 
 // Parses the compiler's stderr text into diagnostics. `cwd` (if non-empty)
@@ -239,23 +241,31 @@ fn parse_diagnostic_line(line: str, cwd: str) (build_diagnostic | void) = {
 	// Strategy: find the third ':' (path:line:col:), then split after the
 	// next ':' (kind:).
 	const c1 = match (strings::index(line, ':')) {
-	case let i: size => yield i;
-	case => return void;
+	case let i: size =>
+		yield i;
+	case =>
+		return void;
 	};
 	const after1 = strings::sub(line, c1 + 1, strings::end);
 	const c2_rel = match (strings::index(after1, ':')) {
-	case let i: size => yield i;
-	case => return void;
+	case let i: size =>
+		yield i;
+	case =>
+		return void;
 	};
 	const after2 = strings::sub(after1, c2_rel + 1, strings::end);
 	const c3_rel = match (strings::index(after2, ':')) {
-	case let i: size => yield i;
-	case => return void;
+	case let i: size =>
+		yield i;
+	case =>
+		return void;
 	};
 	const after3 = strings::sub(after2, c3_rel + 1, strings::end);
 	const c4_rel = match (strings::index(after3, ':')) {
-	case let i: size => yield i;
-	case => return void;
+	case let i: size =>
+		yield i;
+	case =>
+		return void;
 	};
 	const path_str = strings::sub(line, 0, c1);
 	const line_str = strings::sub(after1, 0, c2_rel);
@@ -265,15 +275,19 @@ fn parse_diagnostic_line(line: str, cwd: str) (build_diagnostic | void) = {
 
 	// Validate that line/col parse as numbers; reject otherwise.
 	const lineno = match (strconv::stou32(line_str)) {
-	case let n: u32 => yield n;
-	case => return void;
+	case let n: u32 =>
+		yield n;
+	case =>
+		return void;
 	};
 	const colno = match (strconv::stou32(col_str)) {
-	case let n: u32 => yield n;
-	case => return void;
+	case let n: u32 =>
+		yield n;
+	case =>
+		return void;
 	};
 	if (kind_str != "error" && kind_str != "syntax error" &&
-		kind_str != "warning") {
+			kind_str != "warning") {
 		return void;
 	};
 

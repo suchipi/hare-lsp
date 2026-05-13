@@ -95,7 +95,8 @@ export fn file_parse_cache_get(
 	// Stat the file; on stat failure the file is unreadable and we
 	// drop any stale entry.
 	const st = match (os::stat(path)) {
-	case let s: fs::filestat => yield s;
+	case let s: fs::filestat =>
+		yield s;
 	case fs::error =>
 		drop_path(c, path);
 		return null;
@@ -118,8 +119,10 @@ export fn file_parse_cache_get(
 
 	// Miss — read, parse, insert.
 	const text = match (read_path_bytes(path)) {
-	case let b: []u8 => yield b;
-	case void => return null;
+	case let b: []u8 =>
+		yield b;
+	case void =>
+		return null;
 	};
 	let pr = analysis::parse_recover(text, path);
 	const idx = analysis::build_index(&pr.subunit);
@@ -176,8 +179,10 @@ fn evict_lru(c: *file_parse_cache) void = {
 
 fn read_path_bytes(path: str) ([]u8 | void) = {
 	const f = match (os::open(path)) {
-	case let h: io::file => yield h;
-	case fs::error => return void;
+	case let h: io::file =>
+		yield h;
+	case fs::error =>
+		return void;
 	};
 	defer lsp::safe_close(f);
 	let buf: []u8 = [];
@@ -186,7 +191,8 @@ fn read_path_bytes(path: str) ([]u8 | void) = {
 		match (io::read(f, chunk[..])) {
 		case let n: size =>
 			append(buf, chunk[..n]...)!;
-		case io::EOF => break;
+		case io::EOF =>
+			break;
 		case io::error =>
 			free(buf);
 			return void;
@@ -208,14 +214,19 @@ export fn file_parse_cache_drop_path(c: *file_parse_cache, path: str) void = {
 // entry - see [[cached_parse_or_drop_stale]] in workspace_index.ha.
 export fn file_path_missing(path: str) bool = {
 	match (os::stat(path)) {
-	case fs::filestat => return false;
-	case fs::error => return true;
+	case fs::filestat =>
+		return false;
+	case fs::error =>
+		return true;
 	};
 };
 
 // Drops every cached entry whose path is at or under `root_dir`.
 // Used when a workspace folder is removed or a file is deleted.
-export fn file_parse_cache_drop_under(c: *file_parse_cache, root_dir: str) void = {
+export fn file_parse_cache_drop_under(
+	c: *file_parse_cache,
+	root_dir: str,
+) void = {
 	const prefix = strings::concat(root_dir, "/")!;
 	defer free(prefix);
 	let i = 0z;

@@ -15,7 +15,8 @@ use strings;
 	defer fpc_rm(path);
 
 	const e1 = match (file_parse_cache_get(&c, path)) {
-	case let p: *file_parse_entry => yield p;
+	case let p: *file_parse_entry =>
+		yield p;
 	case null => abort("first get returned null");
 	};
 	assert(len(e1.pr.subunit.decls) == 1);
@@ -25,7 +26,8 @@ use strings;
 	// Second get on the SAME contents must reuse the entry. The
 	// returned pointer is borrowed; just compare cache size + tick.
 	const e2 = match (file_parse_cache_get(&c, path)) {
-	case let p: *file_parse_entry => yield p;
+	case let p: *file_parse_entry =>
+		yield p;
 	case null => abort("second get returned null");
 	};
 	assert(len(c.entries) == 1);
@@ -41,7 +43,8 @@ use strings;
 	defer fpc_rm(path);
 
 	const e1 = match (file_parse_cache_get(&c, path)) {
-	case let p: *file_parse_entry => yield p;
+	case let p: *file_parse_entry =>
+		yield p;
 	case null => abort("first get returned null");
 	};
 	const len1 = len(e1.pr.subunit.decls);
@@ -54,7 +57,8 @@ use strings;
 	fpc_write(path, "export fn a() void = void;\nexport fn b() void = void;\n");
 
 	const e2 = match (file_parse_cache_get(&c, path)) {
-	case let p: *file_parse_entry => yield p;
+	case let p: *file_parse_entry =>
+		yield p;
 	case null => abort("second get returned null");
 	};
 	assert(len(e2.pr.subunit.decls) == 2);
@@ -113,8 +117,10 @@ fn fpc_path_for(i: size) str = {
 
 fn fpc_write(path: str, text: str) void = {
 	const f = match (os::create(path, 0o644)) {
-	case let h: io::file => yield h;
-	case fs::error => return;
+	case let h: io::file =>
+		yield h;
+	case fs::error =>
+		return;
 	};
 	defer io::close(f)!;
 	io::writeall(f, strings::toutf8(text))!;
@@ -130,8 +136,10 @@ fn fpc_rm(path: str) void = {
 fn fpc_sleep_for_mtime() void = {
 	// 10ms — empirically enough on every host the test suite runs on.
 	const start = match (os::stat(".")) {
-	case let s: fs::filestat => yield s;
-	case fs::error => return;
+	case let s: fs::filestat =>
+		yield s;
+	case fs::error =>
+		return;
 	};
 	// Busy-loop until at least the next nanosecond tick. On systems with
 	// second-granularity mtime this isn't enough; tests on such systems

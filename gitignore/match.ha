@@ -75,8 +75,10 @@ export fn evaluate_layers(stack: []layer, abs_path: str, is_dir: bool) bool = {
 	let ignored = false;
 	for (let i = 0z; i < len(stack); i += 1) {
 		const rel = match (relativize(abs_path, stack[i].dir)) {
-		case let s: str => yield s;
-		case void => continue;
+		case let s: str =>
+			yield s;
+		case void =>
+			continue;
 		};
 		defer free(rel);
 		for (let j = 0z; j < len(stack[i].patterns); j += 1) {
@@ -102,12 +104,7 @@ fn split_components(p: str) []str = {
 	return out;
 };
 
-fn match_segs(
-	pat: []pattern_segment,
-	pi: size,
-	comps: []str,
-	ci: size,
-) bool = {
+fn match_segs(pat: []pattern_segment, pi: size, comps: []str, ci: size) bool = {
 	if (pi == len(pat)) return ci == len(comps);
 	if (pat[pi].double_star) {
 		// `**` matches zero or more components; try each split.

@@ -133,8 +133,7 @@ use strings;
 };
 
 @test fn parse_patterns_skips_blanks_and_comments() void = {
-	const text = strings::toutf8(
-		"# comment\n*.log\n\n  \n!keep.log\n");
+	const text = strings::toutf8("# comment\n*.log\n\n  \n!keep.log\n");
 	const ps = parse_patterns(text);
 	defer finish_patterns(ps);
 	assert(len(ps) == 2);

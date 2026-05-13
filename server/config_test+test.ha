@@ -16,7 +16,12 @@ fn fresh_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	return (s, scan, in_buf, out);
 };
 
-fn cleanup_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn cleanup_server(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -43,7 +48,8 @@ fn cleanup_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out
 	let (s, scan, in_buf, out) = fresh_server();
 	defer cleanup_server(&s, scan, in_buf, out);
 
-	const settings = `{"path":"/opt/hare/bin/hare","tags":["+linux","+x86_64"],"diagnostics":{"debounceMs":500,"enableBuild":false,"buildTimeoutMs":10000},"format":{"indentStyle":"space","indentWidth":4,"trimFinalNewlines":false,"insertFinalNewline":false},"inlayHints":{"parameterNames":false,"inferredTypes":false}}`;
+	const settings =
+		`{"path":"/opt/hare/bin/hare","tags":["+linux","+x86_64"],"diagnostics":{"debounceMs":500,"enableBuild":false,"buildTimeoutMs":10000},"format":{"indentStyle":"space","indentWidth":4,"trimFinalNewlines":false,"insertFinalNewline":false},"inlayHints":{"parameterNames":false,"inferredTypes":false}}`;
 	let v = json::loadstr(settings)!;
 	defer json::finish(v);
 	apply_settings(&s, v);
@@ -145,7 +151,9 @@ fn cleanup_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out
 	let v = json::loadstr(body)!;
 	defer json::finish(v);
 	const o = v as json::object;
-	assert(*(json::get(&o, "method") as *json::value) as str == "workspace/configuration");
+	assert(
+		*(json::get(&o, "method") as *json::value) as str == "workspace/configuration"
+	);
 	const params = *(json::get(&o, "params") as *json::value) as json::object;
 	const items = *(json::get(&params, "items") as *json::value) as []json::value;
 	assert(len(items) == 1);
@@ -153,18 +161,24 @@ fn cleanup_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out
 	assert(*(json::get(&item, "section") as *json::value) as str == "hare");
 };
 
-@test fn did_change_configuration_with_enable_build_change_refreshes_diagnostics() void = {
+@test fn did_change_configuration_with_enable_build_change_refreshes_diagnostics(
+
+) void = {
 	let (s, scan, in_buf, out) = fresh_server();
 	defer cleanup_server(&s, scan, in_buf, out);
 
 	// Open a doc so there's something to refresh.
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;\n"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;\n"}}`;
 	let opv = json::loadstr(open)!;
 	const op = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = opv,
 	};
-	defer { free(op.method); json::finish(opv); };
+	defer {
+		free(op.method);
+		json::finish(opv);
+	};
 	handle_did_open(&s, op);
 
 	// Snapshot the wire to count publishDiagnostics emissions so far.
@@ -190,7 +204,9 @@ fn cleanup_server(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out
 	assert(strings::contains(new_text, "textDocument/publishDiagnostics"));
 };
 
-@test fn did_change_configuration_with_inlay_hints_change_emits_refresh() void = {
+@test fn did_change_configuration_with_inlay_hints_change_emits_refresh(
+
+) void = {
 	let (s, scan, in_buf, out) = fresh_server();
 	defer cleanup_server(&s, scan, in_buf, out);
 

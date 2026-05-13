@@ -15,14 +15,16 @@ use strings;
 	defer finish_session(&s);
 	do_init(&s);
 
-	const sample = `export fn answer() int = 42;
+	const sample =
+		`export fn answer() int = 42;
 
 export fn ask() int = answer();
 `;
 	open_doc(&s, "file:///decl.ha", sample);
 
 	// Cursor on `answer` inside `answer()` call on line 2.
-	const req = `{"jsonrpc":"2.0","id":1100,"method":"textDocument/declaration","params":{"textDocument":{"uri":"file:///decl.ha"},"position":{"line":2,"character":23}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":1100,"method":"textDocument/declaration","params":{"textDocument":{"uri":"file:///decl.ha"},"position":{"line":2,"character":23}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 1100.0);
@@ -32,7 +34,8 @@ export fn ask() int = answer();
 	defer json::finish(v);
 	const obj = v as json::object;
 	const result = match (json::get(&obj, "result")) {
-	case let p: *json::value => yield *p;
+	case let p: *json::value =>
+		yield *p;
 	case void =>
 		fmt::fatalf("e2e: declaration missing result: {}", text);
 	};
@@ -41,11 +44,9 @@ export fn ask() int = answer();
 	match (result) {
 	case json::object => void;
 	case let arr: []json::value =>
-		assert(len(arr) > 0,
-			"declaration should resolve to at least one location");
+		assert(len(arr) > 0, "declaration should resolve to at least one location");
 	case =>
-		fmt::fatalf("e2e: declaration returned null for in-file decl: {}",
-			text);
+		fmt::fatalf("e2e: declaration returned null for in-file decl: {}", text);
 	};
 };
 
@@ -54,13 +55,15 @@ export fn ask() int = answer();
 	defer finish_session(&s);
 	do_init(&s);
 
-	const sample = `export fn answer() int = 42;
+	const sample =
+		`export fn answer() int = 42;
 
 export fn ask() int = answer();
 `;
 	open_doc(&s, "file:///impl.ha", sample);
 
-	const req = `{"jsonrpc":"2.0","id":1101,"method":"textDocument/implementation","params":{"textDocument":{"uri":"file:///impl.ha"},"position":{"line":2,"character":23}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":1101,"method":"textDocument/implementation","params":{"textDocument":{"uri":"file:///impl.ha"},"position":{"line":2,"character":23}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 1101.0);
@@ -69,12 +72,14 @@ export fn ask() int = answer();
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	const result = (*(json::get(&obj, "result") as *json::value));
+	const result = *(json::get(&obj, "result") as *json::value);
 	match (result) {
 	case json::object => void;
 	case let arr: []json::value =>
-		assert(len(arr) > 0,
-			"implementation should resolve to at least one location");
+		assert(
+			len(arr) > 0,
+			"implementation should resolve to at least one location"
+		);
 	case =>
 		fmt::fatalf("e2e: implementation returned null: {}", text);
 	};
@@ -87,7 +92,8 @@ export fn ask() int = answer();
 
 	// `let v: my_int = 0;` -- typeDefinition on `v` should land on the
 	// declaration of `my_int`.
-	const sample = `type my_int = int;
+	const sample =
+		`type my_int = int;
 
 export fn main() void = {
 	let v: my_int = 0;
@@ -97,7 +103,8 @@ export fn main() void = {
 	open_doc(&s, "file:///td.ha", sample);
 
 	// Hover over `v` in `let _ = v` (line 4, char 9).
-	const req = `{"jsonrpc":"2.0","id":1102,"method":"textDocument/typeDefinition","params":{"textDocument":{"uri":"file:///td.ha"},"position":{"line":4,"character":9}}}`;
+	const req =
+		`{"jsonrpc":"2.0","id":1102,"method":"textDocument/typeDefinition","params":{"textDocument":{"uri":"file:///td.ha"},"position":{"line":4,"character":9}}}`;
 	send(&s, strings::toutf8(req));
 
 	const body = wait_for_response(&s, 1102.0);
@@ -106,7 +113,7 @@ export fn main() void = {
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	const result = (*(json::get(&obj, "result") as *json::value));
+	const result = *(json::get(&obj, "result") as *json::value);
 	// We accept either a Location (object), an array, or null. The
 	// existing handler returns null for many shapes; this smoke test
 	// only confirms the wire path returns *something* without crashing.

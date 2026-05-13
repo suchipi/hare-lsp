@@ -9,7 +9,9 @@ use lsp;
 use memio;
 use strings;
 
-fn doc_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn doc_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -17,7 +19,12 @@ fn doc_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) =
 	return (s, scan, in_buf, out);
 };
 
-fn doc_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn doc_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -26,7 +33,10 @@ fn doc_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, o
 	free(out);
 };
 
-fn make_notification(method: str, params_json: str) (lsp::notification, json::value) = {
+fn make_notification(
+	method: str,
+	params_json: str,
+) (lsp::notification, json::value) = {
 	let pv = json::loadstr(params_json)!;
 	const n = lsp::notification {
 		method = strings::dup(method)!,
@@ -44,13 +54,15 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	let (s, scan, in_buf, out) = doc_test_server();
 	defer doc_test_cleanup(&s, scan, in_buf, out);
 
-	const params = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;"}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;"}}`;
 	const (n, pv) = make_notification("textDocument/didOpen", params);
 	defer finish_notification(n, pv);
 
 	handle_did_open(&s, n);
 	const doc = match (find_document(&s, "file:///x.ha")) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null => abort("expected document");
 	};
 	assert(doc.version == 1);
@@ -62,12 +74,14 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	let (s, scan, in_buf, out) = doc_test_server();
 	defer doc_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"old"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"old"}}`;
 	const (n1, pv1) = make_notification("textDocument/didOpen", open);
 	defer finish_notification(n1, pv1);
 	handle_did_open(&s, n1);
 
-	const change = `{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"new content"}]}`;
+	const change =
+		`{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"new content"}]}`;
 	const (n2, pv2) = make_notification("textDocument/didChange", change);
 	defer finish_notification(n2, pv2);
 	handle_did_change(&s, n2);
@@ -81,13 +95,15 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	let (s, scan, in_buf, out) = doc_test_server();
 	defer doc_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"hello world"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"hello world"}}`;
 	const (n1, pv1) = make_notification("textDocument/didOpen", open);
 	defer finish_notification(n1, pv1);
 	handle_did_open(&s, n1);
 
 	// Replace "world" (line 0, chars 6..11) with "there".
-	const change = `{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"range":{"start":{"line":0,"character":6},"end":{"line":0,"character":11}},"text":"there"}]}`;
+	const change =
+		`{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"range":{"start":{"line":0,"character":6},"end":{"line":0,"character":11}},"text":"there"}]}`;
 	const (n2, pv2) = make_notification("textDocument/didChange", change);
 	defer finish_notification(n2, pv2);
 	handle_did_change(&s, n2);
@@ -100,14 +116,16 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	let (s, scan, in_buf, out) = doc_test_server();
 	defer doc_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"abcdef"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"abcdef"}}`;
 	const (n1, pv1) = make_notification("textDocument/didOpen", open);
 	defer finish_notification(n1, pv1);
 	handle_did_open(&s, n1);
 
 	// Two edits: insert "X" at 0, then insert "Y" at end.
 	// After first edit: "Xabcdef" (len 7), so end-after-edit-1 is char 7.
-	const change = `{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"text":"X"},{"range":{"start":{"line":0,"character":7},"end":{"line":0,"character":7}},"text":"Y"}]}`;
+	const change =
+		`{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"text":"X"},{"range":{"start":{"line":0,"character":7},"end":{"line":0,"character":7}},"text":"Y"}]}`;
 	const (n2, pv2) = make_notification("textDocument/didChange", change);
 	defer finish_notification(n2, pv2);
 	handle_did_change(&s, n2);
@@ -120,7 +138,8 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	let (s, scan, in_buf, out) = doc_test_server();
 	defer doc_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"x"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"x"}}`;
 	const (n1, pv1) = make_notification("textDocument/didOpen", open);
 	defer finish_notification(n1, pv1);
 	handle_did_open(&s, n1);
@@ -137,7 +156,8 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	let (s, scan, in_buf, out) = doc_test_server();
 	defer doc_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"old"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"old"}}`;
 	const (n1, pv1) = make_notification("textDocument/didOpen", open);
 	defer finish_notification(n1, pv1);
 	handle_did_open(&s, n1);
@@ -155,7 +175,8 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	let (s, scan, in_buf, out) = doc_test_server();
 	defer doc_test_cleanup(&s, scan, in_buf, out);
 
-	const change = `{"textDocument":{"uri":"file:///nope.ha","version":1},"contentChanges":[{"text":"x"}]}`;
+	const change =
+		`{"textDocument":{"uri":"file:///nope.ha","version":1},"contentChanges":[{"text":"x"}]}`;
 	const (n, pv) = make_notification("textDocument/didChange", change);
 	defer finish_notification(n, pv);
 	handle_did_change(&s, n);
@@ -167,12 +188,14 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	let (s, scan, in_buf, out) = doc_test_server();
 	defer doc_test_cleanup(&s, scan, in_buf, out);
 
-	const open1 = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"first"}}`;
+	const open1 =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"first"}}`;
 	const (n1, pv1) = make_notification("textDocument/didOpen", open1);
 	defer finish_notification(n1, pv1);
 	handle_did_open(&s, n1);
 
-	const open2 = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":2,"text":"second"}}`;
+	const open2 =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":2,"text":"second"}}`;
 	const (n2, pv2) = make_notification("textDocument/didOpen", open2);
 	defer finish_notification(n2, pv2);
 	handle_did_open(&s, n2);
@@ -187,7 +210,8 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	let (s, scan, in_buf, out) = doc_test_server();
 	defer doc_test_cleanup(&s, scan, in_buf, out);
 
-	const open = `{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"fn a() void = void;\n"}}`;
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"fn a() void = void;\n"}}`;
 	const (n, pv) = make_notification("textDocument/didOpen", open);
 	defer finish_notification(n, pv);
 	handle_did_open(&s, n);
@@ -207,7 +231,8 @@ fn finish_notification(n: lsp::notification, pv: json::value) void = {
 	assert(c3: uintptr == c1_addr);
 
 	// A buffer-replacing edit invalidates the cache.
-	const change = `{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"fn b() void = void;\n"}]}`;
+	const change =
+		`{"textDocument":{"uri":"file:///x.ha","version":2},"contentChanges":[{"text":"fn b() void = void;\n"}]}`;
 	const (cn, cpv) = make_notification("textDocument/didChange", change);
 	defer finish_notification(cn, cpv);
 	handle_did_change(&s, cn);

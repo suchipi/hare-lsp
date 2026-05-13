@@ -21,13 +21,17 @@ fn id_eq(a: lsp::id, b: lsp::id) bool = {
 	match (a) {
 	case let af: f64 =>
 		match (b) {
-		case let bf: f64 => return af == bf;
-		case => return false;
+		case let bf: f64 =>
+			return af == bf;
+		case =>
+			return false;
 		};
 	case let as_: str =>
 		match (b) {
-		case let bs: str => return as_ == bs;
-		case => return false;
+		case let bs: str =>
+			return as_ == bs;
+		case =>
+			return false;
 		};
 	};
 };
@@ -104,7 +108,12 @@ export fn record_cancellation(s: *server, id: lsp::id) void = {
 // Reports a malformed request: replies with INVALID_PARAMS so the client
 // sees a concrete error instead of silence. `detail` is included in the
 // human-readable message.
-export fn reject_invalid_request(s: *server, id: lsp::id, method: str, detail: str) void = {
+export fn reject_invalid_request(
+	s: *server,
+	id: lsp::id,
+	method: str,
+	detail: str,
+) void = {
 	const msg = fmt::asprintf("{}: {}", method, detail)!;
 	defer free(msg);
 	const err = lsp::response_error {
@@ -121,7 +130,11 @@ export fn reject_invalid_request(s: *server, id: lsp::id, method: str, detail: s
 // Reports a malformed notification by logging to the client (notifications
 // have no response channel). Warning level so editors surface it without
 // being noisy.
-export fn warn_invalid_notification(s: *server, method: str, detail: str) void = {
+export fn warn_invalid_notification(
+	s: *server,
+	method: str,
+	detail: str,
+) void = {
 	const msg = fmt::asprintf("{}: {}", method, detail)!;
 	defer free(msg);
 	log_warning(s, msg);

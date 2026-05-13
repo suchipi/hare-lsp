@@ -8,7 +8,7 @@
 // These tests guard against regressions that unit tests can't catch — most
 // notably anything tied to the real `os::stdout` (which is a buffered handle
 // and historically caused the server to never flush its initialize response
-// to a long-lived client). See `cmd/hare-lsp/main.ha` for context.
+// to a long-lived client). See `cmd/hare_lsp/main.ha` for context.
 //
 // Tests require ./hare-lsp to exist at the repo root. The Makefile's
 // `test-e2e` target builds it first.
@@ -51,8 +51,17 @@ export type session = struct {
 };
 
 // Spawns the server binary with anonymous pipes on stdin and stdout. The
-// child's stderr is inherited from the parent so server-side diagnostics
-// show up in `hare test` output.
+// child's stderr is redirected to /dev/null rather than inherited. Why:
+// if a test panics before [[finish_session]]'s defer fires, the child
+// outlives the test process and the kernel reparents it to init. Any
+// stderr pipe it inherited from the test runner (typically connected
+// downstream of `hare test` → `make test` → the user's shell pipeline)
+// stays open as long as the orphan does, and downstream stages like
+// `tee` or `tail` block on EOF that never comes. With stderr → nullfd
+// the orphan can't hold a pipe back. If you need to see server
+// diagnostics from an e2e run, set HARE_LSP_LOG_DIR in the test's
+// environment - the server tees its stderr to a file there (see
+// cmd/hare_lsp/main.ha).
 fn spawn_session() session = {
 	const (in_r, in_w) = exec::pipe();
 	const (out_r, out_w) = exec::pipe();
@@ -63,12 +72,12 @@ fn spawn_session() session = {
 	case let e: exec::error =>
 		fmt::fatalf("e2e: cannot prepare {}: {} (is the binary built? run `make`)",
 			BIN_PATH, exec::strerror(e));
-	case nomem =>
-		abort("e2e: out of memory preparing command");
+	case nomem => abort("e2e: out of memory preparing command");
 	};
 
 	exec::addfile(&cmd, os::stdin_file, in_r)!;
 	exec::addfile(&cmd, os::stdout_file, out_w)!;
+	exec::addfile(&cmd, os::stderr_file, exec::nullfd)!;
 
 	const proc = match (exec::start(&cmd)) {
 	case let p: exec::process =>
@@ -115,8 +124,7 @@ fn finish_session(s: *session) void = {
 		case exec::error =>
 			return;
 		};
-		if (time::compare(time::now(time::clock::MONOTONIC),
-				deadline) >= 0) {
+		if (time::compare(time::now(time::clock::MONOTONIC), deadline) >= 0) {
 			break;
 		};
 		time::sleep(10 * time::MILLISECOND);
@@ -135,8 +143,8 @@ fn finish_session(s: *session) void = {
 // Writes a single framed LSP message. The body must already be valid JSON.
 fn send(s: *session, body: const []u8) void = {
 	let header_buf: [64]u8 = [0...];
-	const header = fmt::bsprintf(header_buf,
-		"Content-Length: {}\r\n\r\n", len(body))!;
+	const header =
+		fmt::bsprintf(header_buf, "Content-Length: {}\r\n\r\n", len(body))!;
 	io::writeall(s.stdin, strings::toutf8(header))!;
 	io::writeall(s.stdin, body)!;
 };
@@ -153,8 +161,7 @@ fn send(s: *session, body: const []u8) void = {
 // The next `recv` then blocked on a pipe that had no more bytes to give,
 // because the response had already arrived and been thrown away.
 fn recv(s: *session) []u8 = {
-	const deadline = time::add(time::now(time::clock::MONOTONIC),
-		RECV_TIMEOUT);
+	const deadline = time::add(time::now(time::clock::MONOTONIC), RECV_TIMEOUT);
 	let chunk: [4096]u8 = [0...];
 
 	for (true) {
@@ -169,21 +176,21 @@ fn recv(s: *session) []u8 = {
 		const now = time::now(time::clock::MONOTONIC);
 		if (time::compare(now, deadline) >= 0) {
 			fmt::fatalf("e2e: recv timed out after {} ms (buffered {} bytes)",
-				RECV_TIMEOUT / time::MILLISECOND,
-				len(s.read_buf));
+				RECV_TIMEOUT / time::MILLISECOND, len(s.read_buf));
 		};
 		const remaining_ns = time::diff(now, deadline);
 
-		let pfd: [_]poll::pollfd = [poll::pollfd {
-			fd = s.stdout,
-			events = poll::event::POLLIN,
-			revents = 0,
-		}];
+		let pfd: [_]poll::pollfd = [
+			poll::pollfd {
+				fd = s.stdout,
+				events = poll::event::POLLIN,
+				revents = 0,
+			},
+		];
 		const ready = match (poll::poll(pfd, remaining_ns)) {
 		case let n: uint =>
 			yield n;
-		case poll::error =>
-			abort("e2e: poll failed");
+		case poll::error => abort("e2e: poll failed");
 		};
 		if (ready == 0) {
 			continue; // loop checks deadline at top
@@ -209,8 +216,10 @@ fn recv(s: *session) []u8 = {
 // a complete frame. The returned slice is owned by the caller.
 fn try_take_frame(buf: *[]u8) ([]u8 | void) = {
 	const (body_off, body_len) = match (parse_header(*buf)) {
-	case let p: (size, size) => yield p;
-	case void => return void;
+	case let p: (size, size) =>
+		yield p;
+	case void =>
+		return void;
 	};
 	const frame_end = body_off + body_len;
 	if (len(*buf) < frame_end) return void;
@@ -238,9 +247,9 @@ fn parse_header(buf: []u8) ((size, size) | void) = {
 	let end: size = 0;
 	let found = false;
 	for (let i = 0z; i + len(needle) <= len(buf); i += 1) {
-		if (buf[i] == needle[0] && buf[i + 1] == needle[1]
-				&& buf[i + 2] == needle[2]
-				&& buf[i + 3] == needle[3]) {
+		if (buf[i] == needle[0] && buf[i + 1] == needle[1] &&
+				buf[i + 2] == needle[2] &&
+				buf[i + 3] == needle[3]) {
 			end = i;
 			found = true;
 			break;
@@ -251,8 +260,7 @@ fn parse_header(buf: []u8) ((size, size) | void) = {
 	const headers = match (strings::fromutf8(buf[..end])) {
 	case let s: str =>
 		yield s;
-	case =>
-		abort("e2e: server emitted non-UTF-8 headers");
+	case => abort("e2e: server emitted non-UTF-8 headers");
 	};
 	const length = match (find_content_length(headers)) {
 	case let n: size =>
@@ -276,8 +284,7 @@ fn find_content_length(headers: str) (size | void) = {
 		// The server always emits this casing — keep the compare exact
 		// so we don't pull in extra string utilities for the test path.
 		if (name != "Content-Length") continue;
-		const value = strings::trim(strings::sub(line, colon + 1,
-			strings::end));
+		const value = strings::trim(strings::sub(line, colon + 1, strings::end));
 		match (strconv::stoz(value)) {
 		case let n: size =>
 			return n;
@@ -291,9 +298,13 @@ fn find_content_length(headers: str) (size | void) = {
 // response, then sends `initialized`. Most e2e tests don't care about
 // the response body, so the bytes are discarded.
 fn do_init(s: *session) void = {
-	send(s, strings::toutf8(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`));
+	send(s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
 	free(wait_for_response(s, 1.0));
-	send(s, strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+	send(s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 };
 
 // Sends a textDocument/didOpen for the given URI with the given body.

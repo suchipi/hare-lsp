@@ -22,7 +22,10 @@ export type workspace_folder = struct {
 
 // Replaces the server's workspace folder list. Takes ownership of the slice
 // elements' strings — caller transfers them in. The previous list is freed.
-export fn set_workspace_folders(s: *server, folders: []workspace_folder) void = {
+export fn set_workspace_folders(
+	s: *server,
+	folders: []workspace_folder,
+) void = {
 	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
 		free(s.workspace_folders[i].uri);
 		free(s.workspace_folders[i].name);
@@ -39,6 +42,54 @@ export fn has_workspace_folder(s: *server, uri: str) bool = {
 	return false;
 };
 
+// Returns a freshly-allocated path string for the deepest workspace
+// folder that contains `file_path`, or an empty string when no folder
+// matches. Caller frees.
+//
+// Spawning `hare build` from the workspace root (rather than the file's
+// directory) means a relative `HARECACHE` like `.cache` lands in the
+// project's cache rather than scattering `.cache/` directories beside
+// every file the user touches.
+export fn workspace_root_for_path(s: *server, file_path: str) str = {
+	let best: str = "";
+	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
+		const dir = lsp::uri_decode_path(s.workspace_folders[i].uri);
+		if (len(dir) == 0) {
+			free(dir);
+			continue;
+		};
+		const prefix = strings::concat(dir, "/")!;
+		defer free(prefix);
+		const matched = strings::hasprefix(file_path, prefix)
+			|| file_path == dir;
+		if (matched && len(dir) > len(best)) {
+			free(best);
+			best = dir;
+		} else {
+			free(dir);
+		};
+	};
+	return best;
+};
+
+// Like [[workspace_root_for_path]] but falls back to the file's parent
+// directory when no workspace folder matches. Used by command spawn
+// sites so that single-file editing (no open workspace folder) still
+// has a sensible cwd; otherwise the child inherits the LSP's own cwd,
+// which is `/` under vscode-languageclient.
+export fn spawn_cwd_for_path(s: *server, file_path: str) str = {
+	const root = workspace_root_for_path(s, file_path);
+	if (len(root) > 0) return root;
+	free(root);
+	const idx = strings::rindex(file_path, '/');
+	match (idx) {
+	case let i: size =>
+		return strings::dup(strings::sub(file_path, 0, i))!;
+	case void =>
+		return strings::dup("")!;
+	};
+};
+
 // Decodes the `workspaceFolders` array from initialize params, returning a
 // freshly-allocated slice the caller takes ownership of.
 //
@@ -47,30 +98,40 @@ export fn has_workspace_folder(s: *server, uri: str) bool = {
 // focused on the array shape.
 export fn decode_workspace_folders(v: json::value) []workspace_folder = {
 	const arr = match (v) {
-	case let a: []json::value => yield a;
-	case => return [];
+	case let a: []json::value =>
+		yield a;
+	case =>
+		return [];
 	};
 	let out: []workspace_folder = alloc([], len(arr))!;
 	for (let i = 0z; i < len(arr); i += 1) {
 		const o = match (arr[i]) {
-		case let o: json::object => yield o;
-		case => continue;
+		case let o: json::object =>
+			yield o;
+		case =>
+			continue;
 		};
 		const uri = match (json::get(&o, "uri")) {
 		case let p: *json::value =>
 			yield match (*p) {
-			case let s: str => yield strings::dup(s)!;
-			case => continue;
+			case let s: str =>
+				yield strings::dup(s)!;
+			case =>
+				continue;
 			};
-		case => continue;
+		case =>
+			continue;
 		};
 		const name = match (json::get(&o, "name")) {
 		case let p: *json::value =>
 			yield match (*p) {
-			case let s: str => yield strings::dup(s)!;
-			case => yield strings::dup("")!;
+			case let s: str =>
+				yield strings::dup(s)!;
+			case =>
+				yield strings::dup("")!;
 			};
-		case => yield strings::dup("")!;
+		case =>
+			yield strings::dup("")!;
 		};
 		append(out, workspace_folder { uri = uri, name = name })!;
 	};
@@ -91,7 +152,10 @@ export fn request_workspace_folders(s: *server) (i64 | void) = {
 
 // Applies the result payload from a workspace/workspaceFolders response. The
 // payload is either a json array of folder objects or null.
-export fn apply_workspace_folders_response(s: *server, result: json::value) void = {
+export fn apply_workspace_folders_response(
+	s: *server,
+	result: json::value,
+) void = {
 	const folders = decode_workspace_folders(result);
 	set_workspace_folders(s, folders);
 };
@@ -100,22 +164,32 @@ export fn apply_workspace_folders_response(s: *server, result: json::value) void
 // `added` and `removed` arrays. Removed folders have their indexed
 // entries dropped; added folders are immediately scanned and indexed
 // so workspace-wide features see the new content.
-export fn handle_did_change_workspace_folders(s: *server, n: lsp::notification) void = {
+export fn handle_did_change_workspace_folders(
+	s: *server,
+	n: lsp::notification,
+) void = {
 	const params = match (n.params) {
-	case let v: json::value => yield v;
-	case void => return;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return;
 	};
 	const obj = match (params) {
-	case let o: json::object => yield o;
-	case => return;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return;
 	};
 	const event = match (json::get(&obj, "event")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return;
 		};
-	case => return;
+	case =>
+		return;
 	};
 
 	// Apply removals first.
@@ -137,8 +211,7 @@ export fn handle_did_change_workspace_folders(s: *server, n: lsp::notification) 
 					case let pv: *json::value =>
 						match (*pv) {
 						case let uri: str =>
-							append(removed_paths,
-								uri_to_dir_path(uri))!;
+							append(removed_paths, uri_to_dir_path(uri))!;
 							remove_workspace_folder(s, uri);
 						case => void;
 						};
@@ -172,8 +245,7 @@ export fn handle_did_change_workspace_folders(s: *server, n: lsp::notification) 
 		};
 		free(new);
 		if (len(roots) > 0) {
-			start_index_job(s, roots, &s.workspace_index,
-				"Indexing workspace",
+			start_index_job(s, roots, &s.workspace_index, "Indexing workspace",
 				"hare-lsp: indexed");
 		};
 	case => void;

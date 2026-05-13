@@ -10,7 +10,9 @@ use memio;
 use strconv;
 use strings;
 
-fn ca_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn ca_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -18,7 +20,12 @@ fn ca_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = 
 	return (s, scan, in_buf, out);
 };
 
-fn ca_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn ca_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -28,15 +35,19 @@ fn ca_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, ou
 };
 
 fn ca_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -77,8 +88,10 @@ fn ca_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 };
 
 fn organize_imports_new_text(s: *server, uri: str) str = {
-	const params = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}`)!;
+	const params =
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}`
+		)!;
 	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
@@ -92,7 +105,8 @@ fn organize_imports_new_text(s: *server, uri: str) str = {
 
 	const v = ca_skip_to_response(s.out: *memio::stream, 60.0);
 	defer json::finish(v);
-	const actions = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const actions =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	assert(len(actions) >= 1);
 	// First action should be organize-imports.
 	const action = actions[0] as json::object;
@@ -100,7 +114,8 @@ fn organize_imports_new_text(s: *server, uri: str) str = {
 	const changes = *(json::get(&edit, "changes") as *json::value) as json::object;
 	const edits = *(json::get(&changes, uri) as *json::value) as []json::value;
 	const first_edit = edits[0] as json::object;
-	return strings::dup(*(json::get(&first_edit, "newText") as *json::value) as str)!;
+	return strings::dup(
+		*(json::get(&first_edit, "newText") as *json::value) as str)!;
 };
 
 @test fn organize_imports_preserves_alias() void = {
@@ -142,8 +157,10 @@ fn organize_imports_new_text(s: *server, uri: str) str = {
 // Returns every code action returned for the given URI. The caller owns
 // the response and must finish it.
 fn ca_get_actions(s: *server, uri: str, request_id: f64) json::value = {
-	const params = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}`)!;
+	const params =
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}`
+		)!;
 	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
@@ -159,7 +176,8 @@ fn ca_get_actions(s: *server, uri: str, request_id: f64) json::value = {
 
 // Counts code actions in a response whose title starts with `prefix`.
 fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
-	const actions = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const actions =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	let n: size = 0;
 	for (let i = 0z; i < len(actions); i += 1) {
 		const action = actions[i] as json::object;
@@ -191,8 +209,7 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	let (s, scan, in_buf, out) = ca_test_server();
 	defer ca_test_cleanup(&s, scan, in_buf, out);
 	// `foo` is the alias and never appears in the body.
-	ca_open(&s, "file:///u2.ha",
-		"use foo = bar::baz;\\nfn x() void = void;\\n");
+	ca_open(&s, "file:///u2.ha", "use foo = bar::baz;\\nfn x() void = void;\\n");
 
 	const v = ca_get_actions(&s, "file:///u2.ha", 101.0);
 	defer json::finish(v);
@@ -221,8 +238,7 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	defer ca_test_cleanup(&s, scan, in_buf, out);
 	// Member `a` is called directly; `b` is not. Whole import stays
 	// because at least one member is used.
-	ca_open(&s, "file:///u4.ha",
-		"use foo::{a, b};\\nfn x() void = a();\\n");
+	ca_open(&s, "file:///u4.ha", "use foo::{a, b};\\nfn x() void = a();\\n");
 
 	const v = ca_get_actions(&s, "file:///u4.ha", 103.0);
 	defer json::finish(v);
@@ -233,8 +249,7 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 @test fn unused_imports_all_members_unused_is_flagged() void = {
 	let (s, scan, in_buf, out) = ca_test_server();
 	defer ca_test_cleanup(&s, scan, in_buf, out);
-	ca_open(&s, "file:///u5.ha",
-		"use foo::{a, b};\\nfn x() void = void;\\n");
+	ca_open(&s, "file:///u5.ha", "use foo::{a, b};\\nfn x() void = void;\\n");
 
 	const v = ca_get_actions(&s, "file:///u5.ha", 104.0);
 	defer json::finish(v);
@@ -247,8 +262,7 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	defer ca_test_cleanup(&s, scan, in_buf, out);
 	// Wildcard imports are conservatively never flagged: the names
 	// they expose can't be statically enumerated.
-	ca_open(&s, "file:///u6.ha",
-		"use foo::*;\\nfn x() void = void;\\n");
+	ca_open(&s, "file:///u6.ha", "use foo::*;\\nfn x() void = void;\\n");
 
 	const v = ca_get_actions(&s, "file:///u6.ha", 105.0);
 	defer json::finish(v);
@@ -262,8 +276,7 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	// `foo` appears in `bar::foo::baz` but is a path continuation, not
 	// a reference to the imported `foo` module. So `use foo;` is
 	// unused.
-	ca_open(&s, "file:///u7.ha",
-		"use foo;\\nfn x() void = bar::foo::baz();\\n");
+	ca_open(&s, "file:///u7.ha", "use foo;\\nfn x() void = bar::foo::baz();\\n");
 
 	const v = ca_get_actions(&s, "file:///u7.ha", 106.0);
 	defer json::finish(v);
@@ -277,7 +290,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	// `foo::` appears inside a comment and a string literal; neither
 	// counts as a real use of the import.
 	ca_open(&s, "file:///u8.ha",
-		"use foo;\\n// foo::bar\\nfn x() void = {\\n\\tconst s = \\\"foo::baz\\\";\\n};\\n");
+		"use foo;\\n// foo::bar\\nfn x() void = {\\n\\tconst s = \\\"foo::baz\\\";\\n};\\n"
+	);
 
 	const v = ca_get_actions(&s, "file:///u8.ha", 107.0);
 	defer json::finish(v);
@@ -288,12 +302,12 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 @test fn unused_import_quickfix_edit_clears_the_use_line() void = {
 	let (s, scan, in_buf, out) = ca_test_server();
 	defer ca_test_cleanup(&s, scan, in_buf, out);
-	ca_open(&s, "file:///u9.ha",
-		"use foo;\\nfn x() void = void;\\n");
+	ca_open(&s, "file:///u9.ha", "use foo;\\nfn x() void = void;\\n");
 
 	const v = ca_get_actions(&s, "file:///u9.ha", 108.0);
 	defer json::finish(v);
-	const actions = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const actions =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	// Find the per-import quickfix (kind == "quickfix").
 	let found_quickfix = false;
 	for (let i = 0z; i < len(actions); i += 1) {
@@ -301,8 +315,10 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 		const kind = *(json::get(&action, "kind") as *json::value) as str;
 		if (kind != "quickfix") continue;
 		const edit = *(json::get(&action, "edit") as *json::value) as json::object;
-		const changes = *(json::get(&edit, "changes") as *json::value) as json::object;
-		const edits = *(json::get(&changes, "file:///u9.ha") as *json::value) as []json::value;
+		const changes =
+			*(json::get(&edit, "changes") as *json::value) as json::object;
+		const edits =
+			*(json::get(&changes, "file:///u9.ha") as *json::value) as []json::value;
 		assert(len(edits) == 1);
 		const e0 = edits[0] as json::object;
 		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
@@ -327,15 +343,18 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 
 	const v = ca_get_actions(&s, "file:///u10.ha", 109.0);
 	defer json::finish(v);
-	const actions = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const actions =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	let found_batch = false;
 	for (let i = 0z; i < len(actions); i += 1) {
 		const action = actions[i] as json::object;
 		const kind = *(json::get(&action, "kind") as *json::value) as str;
 		if (kind != "source.removeUnused") continue;
 		const edit = *(json::get(&action, "edit") as *json::value) as json::object;
-		const changes = *(json::get(&edit, "changes") as *json::value) as json::object;
-		const edits = *(json::get(&changes, "file:///u10.ha") as *json::value) as []json::value;
+		const changes =
+			*(json::get(&edit, "changes") as *json::value) as json::object;
+		const edits =
+			*(json::get(&changes, "file:///u10.ha") as *json::value) as []json::value;
 		assert(len(edits) == 3);
 		found_batch = true;
 		break;
@@ -352,7 +371,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	// unused-import diagnostic shape. The request range is at line 0
 	// where the range-based path would also produce a quickfix; only
 	// one should make it through after dedup.
-	const params = `{"textDocument":{"uri":"file:///dd.ha"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[{"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":0}},"severity":4,"code":"unused-import","source":"hare-lsp","message":"unused import","tags":[1],"data":{"kind":"unused-import","import_idx":0}}]}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///dd.ha"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[{"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":0}},"severity":4,"code":"unused-import","source":"hare-lsp","message":"unused import","tags":[1],"data":{"kind":"unused-import","import_idx":0}}]}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -365,7 +385,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 
 	const v = ca_skip_to_response(out, 200.0);
 	defer json::finish(v);
-	const actions = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const actions =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	let quickfix_count: size = 0;
 	let saw_with_diag = false;
 	for (let i = 0z; i < len(actions); i += 1) {
@@ -391,8 +412,10 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 		};
 		// The edit removes the import line.
 		const edit = *(json::get(&action, "edit") as *json::value) as json::object;
-		const changes = *(json::get(&edit, "changes") as *json::value) as json::object;
-		const edits = *(json::get(&changes, "file:///dd.ha") as *json::value) as []json::value;
+		const changes =
+			*(json::get(&edit, "changes") as *json::value) as json::object;
+		const edits =
+			*(json::get(&changes, "file:///dd.ha") as *json::value) as []json::value;
 		assert(len(edits) == 1);
 		const e0 = edits[0] as json::object;
 		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
@@ -408,10 +431,10 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	// `foo` is unused, but the request range is on line 2 (the fn
 	// decl). Per-import quickfix should be suppressed; the source
 	// action should still appear.
-	ca_open(&s, "file:///u11.ha",
-		"use foo;\\n\\nfn x() void = void;\\n");
+	ca_open(&s, "file:///u11.ha", "use foo;\\n\\nfn x() void = void;\\n");
 
-	const params = `{"textDocument":{"uri":"file:///u11.ha"},"range":{"start":{"line":2,"character":0},"end":{"line":2,"character":0}},"context":{"diagnostics":[]}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///u11.ha"},"range":{"start":{"line":2,"character":0},"end":{"line":2,"character":0}},"context":{"diagnostics":[]}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -423,7 +446,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	handle_code_action(&s, r);
 	const v = ca_skip_to_response(out, 110.0);
 	defer json::finish(v);
-	const actions = *(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	const actions =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
 	let saw_quickfix = false;
 	let saw_batch = false;
 	for (let i = 0z; i < len(actions); i += 1) {

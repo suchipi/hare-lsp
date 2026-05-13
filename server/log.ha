@@ -35,12 +35,16 @@ export def DEFAULT_LOG_LEVEL: log_level = log_level::INFO;
 // doesn't silence everything.
 export fn log_level_from_env() log_level = {
 	const v = match (os::getenv("HARE_LSP_LOG_LEVEL")) {
-	case let s: str => yield s;
-	case void => return DEFAULT_LOG_LEVEL;
+	case let s: str =>
+		yield s;
+	case void =>
+		return DEFAULT_LOG_LEVEL;
 	};
 	return match (parse_log_level(v)) {
-	case let l: log_level => yield l;
-	case void => yield DEFAULT_LOG_LEVEL;
+	case let l: log_level =>
+		yield l;
+	case void =>
+		yield DEFAULT_LOG_LEVEL;
 	};
 };
 
@@ -57,26 +61,32 @@ export fn parse_log_level(s: str) (log_level | void) = {
 
 // Reports whether a message at `lvl` should be emitted given the
 // configured `min` threshold.
-export fn level_enabled(min: log_level, lvl: log_level) bool =
-	(lvl: int) >= (min: int);
+export fn level_enabled(
+	min: log_level,
+	lvl: log_level,
+) bool = lvl: int >= min: int;
 
 // --- emit helpers ----------------------------------------------------
+export fn slog_debug(s: *server, args: fmt::formattable...) void = log_args(s,
+	log_level::DEBUG, args...);
 
-export fn slog_debug(s: *server, args: fmt::formattable...) void =
-	log_args(s, log_level::DEBUG, args...);
-export fn slog_info(s: *server, args: fmt::formattable...) void =
-	log_args(s, log_level::INFO, args...);
-export fn slog_warn(s: *server, args: fmt::formattable...) void =
-	log_args(s, log_level::WARN, args...);
-export fn slog_error(s: *server, args: fmt::formattable...) void =
-	log_args(s, log_level::ERROR, args...);
+export fn slog_info(s: *server, args: fmt::formattable...) void = log_args(s,
+	log_level::INFO, args...);
+
+export fn slog_warn(s: *server, args: fmt::formattable...) void = log_args(s,
+	log_level::WARN, args...);
+
+export fn slog_error(s: *server, args: fmt::formattable...) void = log_args(s,
+	log_level::ERROR, args...);
 
 fn log_args(s: *server, lvl: log_level, args: fmt::formattable...) void = {
 	if (!level_enabled(s.log_min_level, lvl)) return;
 	write_log_prefix(lvl);
 	match (fmt::fprintln(os::stderr, args...)) {
 	case size => void;
-	case io::error => void; // best effort; nothing useful to do on EIO
+	case io::error => void;
+	// best effort; nothing useful to do on EIO
+
 	};
 };
 
@@ -85,8 +95,7 @@ fn log_args(s: *server, lvl: log_level, args: fmt::formattable...) void = {
 // placeholder rather than skipped — every log line carries at least the
 // level tag so callers can still grep.
 fn write_log_prefix(lvl: log_level) void = {
-	let d = date::from_instant(date::UTC,
-		time::now(time::clock::REALTIME));
+	let d = date::from_instant(date::UTC, time::now(time::clock::REALTIME));
 	// The literal "Z" suffix marks UTC; date::format treats non-'%'
 	// runes as literals so we can embed it directly in the layout.
 	match (date::format(os::stderr, "%Y-%m-%dT%H:%M:%SZ ", &d)) {
@@ -101,9 +110,13 @@ fn write_log_prefix(lvl: log_level) void = {
 
 fn level_name(lvl: log_level) str = {
 	switch (lvl) {
-	case log_level::DEBUG => return "DEBUG";
-	case log_level::INFO => return "INFO";
-	case log_level::WARN => return "WARN";
-	case log_level::ERROR => return "ERROR";
+	case log_level::DEBUG =>
+		return "DEBUG";
+	case log_level::INFO =>
+		return "INFO";
+	case log_level::WARN =>
+		return "WARN";
+	case log_level::ERROR =>
+		return "ERROR";
 	};
 };

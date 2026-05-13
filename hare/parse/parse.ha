@@ -21,11 +21,7 @@ export type error = !lex::error;
 // allocated.
 export fn strerror(err: error) const str = lex::strerror(err: lex::error);
 
-fn syntaxerr(
-	loc: lex::location,
-	fmt: str,
-	args: fmt::field...
-) lex::error = {
+fn syntaxerr(loc: lex::location, fmt: str, args: fmt::field...) lex::error = {
 	static let buf: [4096]u8 = [0...];
 	let why = fmt::bsprintf(buf, fmt, args...)!;
 	return lex::syntaxerr(loc, why);
@@ -62,8 +58,8 @@ export fn want(lexer: *lex::lexer, want: lex::ltok...) (lex::token | error) = {
 		};
 	};
 	lex::unlex(lexer, tok);
-	return syntaxerr(tok.2, "Unexpected '{}', was expecting {}",
-		lex::tokstr(tok), memio::string(&buf)!);
+	return syntaxerr(tok.2, "Unexpected '{}', was expecting {}", lex::tokstr(tok),
+		memio::string(&buf)!);
 };
 
 // Looks for a matching ltok from the lexer, and if not present, unlexes the

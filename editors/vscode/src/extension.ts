@@ -26,6 +26,38 @@ const execFileAsync = promisify(execFile);
 
 let client: LanguageClient | undefined;
 
+type TestStatus = "passed" | "failed" | "skipped";
+
+interface TestEntry {
+  line: number;
+  status: TestStatus;
+}
+
+// uri -> testName -> { line, status }. Populated as `hare test` output
+// is parsed and consumed by applyDecorations() when an editor for the
+// file is visible.
+const testResults = new Map<string, Map<string, TestEntry>>();
+
+interface FailureLoc {
+  // URI of the file where the failing assertion lives. May differ from
+  // the test source file if the test called into a helper.
+  uri: string;
+  line: number;
+  col: number;
+  message: string;
+}
+
+// Test source uri -> testName -> failure locations (usually one per
+// failing test, but Hare's runner could in principle emit several).
+// Indexed by *test* source so a re-run of that test can clear the
+// associated underlines wherever they landed.
+const testFailures = new Map<string, Map<string, FailureLoc[]>>();
+
+let passedDecoration: vscode.TextEditorDecorationType | undefined;
+let failedDecoration: vscode.TextEditorDecorationType | undefined;
+let skippedDecoration: vscode.TextEditorDecorationType | undefined;
+let failureDiagnostics: vscode.DiagnosticCollection | undefined;
+
 // vscode-languageclient's default ErrorHandler shows a toast after just a
 // handful of restarts and requires the user to click "Restart" to bring
 // the server back. That's reasonable for a server that's expected to be
@@ -112,6 +144,26 @@ class HareLspErrorHandler implements ErrorHandler {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  const mkDecoration = (name: TestStatus, ruler: string) =>
+    vscode.window.createTextEditorDecorationType({
+      gutterIconPath: vscode.Uri.file(
+        context.asAbsolutePath(`media/test-${name}.svg`),
+      ),
+      gutterIconSize: "contain",
+      overviewRulerColor: ruler,
+      overviewRulerLane: vscode.OverviewRulerLane.Left,
+    });
+  passedDecoration = mkDecoration("passed", "#3fb950");
+  failedDecoration = mkDecoration("failed", "#f85149");
+  skippedDecoration = mkDecoration("skipped", "#d4a72c");
+  failureDiagnostics = vscode.languages.createDiagnosticCollection("hare-test");
+  context.subscriptions.push(
+    passedDecoration,
+    failedDecoration,
+    skippedDecoration,
+    failureDiagnostics,
+  );
+
   const serverPath = vscode.workspace
     .getConfiguration("hare-lsp")
     .get<string>("path") ?? "hare-lsp";
@@ -229,7 +281,42 @@ export function activate(context: vscode.ExtensionContext): void {
           const label = testName && testName.length > 0
             ? `hare test: ${testName}`
             : `hare test: ${modulePath.relative}`;
-          runHareInTerminal(hareArgs, modulePath.cwd, label, traceOutputChannel);
+          await saveIfDirty(uri);
+          // Look up which lines the tests live on so output parsing can
+          // attach gutter status to the right ranges.
+          const lenses = await fetchTestLenses(uri);
+          const lineOf = new Map<string, number>();
+          for (const l of lenses) lineOf.set(l.name, l.line);
+          // Clear previously recorded results for the tests we're about
+          // to re-run so stale gutter icons and underlines disappear
+          // immediately.
+          const perFile = testResults.get(uri);
+          if (perFile) {
+            if (testName && testName.length > 0) {
+              perFile.delete(testName);
+            } else {
+              perFile.clear();
+            }
+            refreshDecorationsForUri(uri);
+          }
+          clearFailuresFor(uri, testName && testName.length > 0 ? testName : undefined);
+          const parser = createTestOutputParser({
+            cwd: modulePath.cwd,
+            onResult: (name, status) => {
+              const line = lineOf.get(name);
+              if (line === undefined) return;
+              recordTestResult(uri, name, line, status);
+            },
+            onFailure: (name, failUri, fline, fcol, message) => {
+              recordTestFailure(uri, name, {
+                uri: failUri,
+                line: fline,
+                col: fcol,
+                message,
+              });
+            },
+          });
+          runHareInTerminal(hareArgs, modulePath.cwd, label, traceOutputChannel, parser);
           return null;
         }
         if (command === "hare-lsp.runModule") {
@@ -550,9 +637,67 @@ export function activate(context: vscode.ExtensionContext): void {
         { forceNewWindow: true },
       );
     }),
-    vscode.window.onDidChangeActiveTextEditor(() => {
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
       updateVisibility();
       void refreshStatus();
+      if (editor) applyDecorations(editor);
+    }),
+    vscode.window.onDidChangeVisibleTextEditors((editors) => {
+      for (const editor of editors) applyDecorations(editor);
+    }),
+    vscode.commands.registerCommand("hare-lsp.runTestsInFile", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== "hare") {
+        void vscode.window.showWarningMessage(
+          "Open a Hare file to run its tests.",
+        );
+        return;
+      }
+      if (editor.document.isDirty) await editor.document.save();
+      const uri = editor.document.uri.toString();
+      const lenses = await fetchTestLenses(uri);
+      if (lenses.length === 0) {
+        void vscode.window.showInformationMessage(
+          "No @test functions found in this file.",
+        );
+        return;
+      }
+      const modulePath = resolveModulePath(uri);
+      const lineOf = new Map<string, number>();
+      const names: string[] = [];
+      for (const l of lenses) {
+        lineOf.set(l.name, l.line);
+        names.push(l.name);
+      }
+      const perFile = testResults.get(uri);
+      if (perFile) {
+        perFile.clear();
+        refreshDecorationsForUri(uri);
+      }
+      clearFailuresFor(uri);
+      const parser = createTestOutputParser({
+        cwd: modulePath.cwd,
+        onResult: (name, status) => {
+          const line = lineOf.get(name);
+          if (line === undefined) return;
+          recordTestResult(uri, name, line, status);
+        },
+        onFailure: (name, failUri, fline, fcol, message) => {
+          recordTestFailure(uri, name, {
+            uri: failUri,
+            line: fline,
+            col: fcol,
+            message,
+          });
+        },
+      });
+      runHareInTerminal(
+        ["test", modulePath.relative, ...names],
+        modulePath.cwd,
+        `hare test: ${path.basename(editor.document.uri.fsPath)} (${names.length} tests)`,
+        traceOutputChannel,
+        parser,
+      );
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("hare.path")) {
@@ -569,6 +714,8 @@ export function activate(context: vscode.ExtensionContext): void {
       void refreshStatus();
     }),
   );
+
+  installTerminalShellWatcher(context, traceOutputChannel);
 
   updateVisibility();
   void refreshStatus();
@@ -597,6 +744,243 @@ function resolveModulePath(uri: string): { cwd: string; relative: string } {
   const cwd = folder?.uri.fsPath ?? fileDir;
   const rel = path.relative(cwd, fileDir);
   return { cwd, relative: rel.length > 0 ? rel : "." };
+}
+
+// Queries the server for code lenses on `uri`, then filters to the
+// `▶ Run test: <name>` lenses and extracts (name, line) for each. The
+// server emits these eagerly (no codeLens/resolve needed), so the
+// command + arguments are always populated.
+async function fetchTestLenses(
+  uri: string,
+): Promise<Array<{ name: string; line: number }>> {
+  if (!client) return [];
+  type LspCodeLens = {
+    range: { start: { line: number; character: number } };
+    command?: { command: string; arguments?: unknown[] };
+  };
+  let lenses: LspCodeLens[] | null = null;
+  try {
+    lenses = await client.sendRequest<LspCodeLens[] | null>(
+      "textDocument/codeLens",
+      { textDocument: { uri } },
+    );
+  } catch {
+    return [];
+  }
+  if (!lenses) return [];
+  const out: Array<{ name: string; line: number }> = [];
+  for (const lens of lenses) {
+    const cmd = lens.command;
+    if (!cmd || cmd.command !== "hare-lsp.runTest") continue;
+    const args = cmd.arguments ?? [];
+    if (args.length < 2) continue;
+    const name = typeof args[1] === "string" ? args[1] : "";
+    if (name.length === 0) continue;
+    out.push({ name, line: lens.range.start.line });
+  }
+  return out;
+}
+
+// Hare's test runner prints one line per test in the form
+// `<name>.....PASS in 0.000006000s` (FAIL / SKIP variants share the
+// shape). The in-extension pty path captures from a pipe (no colors);
+// the shell-integration path captures from a real terminal, which may
+// include ANSI escapes - those are stripped in createTestOutputParser.
+const TEST_RESULT_RE =
+  /^([A-Za-z_][A-Za-z0-9_]*)\.{2,}(PASS|FAIL|SKIP) in \d+\.\d+s\s*$/;
+
+// CSI / OSC escape sequences. Conservative: covers `\x1b[…m`, cursor
+// moves, OSC strings terminated by BEL or ST, and bare single-char
+// escapes. Good enough for Hare's runner output.
+const ANSI_ESCAPE_RE =
+  // eslint-disable-next-line no-control-regex
+  /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
+
+// In the post-run `Failures:` section, each failure with a known
+// location prints as `<testname>: <path>:<line>:<col>: <message>`.
+// Backtrace lines (when present) start with hex addresses and don't
+// match this shape.
+const TEST_FAILURE_RE =
+  /^([A-Za-z_][A-Za-z0-9_]*): ([^:]+):(\d+):(\d+): (.+)$/;
+
+function parseTestStatus(status: string): TestStatus | undefined {
+  if (status === "PASS") return "passed";
+  if (status === "FAIL") return "failed";
+  if (status === "SKIP") return "skipped";
+  return undefined;
+}
+
+interface ParserCallbacks {
+  cwd: string;
+  onResult: (name: string, status: TestStatus) => void;
+  onFailure: (
+    testName: string,
+    uri: string,
+    line: number,
+    col: number,
+    message: string,
+  ) => void;
+}
+
+// Stateful line-buffered parser. Returns a function that should be
+// called with each chunk of child stdout/stderr; it invokes `onResult`
+// for each per-test status line and `onFailure` for each failure entry
+// in the trailing `Failures:` section.
+function createTestOutputParser(
+  cb: ParserCallbacks & { stripAnsi?: boolean },
+): (chunk: string) => void {
+  let buf = "";
+  return (chunk: string): void => {
+    buf += cb.stripAnsi ? chunk.replace(ANSI_ESCAPE_RE, "") : chunk;
+    for (;;) {
+      const idx = buf.indexOf("\n");
+      if (idx < 0) break;
+      const line = buf.slice(0, idx).replace(/\r$/, "");
+      buf = buf.slice(idx + 1);
+      const r = TEST_RESULT_RE.exec(line);
+      if (r) {
+        const status = parseTestStatus(r[2]);
+        if (status) cb.onResult(r[1], status);
+        continue;
+      }
+      const f = TEST_FAILURE_RE.exec(line);
+      if (f) {
+        const rawPath = f[2];
+        const absPath = path.isAbsolute(rawPath)
+          ? rawPath
+          : path.resolve(cb.cwd, rawPath);
+        const uri = vscode.Uri.file(absPath).toString();
+        cb.onFailure(f[1], uri, Number(f[3]), Number(f[4]), f[5]);
+      }
+    }
+  };
+}
+
+function applyDecorations(editor: vscode.TextEditor): void {
+  if (editor.document.languageId !== "hare") return;
+  if (!passedDecoration || !failedDecoration || !skippedDecoration) return;
+  const uri = editor.document.uri.toString();
+  const entries = testResults.get(uri);
+  const passed: vscode.DecorationOptions[] = [];
+  const failed: vscode.DecorationOptions[] = [];
+  const skipped: vscode.DecorationOptions[] = [];
+  if (entries) {
+    for (const [name, entry] of entries) {
+      const range = new vscode.Range(entry.line, 0, entry.line, 0);
+      const hover = new vscode.MarkdownString(
+        `Hare test \`${name}\`: **${entry.status}**`,
+      );
+      const opts: vscode.DecorationOptions = { range, hoverMessage: hover };
+      if (entry.status === "passed") passed.push(opts);
+      else if (entry.status === "failed") failed.push(opts);
+      else skipped.push(opts);
+    }
+  }
+  editor.setDecorations(passedDecoration, passed);
+  editor.setDecorations(failedDecoration, failed);
+  editor.setDecorations(skippedDecoration, skipped);
+}
+
+function refreshDecorationsForUri(uri: string): void {
+  for (const editor of vscode.window.visibleTextEditors) {
+    if (editor.document.uri.toString() === uri) applyDecorations(editor);
+  }
+}
+
+// `hare test` reads from disk, so an unsaved buffer would be tested
+// against its on-disk contents. Save the matching document first so
+// the user is running what they see.
+async function saveIfDirty(uri: string): Promise<void> {
+  for (const doc of vscode.workspace.textDocuments) {
+    if (doc.uri.toString() !== uri) continue;
+    if (doc.isDirty) await doc.save();
+    return;
+  }
+}
+
+function recordTestResult(uri: string, name: string, line: number, status: TestStatus): void {
+  let perFile = testResults.get(uri);
+  if (!perFile) {
+    perFile = new Map();
+    testResults.set(uri, perFile);
+  }
+  perFile.set(name, { line, status });
+  refreshDecorationsForUri(uri);
+}
+
+// Walks `testFailures`, groups failure locations by target uri, and
+// republishes the diagnostic collection. Cheap enough for the volume
+// of failures a single `hare test` run produces.
+function rebuildFailureDiagnostics(): void {
+  if (!failureDiagnostics) return;
+  const byTarget = new Map<string, vscode.Diagnostic[]>();
+  for (const perFile of testFailures.values()) {
+    for (const [testName, locs] of perFile) {
+      for (const loc of locs) {
+        const start = new vscode.Position(
+          Math.max(0, loc.line - 1),
+          Math.max(0, loc.col - 1),
+        );
+        // Try to extend to the end of the line so the wavy underline
+        // is visible even when no doc is open we fall back to a
+        // zero-width range, which VSCode still renders as a 1-char
+        // wavy underline.
+        let end = start;
+        for (const doc of vscode.workspace.textDocuments) {
+          if (doc.uri.toString() === loc.uri) {
+            const lineLen = doc.lineAt(start.line).range.end.character;
+            end = new vscode.Position(start.line, lineLen);
+            break;
+          }
+        }
+        const diag = new vscode.Diagnostic(
+          new vscode.Range(start, end),
+          `${loc.message}\nFailing test: ${testName}`,
+          vscode.DiagnosticSeverity.Error,
+        );
+        diag.source = "hare test";
+        let bucket = byTarget.get(loc.uri);
+        if (!bucket) {
+          bucket = [];
+          byTarget.set(loc.uri, bucket);
+        }
+        bucket.push(diag);
+      }
+    }
+  }
+  failureDiagnostics.clear();
+  for (const [uri, diags] of byTarget) {
+    failureDiagnostics.set(vscode.Uri.parse(uri), diags);
+  }
+}
+
+function recordTestFailure(
+  sourceUri: string,
+  testName: string,
+  loc: FailureLoc,
+): void {
+  let perFile = testFailures.get(sourceUri);
+  if (!perFile) {
+    perFile = new Map();
+    testFailures.set(sourceUri, perFile);
+  }
+  let arr = perFile.get(testName);
+  if (!arr) {
+    arr = [];
+    perFile.set(testName, arr);
+  }
+  arr.push(loc);
+  rebuildFailureDiagnostics();
+}
+
+// Clears failure entries for one test (when re-running just that test)
+// or for every test in `sourceUri` (when running all tests in a file).
+function clearFailuresFor(sourceUri: string, testName?: string): void {
+  const perFile = testFailures.get(sourceUri);
+  if (!perFile) return;
+  if (testName === undefined) perFile.clear();
+  else perFile.delete(testName);
+  rebuildFailureDiagnostics();
 }
 
 // Backing session for the singleton "Hare" terminal. Created lazily on
@@ -643,9 +1027,10 @@ class HareTerminalSession {
     argv: string[],
     cwd: string,
     env: Record<string, string>,
+    onChunk?: (text: string) => void,
   ): void {
     this.terminal.show(true);
-    const start = () => this.spawnChild(harePath, argv, cwd, env);
+    const start = () => this.spawnChild(harePath, argv, cwd, env, onChunk);
     if (this.opened) start();
     else this.pending.push(start);
   }
@@ -655,6 +1040,7 @@ class HareTerminalSession {
     argv: string[],
     cwd: string,
     env: Record<string, string>,
+    onChunk: ((text: string) => void) | undefined,
   ): void {
     // If a previous run is still in flight, kill it before starting a
     // new one. Its exit handler will still fire later; the guard in the
@@ -687,6 +1073,7 @@ class HareTerminalSession {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
       // Terminals require CRLF; the child emits bare LF.
       this.writeEmitter.fire(text.replace(/\r?\n/g, "\r\n"));
+      if (onChunk) onChunk(text);
     };
     child.stdout?.on("data", onData);
     child.stderr?.on("data", onData);
@@ -716,6 +1103,7 @@ function runHareInTerminal(
   cwd: string,
   label: string,
   channel: vscode.OutputChannel,
+  onChunk?: (text: string) => void,
 ): void {
   const config = vscode.workspace.getConfiguration("hare");
   const harePath = config.get<string>("path") ?? "hare";
@@ -738,5 +1126,274 @@ function runHareInTerminal(
   if (!activeHareSession || activeHareSession.isClosed) {
     activeHareSession = new HareTerminalSession();
   }
-  activeHareSession.run(harePath, argv, cwd, env);
+  activeHareSession.run(harePath, argv, cwd, env, onChunk);
+}
+
+// Workspace-wide test name -> location index. Built lazily on first
+// lookup so we don't scan every .ha file at startup. Invalidated on
+// .ha file changes; entire cache is dropped rather than per-file
+// surgery, since the scan is cheap and re-runs are rare.
+interface TestLocation {
+  uri: string;
+  line: number;
+}
+
+let workspaceTestIndex: Map<string, TestLocation> | undefined;
+let workspaceTestIndexBuilding: Promise<Map<string, TestLocation>> | undefined;
+
+function invalidateWorkspaceTestIndex(): void {
+  workspaceTestIndex = undefined;
+  workspaceTestIndexBuilding = undefined;
+}
+
+async function getWorkspaceTestIndex(): Promise<Map<string, TestLocation>> {
+  if (workspaceTestIndex) return workspaceTestIndex;
+  if (workspaceTestIndexBuilding) return workspaceTestIndexBuilding;
+  workspaceTestIndexBuilding = buildWorkspaceTestIndex().then((idx) => {
+    workspaceTestIndex = idx;
+    workspaceTestIndexBuilding = undefined;
+    return idx;
+  });
+  return workspaceTestIndexBuilding;
+}
+
+// Matches `@test fn name`, `@test export fn name`, `@test @other fn name`,
+// and `@test\nfn name` (attributes on their own line). Whitespace and
+// other attributes between `@test` and `fn` are tolerated. Captures the
+// function name.
+const TEST_DECL_RE =
+  /@test\b[^{}]*?\bfn\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+
+// Replaces line-comment bodies and double-quoted string contents with
+// spaces so [[TEST_DECL_RE]] can't false-match on `// @test fn fake`
+// or on `@test` appearing inside a string literal. Lengths and newline
+// positions are preserved so byte offsets and line numbers stay
+// consistent with the original text. Strings are terminated at a bare
+// newline to bound the damage from an unclosed `"`; Hare string
+// literals don't span lines anyway.
+function stripCommentsAndStrings(text: string): string {
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (c === "/" && text[i + 1] === "/") {
+      out += "  ";
+      i += 2;
+      while (i < n && text[i] !== "\n") {
+        out += " ";
+        i += 1;
+      }
+      continue;
+    }
+    if (c === "\"") {
+      out += " ";
+      i += 1;
+      while (i < n && text[i] !== "\"" && text[i] !== "\n") {
+        if (text[i] === "\\" && i + 1 < n && text[i + 1] !== "\n") {
+          out += "  ";
+          i += 2;
+          continue;
+        }
+        out += " ";
+        i += 1;
+      }
+      if (i < n && text[i] === "\"") {
+        out += " ";
+        i += 1;
+      }
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
+async function buildWorkspaceTestIndex(): Promise<Map<string, TestLocation>> {
+  const idx = new Map<string, TestLocation>();
+  // Exclude node_modules and the local hare build cache. *.ha files
+  // shouldn't generally appear there but the build cache lives at
+  // .cache/ and contains generated .ssa / .o / .tmp.s - no Hare source,
+  // so the exclusion is mostly defensive.
+  const files = await vscode.workspace.findFiles(
+    "**/*.ha",
+    "{**/node_modules/**,**/.cache/**}",
+  );
+  await Promise.all(
+    files.map(async (file) => {
+      let bytes: Uint8Array;
+      try {
+        bytes = await vscode.workspace.fs.readFile(file);
+      } catch {
+        return;
+      }
+      const raw = Buffer.from(bytes).toString("utf8");
+      const text = stripCommentsAndStrings(raw);
+      const uri = file.toString();
+      TEST_DECL_RE.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = TEST_DECL_RE.exec(text)) !== null) {
+        const name = m[1];
+        // Line where the captured `fn name` lives: count newlines up
+        // to the start of `name` in the match.
+        const nameStart = m.index + m[0].lastIndexOf(name);
+        let line = 0;
+        for (let i = 0; i < nameStart; i += 1) {
+          if (text.charCodeAt(i) === 10) line += 1;
+        }
+        // First write wins; in the rare case two files declare a test
+        // with the same name we'll paint the gutter on the first found.
+        if (!idx.has(name)) idx.set(name, { uri, line });
+      }
+    }),
+  );
+  return idx;
+}
+
+// Hooks every shell execution started in a VSCode terminal so that
+// `hare test` output (including via `make test`, ssh wrappers, or any
+// other command whose stdout matches the Hare runner's per-test result
+// format) updates the gutter test status. Filtering is done on output
+// shape, not on the command line, so wrappers Just Work.
+//
+// Requires shell integration to be active in the terminal. VSCode
+// auto-injects this for bash/zsh/fish/pwsh; when it isn't active we
+// silently degrade (no events fire).
+function installTerminalShellWatcher(
+  context: vscode.ExtensionContext,
+  channel: vscode.OutputChannel,
+): void {
+  if (typeof vscode.window.onDidStartTerminalShellExecution !== "function") {
+    channel.appendLine(
+      "[hare-lsp] terminal shell integration API not available; skipping watcher",
+    );
+    return;
+  }
+
+  // Drop the cached test index whenever any .ha file is created,
+  // changed, or deleted. We don't react to the events themselves; the
+  // next lookup will lazily rebuild.
+  const watcher = vscode.workspace.createFileSystemWatcher("**/*.ha");
+  context.subscriptions.push(
+    watcher,
+    watcher.onDidChange(invalidateWorkspaceTestIndex),
+    watcher.onDidCreate(invalidateWorkspaceTestIndex),
+    watcher.onDidDelete(invalidateWorkspaceTestIndex),
+  );
+
+  context.subscriptions.push(
+    vscode.window.onDidStartTerminalShellExecution(async (event) => {
+      // Resolve the workspace test name index up front so the parser
+      // callbacks can run synchronously. Cheap when cached; on cold
+      // start, this races the first output chunks but is normally
+      // ready well before the runner emits its first PASS/FAIL line.
+      const idxPromise = getWorkspaceTestIndex();
+
+      // The execution's cwd, when known, lets us resolve relative
+      // paths in failure entries.
+      const cwdUri = event.shellIntegration.cwd
+        ?? vscode.workspace.workspaceFolders?.[0]?.uri;
+      const cwd = cwdUri?.fsPath ?? process.cwd();
+
+      // Lazily-populated; bound to `idx` once the promise resolves.
+      let idx: Map<string, TestLocation> | undefined;
+      const clearedSources = new Set<string>();
+      let sawTestLine = false;
+
+      // Records a result/failure into the global maps. If the test
+      // source uri isn't known yet (index still building), buffer
+      // until it is - keeps gutter updates in order.
+      const pendingResults: Array<{ name: string; status: TestStatus }> = [];
+      const pendingFailures: Array<{
+        name: string;
+        loc: FailureLoc;
+      }> = [];
+
+      const apply = (name: string, status: TestStatus): void => {
+        if (!idx) return;
+        const loc = idx.get(name);
+        if (!loc) return;
+        if (!clearedSources.has(loc.uri)) {
+          clearedSources.add(loc.uri);
+          const perFile = testResults.get(loc.uri);
+          if (perFile) {
+            perFile.clear();
+            refreshDecorationsForUri(loc.uri);
+          }
+          clearFailuresFor(loc.uri);
+        }
+        recordTestResult(loc.uri, name, loc.line, status);
+      };
+
+      const applyFailure = (name: string, loc: FailureLoc): void => {
+        if (!idx) return;
+        const source = idx.get(name);
+        // If we can't resolve a source uri, fall back to keying the
+        // failure under the failure location's uri. The diagnostic
+        // still publishes correctly; only re-run clearing degrades.
+        const sourceUri = source?.uri ?? loc.uri;
+        if (!clearedSources.has(sourceUri)) {
+          clearedSources.add(sourceUri);
+          clearFailuresFor(sourceUri);
+        }
+        recordTestFailure(sourceUri, name, loc);
+      };
+
+      const parser = createTestOutputParser({
+        cwd,
+        stripAnsi: true,
+        onResult: (name, status) => {
+          sawTestLine = true;
+          if (idx) apply(name, status);
+          else pendingResults.push({ name, status });
+        },
+        onFailure: (name, failUri, fline, fcol, message) => {
+          const loc: FailureLoc = {
+            uri: failUri,
+            line: fline,
+            col: fcol,
+            message,
+          };
+          if (idx) applyFailure(name, loc);
+          else pendingFailures.push({ name, loc });
+        },
+      });
+
+      idxPromise.then((built) => {
+        idx = built;
+        for (const p of pendingResults) apply(p.name, p.status);
+        pendingResults.length = 0;
+        for (const p of pendingFailures) applyFailure(p.name, p.loc);
+        pendingFailures.length = 0;
+      }).catch(() => {/* index build failure is non-fatal */});
+
+      try {
+        const stream = event.execution.read();
+        for await (const chunk of stream) parser(chunk);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        channel.appendLine(
+          `[hare-lsp] terminal shell read error: ${message}`,
+        );
+      }
+      // Drain anything still pending after the execution ends. The
+      // index promise is virtually always settled by now, but await
+      // it once more to be safe.
+      try {
+        idx = await idxPromise;
+        for (const p of pendingResults) apply(p.name, p.status);
+        pendingResults.length = 0;
+        for (const p of pendingFailures) applyFailure(p.name, p.loc);
+        pendingFailures.length = 0;
+      } catch {
+        // ignore
+      }
+      if (sawTestLine) {
+        channel.appendLine(
+          `[hare-lsp] terminal shell execution finished, gutter updated: ${event.execution.commandLine.value}`,
+        );
+      }
+    }),
+  );
 }

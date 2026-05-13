@@ -29,13 +29,17 @@ use strings;
 // possible); otherwise returns a freshly-allocated label the caller
 // must free.
 export fn infer_let_type_deep(
-	s: *server, doc: *document, init: *ast::expr,
+	s: *server,
+	doc: *document,
+	init: *ast::expr,
 ) (str | void) = {
 	const max_depth = effective_inlay_depth(s);
 	if (max_depth == 0) return void;
 	const first = match (infer_type_from_init(s, doc, init)) {
-	case let label: str => yield label;
-	case void => return void;
+	case let label: str =>
+		yield label;
+	case void =>
+		return void;
 	};
 	if (max_depth <= 1) return first;
 	return follow_alias_chain(s, first, max_depth - 1);
@@ -59,8 +63,10 @@ fn follow_alias_chain(s: *server, current: str, budget: u32) str = {
 	append(visited, strings::dup(label)!)!;
 	for (let hops: u32 = 0; hops < budget; hops += 1) {
 		const next = match (resolve_alias_once(s, label)) {
-		case let s: str => yield s;
-		case void => break;
+		case let s: str =>
+			yield s;
+		case void =>
+			break;
 		};
 		if (contains_str_ih(visited, next)) {
 			free(next);
@@ -78,37 +84,41 @@ fn follow_alias_chain(s: *server, current: str, budget: u32) str = {
 // TYPE, doesn't have an underlying, or the underlying can't be
 // rendered.
 fn resolve_alias_once(s: *server, name: str) (str | void) = {
-	const entry = match (analysis::find_first_by_short_name(
-			&s.workspace_index, name)) {
+	const entry = match (analysis::find_first_by_short_name(&s.workspace_index,
+		name)) {
 	case let e: *analysis::workspace_entry =>
 		if (e.kind != analysis::symbol_kind::TYPE) return void;
 		yield e;
-	case void => return void;
+	case void =>
+		return void;
 	};
 	const fpe = match (cached_parse_or_drop_stale(s, entry.path)) {
-	case let p: *file_parse_entry => yield p;
-	case null => return void;
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
 	};
 	const decl = match (find_type_decl_by_name(&fpe.pr.subunit, name)) {
-	case let d: *ast::decl => yield d;
-	case void => return void;
+	case let d: *ast::decl =>
+		yield d;
+	case void =>
+		return void;
 	};
 	const underlying = match (analysis::type_decl_underlying(decl)) {
-	case let t: *ast::_type => yield t;
-	case void => return void;
+	case let t: *ast::_type =>
+		yield t;
+	case void =>
+		return void;
 	};
 	return render_type_ih(underlying);
 };
 
-fn find_type_decl_by_name(
-	su: *ast::subunit, name: str,
-) (*ast::decl | void) = {
+fn find_type_decl_by_name(su: *ast::subunit, name: str) (*ast::decl | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
 		match (d.decl) {
 		case let t: ast::decl_type =>
-			if (len(t.ident) > 0 &&
-					t.ident[len(t.ident) - 1] == name) {
+			if (len(t.ident) > 0 && t.ident[len(t.ident) - 1] == name) {
 				return d;
 			};
 		case => void;
@@ -119,10 +129,13 @@ fn find_type_decl_by_name(
 
 fn render_type_ih(t: *ast::_type) (str | void) = {
 	let buf = memio::dynamic();
-	defer match (io::close(&buf)) { case => void; };
+	defer match (io::close(&buf)) {
+	case => void;
+	};
 	match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
 	case size => void;
-	case => return void;
+	case =>
+		return void;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };

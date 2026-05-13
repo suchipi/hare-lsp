@@ -31,15 +31,15 @@ For an e2e test, add `e2e` after the test name selector (the e2e suite is its ow
 
 ### Debugging the wire protocol
 
-Set `HARE_LSP_LOG_DIR=/abs/path` in the server's environment to tee every byte read/written/logged to `hare-lsp-{in,out,err}.log` in that directory. The path must be absolute because vscode-languageclient spawns the server with `cwd=/`. See [cmd/hare-lsp/main.ha](cmd/hare-lsp/main.ha) for the wiring.
+Set `HARE_LSP_LOG_DIR=/abs/path` in the server's environment to tee every byte read/written/logged to `hare-lsp-{in,out,err}.log` in that directory. The path must be absolute because vscode-languageclient spawns the server with `cwd=/`. See [cmd/hare_lsp/main.ha](cmd/hare_lsp/main.ha) for the wiring.
 
 ## Architecture
 
 Five top-level modules form a clean stack. Each is on `HAREPATH` and is imported by name (`use lsp;`, `use analysis;`, etc.).
 
-### `cmd/hare-lsp/` — entry point
+### `cmd/hare_lsp/` — entry point
 
-[cmd/hare-lsp/main.ha](cmd/hare-lsp/main.ha) wires `os::stdin`/`os::stdout_file` to a `server::server` and runs the loop. Critically, it uses the **unbuffered** stdout handle: vscode-languageclient holds stdin open across requests, so the process never exits to flush a buffered stdout, and responses would sit in the 4 KiB buffer indefinitely. The e2e suite guards against re-introducing that bug.
+[cmd/hare_lsp/main.ha](cmd/hare_lsp/main.ha) wires `os::stdin`/`os::stdout_file` to a `server::server` and runs the loop. Critically, it uses the **unbuffered** stdout handle: vscode-languageclient holds stdin open across requests, so the process never exits to flush a buffered stdout, and responses would sit in the 4 KiB buffer indefinitely. The e2e suite guards against re-introducing that bug. The directory uses an underscore (not a dash) so that `hare test` auto-discovers the module; the built binary is still named `hare-lsp`.
 
 ### `lsp/` — transport + JSON-RPC framing
 

@@ -11,7 +11,9 @@ use memio;
 use strconv;
 use strings;
 
-fn comp_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn comp_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -19,7 +21,12 @@ fn comp_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) 
 	return (s, scan, in_buf, out);
 };
 
-fn comp_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn comp_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
@@ -29,15 +36,19 @@ fn comp_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, 
 };
 
 fn comp_open(s: *server, uri: str, text: str) void = {
-	const open = strings::concat(`{"textDocument":{"uri":"`, uri,
-		`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
+	const open =
+		strings::concat(`{"textDocument":{"uri":"`, uri,
+			`","languageId":"hare","version":1,"text":"`, text, `"}}`)!;
 	defer free(open);
 	let pv = json::loadstr(open)!;
 	const n = lsp::notification {
 		method = strings::dup("textDocument/didOpen")!,
 		params = pv,
 	};
-	defer { free(n.method); json::finish(pv); };
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
 	handle_did_open(s, n);
 };
 
@@ -82,7 +93,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer comp_test_cleanup(&s, scan, in_buf, out);
 	comp_open(&s, "file:///x.ha", "fn main() void = {\\n\\t\\n};\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":1}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":1}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -95,7 +107,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = comp_skip_to_response(out, 1.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	// Should at least contain the keyword "let".
 	let found_let = false;
@@ -117,7 +130,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	comp_open(&s, "file:///x.ha", "fn main() void = ret\\n");
 
 	// Position right after "ret".
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":20}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":20}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -130,7 +144,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = comp_skip_to_response(out, 2.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	// All labels should start with "ret".
 	for (let i = 0z; i < len(items); i += 1) {
@@ -151,9 +166,11 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn completion_includes_local_decls() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
-	comp_open(&s, "file:///x.ha", "fn helper() void = void;\\nfn main() void = h\\n");
+	comp_open(&s, "file:///x.ha",
+		"fn helper() void = void;\\nfn main() void = h\\n");
 
-	const params = `{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":18}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":1,"character":18}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -166,7 +183,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = comp_skip_to_response(out, 3.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found_helper = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -183,7 +201,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	comp_open(&s, "file:///snip.ha",
 		"fn greet(name: str, age: int) void = void;\\nfn main() void = g\\n");
 
-	const params = `{"textDocument":{"uri":"file:///snip.ha"},"position":{"line":1,"character":18}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///snip.ha"},"position":{"line":1,"character":18}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -196,7 +215,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = comp_skip_to_response(out, 4.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -207,7 +227,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		// Snippet insertText and Snippet format.
 		const insert_text = *(json::get(&item, "insertText") as *json::value) as str;
 		assert(insert_text == "greet(${1:name}, ${2:age})$0");
-		const fmt_val = *(json::get(&item, "insertTextFormat") as *json::value) as f64;
+		const fmt_val =
+			*(json::get(&item, "insertTextFormat") as *json::value) as f64;
 		assert(fmt_val == 2.0);
 		// File-local sortText prefix.
 		const sort = *(json::get(&item, "sortText") as *json::value) as str;
@@ -222,14 +243,14 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	// Seed the workspace index with an exported symbol from a module
 	// the open document doesn't import.
-	const provider = strings::toutf8(
-		"export fn barbar() void = void;\n");
+	const provider = strings::toutf8("export fn barbar() void = void;\n");
 	analysis::index_file(&s.workspace_index, "/repo/mymod/p.ha", provider);
 
 	// The open doc has no `use mymod;`. Cursor sits right after "ba".
 	comp_open(&s, "file:///c.ha", "fn main() void = ba\\n");
 
-	const params = `{"textDocument":{"uri":"file:///c.ha"},"position":{"line":0,"character":19}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///c.ha"},"position":{"line":0,"character":19}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -242,7 +263,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = comp_skip_to_response(out, 50.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -250,7 +272,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		const label = *(json::get(&item, "label") as *json::value) as str;
 		if (label != "barbar") continue;
 		found = true;
-		const edits = *(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
+		const edits =
+			*(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
 		assert(len(edits) >= 1);
 		const e0 = edits[0] as json::object;
 		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
@@ -264,15 +287,14 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
 
-	const provider = strings::toutf8(
-		"export fn barbar() void = void;\n");
+	const provider = strings::toutf8("export fn barbar() void = void;\n");
 	analysis::index_file(&s.workspace_index, "/repo/mymod/p.ha", provider);
 
 	// The open doc already has `use mymod;`.
-	comp_open(&s, "file:///c2.ha",
-		"use mymod;\\nfn main() void = ba\\n");
+	comp_open(&s, "file:///c2.ha", "use mymod;\\nfn main() void = ba\\n");
 
-	const params = `{"textDocument":{"uri":"file:///c2.ha"},"position":{"line":1,"character":19}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///c2.ha"},"position":{"line":1,"character":19}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -285,7 +307,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = comp_skip_to_response(out, 51.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	for (let i = 0z; i < len(items); i += 1) {
 		const item = items[i] as json::object;
@@ -293,8 +316,9 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		if (label != "barbar") continue;
 		// No additionalTextEdits since the module is already imported.
 		match (json::get(&item, "additionalTextEdits")) {
-		case let p: *json::value =>
-			abort("expected no additionalTextEdits for imported module");
+		case let p: *json::value => abort(
+			"expected no additionalTextEdits for imported module"
+		);
 		case => void;
 		};
 		return;
@@ -307,7 +331,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	defer comp_test_cleanup(&s, scan, in_buf, out);
 	comp_open(&s, "file:///k.ha", "fn main() void = l\\n");
 
-	const params = `{"textDocument":{"uri":"file:///k.ha"},"position":{"line":0,"character":18}}`;
+	const params =
+		`{"textDocument":{"uri":"file:///k.ha"},"position":{"line":0,"character":18}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -320,7 +345,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	const v = comp_skip_to_response(out, 5.0);
 	defer json::finish(v);
-	const result = *(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let saw_let = false;
 	for (let i = 0z; i < len(items); i += 1) {

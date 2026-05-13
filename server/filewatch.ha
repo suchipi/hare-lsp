@@ -62,44 +62,62 @@ export fn register_file_watchers(s: *server) (i64 | void) = {
 // is logged at the configured trace level and forwarded to
 // workspace_handle_file_event which refreshes the index entry on the
 // affected file.
-export fn handle_did_change_watched_files(s: *server, n: lsp::notification) void = {
+export fn handle_did_change_watched_files(
+	s: *server,
+	n: lsp::notification,
+) void = {
 	const params = match (n.params) {
-	case let v: json::value => yield v;
-	case void => return;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return;
 	};
 	const obj = match (params) {
-	case let o: json::object => yield o;
-	case => return;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return;
 	};
 	const changes = match (json::get(&obj, "changes")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let a: []json::value => yield a;
-		case => return;
+		case let a: []json::value =>
+			yield a;
+		case =>
+			return;
 		};
-	case => return;
+	case =>
+		return;
 	};
 
 	for (let i = 0z; i < len(changes); i += 1) {
 		const change = match (changes[i]) {
-		case let o: json::object => yield o;
-		case => continue;
+		case let o: json::object =>
+			yield o;
+		case =>
+			continue;
 		};
 		const uri = match (json::get(&change, "uri")) {
 		case let p: *json::value =>
 			yield match (*p) {
-			case let s: str => yield s;
-			case => continue;
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
 			};
-		case => continue;
+		case =>
+			continue;
 		};
 		const change_type = match (json::get(&change, "type")) {
 		case let p: *json::value =>
 			yield match (*p) {
-			case let f: f64 => yield f: int;
-			case => continue;
+			case let f: f64 =>
+				yield f: int;
+			case =>
+				continue;
 			};
-		case => continue;
+		case =>
+			continue;
 		};
 		// 1 = Created, 2 = Changed, 3 = Deleted.
 		log_trace(s, fmt_watcher_event(uri, change_type), "");
@@ -109,16 +127,19 @@ export fn handle_did_change_watched_files(s: *server, n: lsp::notification) void
 
 fn fmt_watcher_event(uri: str, kind: int) str = {
 	const kind_str = switch (kind) {
-	case 1 => yield "created";
-	case 2 => yield "changed";
-	case 3 => yield "deleted";
-	case => yield "unknown";
+	case 1 =>
+		yield "created";
+	case 2 =>
+		yield "changed";
+	case 3 =>
+		yield "deleted";
+	case =>
+		yield "unknown";
 	};
 	return strings::concat("watched file ", kind_str, ": ", uri)!;
 };
 
 // --- file ops -------------------------------------------------------
-
 // workspace/willCreateFiles request. Per spec, returns a WorkspaceEdit (or
 // null) to apply before the file is created. We don't need to mutate
 // existing files when a new .ha file is created, so we always return null.
@@ -143,41 +164,56 @@ export fn handle_will_rename_files(s: *server, r: lsp::request) void = {
 // open documents whose URI changed.
 export fn handle_did_rename_files(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
-	case let v: json::value => yield v;
-	case void => return;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return;
 	};
 	const obj = match (params) {
-	case let o: json::object => yield o;
-	case => return;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return;
 	};
 	const renames = match (json::get(&obj, "files")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let a: []json::value => yield a;
-		case => return;
+		case let a: []json::value =>
+			yield a;
+		case =>
+			return;
 		};
-	case => return;
+	case =>
+		return;
 	};
 	for (let i = 0z; i < len(renames); i += 1) {
 		const rn = match (renames[i]) {
-		case let o: json::object => yield o;
-		case => continue;
+		case let o: json::object =>
+			yield o;
+		case =>
+			continue;
 		};
 		const old_uri = match (json::get(&rn, "oldUri")) {
 		case let p: *json::value =>
 			yield match (*p) {
-			case let s: str => yield s;
-			case => continue;
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
 			};
-		case => continue;
+		case =>
+			continue;
 		};
 		const new_uri = match (json::get(&rn, "newUri")) {
 		case let p: *json::value =>
 			yield match (*p) {
-			case let s: str => yield s;
-			case => continue;
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
 			};
-		case => continue;
+		case =>
+			continue;
 		};
 		rename_open_document(s, old_uri, new_uri);
 	};
@@ -210,33 +246,45 @@ export fn handle_will_delete_files(s: *server, r: lsp::request) void = {
 // reporting locations in files that no longer exist.
 export fn handle_did_delete_files(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
-	case let v: json::value => yield v;
-	case void => return;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return;
 	};
 	const obj = match (params) {
-	case let o: json::object => yield o;
-	case => return;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return;
 	};
 	const dels = match (json::get(&obj, "files")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let a: []json::value => yield a;
-		case => return;
+		case let a: []json::value =>
+			yield a;
+		case =>
+			return;
 		};
-	case => return;
+	case =>
+		return;
 	};
 	for (let i = 0z; i < len(dels); i += 1) {
 		const item = match (dels[i]) {
-		case let o: json::object => yield o;
-		case => continue;
+		case let o: json::object =>
+			yield o;
+		case =>
+			continue;
 		};
 		const uri = match (json::get(&item, "uri")) {
 		case let p: *json::value =>
 			yield match (*p) {
-			case let s: str => yield s;
-			case => continue;
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
 			};
-		case => continue;
+		case =>
+			continue;
 		};
 		// If we have it open, close it.
 		for (let j = 0z; j < len(s.documents); j += 1) {
@@ -298,10 +346,16 @@ fn drop_index_for_deleted_uri(s: *server, uri: str) void = {
 	};
 };
 
-fn send_workspace_edit_or_null(s: *server, id: lsp::id, edit: (json::value | void)) void = {
+fn send_workspace_edit_or_null(
+	s: *server,
+	id: lsp::id,
+	edit: (json::value | void),
+) void = {
 	const result: json::value = match (edit) {
-	case void => yield json::_null;
-	case let v: json::value => yield v;
+	case void =>
+		yield json::_null;
+	case let v: json::value =>
+		yield v;
 	};
 	send_result_local(s, id, result);
 	match (edit) {

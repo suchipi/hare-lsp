@@ -4,7 +4,6 @@
 // LSP 3.17 types and helper constructors. This module exposes the
 // strongly-typed shapes that handlers exchange. Encode/decode against
 // json::value happens in codec.ha.
-
 // LSP Position. Both fields are 0-based. The character offset is in the units
 // negotiated during initialize (default UTF-16 code units).
 export type position = struct {
@@ -58,7 +57,7 @@ export type position_encoding = enum {
 };
 
 // Diagnostic severity per LSP spec.
-export type diagnostic_severity = enum int {
+export type diagnostic_severity = enum {
 	ERROR = 1,
 	WARNING = 2,
 	INFORMATION = 3,
@@ -66,7 +65,7 @@ export type diagnostic_severity = enum int {
 };
 
 // Diagnostic tag per LSP spec.
-export type diagnostic_tag = enum int {
+export type diagnostic_tag = enum {
 	UNNECESSARY = 1,
 	DEPRECATED = 2,
 };
@@ -82,7 +81,7 @@ export type diagnostic = struct {
 };
 
 // LSP MessageType (for window/showMessage and window/logMessage).
-export type message_type = enum int {
+export type message_type = enum {
 	ERROR = 1,
 	WARNING = 2,
 	INFO = 3,

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
-
 @test fn parse_log_level_accepts_canonical_names() void = {
 	assert(parse_log_level("debug") as log_level == log_level::DEBUG);
 	assert(parse_log_level("info") as log_level == log_level::INFO);

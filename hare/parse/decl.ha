@@ -15,12 +15,11 @@ fn attr_symbol(lexer: *lex::lexer) (str | error) = {
 	match (strings::next(&d)) {
 	case done => void;
 	case let r: rune =>
-		synassert(t.2, ascii::isalpha(r) || r == '.'
-			|| r == '_', "Invalid symbol")?;
+		synassert(t.2, ascii::isalpha(r) || r == '.' || r == '_', "Invalid symbol")?;
 	};
 	for (let r => strings::next(&d)) {
-		synassert(t.2, ascii::isalnum(r) || r == '$'
-			|| r == '.' || r == '_', "Invalid symbol")?;
+		synassert(t.2, ascii::isalnum(r) || r == '$' || r == '.' || r == '_',
+			"Invalid symbol")?;
 	};
 	want(lexer, ltok::RPAREN)?;
 	return s;
@@ -30,8 +29,10 @@ fn attr_symbol(lexer: *lex::lexer) (str | error) = {
 export fn define(lexer: *lex::lexer) (ast::decl_const | error) = {
 	const ident = ident(lexer)?;
 	const _type: nullable *ast::_type = match (try(lexer, ltok::COLON)?) {
-	case lex::token => yield alloc(_type(lexer)?)!;
-	case void => yield null;
+	case lex::token =>
+		yield alloc(_type(lexer)?)!;
+	case void =>
+		yield null;
 	};
 	want(lexer, ltok::EQUAL)?;
 	const init: *ast::expr = alloc(expr(lexer)?)!;
@@ -49,20 +50,18 @@ fn decl_global(
 	threadlocal: bool,
 ) (ast::decl_global | error) = {
 	const ident = ident(lexer)?;
-	const _type: nullable *ast::_type =
-		match (try(lexer, ltok::COLON)?) {
-		case lex::token =>
-			yield alloc(_type(lexer)?)!;
-		case void =>
-			yield null;
-		};
-	const init: nullable *ast::expr =
-		match (try(lexer, ltok::EQUAL)?) {
-		case lex::token =>
-			yield alloc(initializer(lexer)?)!;
-		case void =>
-			yield null;
-		};
+	const _type: nullable *ast::_type = match (try(lexer, ltok::COLON)?) {
+	case lex::token =>
+		yield alloc(_type(lexer)?)!;
+	case void =>
+		yield null;
+	};
+	const init: nullable *ast::expr = match (try(lexer, ltok::EQUAL)?) {
+	case lex::token =>
+		yield alloc(initializer(lexer)?)!;
+	case void =>
+		yield null;
+	};
 	return ast::decl_global {
 		is_const = tok == ltok::CONST,
 		is_threadlocal = threadlocal,
@@ -98,15 +97,16 @@ fn decl_func(
 	let body = switch (tok.0) {
 	case ltok::EQUAL =>
 		for (let param &.. prototype.params) {
-			synassert(param.loc.start,
-				len(param.name) > 0,
+			synassert(param.loc.start, len(param.name) > 0,
 				"Expected parameter name in function declaration")?;
 		};
 		yield alloc(expr(lexer)?)!;
 	case ltok::SEMICOLON =>
 		lex::unlex(lexer, tok);
 		yield null;
-	case => abort(); // unreachable
+	case => abort();
+	// unreachable
+
 	};
 
 	return ast::decl_func {
@@ -151,16 +151,19 @@ export fn decl(lexer: *lex::lexer) (ast::decl | error) = {
 	};
 
 	const attrs = [
-		ltok::ATTR_FINI, ltok::ATTR_INIT, ltok::ATTR_TEST,
-		ltok::ATTR_SYMBOL, ltok::ATTR_THREADLOCAL,
+		ltok::ATTR_FINI,
+		ltok::ATTR_INIT,
+		ltok::ATTR_TEST,
+		ltok::ATTR_SYMBOL,
+		ltok::ATTR_THREADLOCAL,
 	];
 	let attr = ast::fndecl_attr::NONE, sym = "", threadlocal = false;
 	for (true) match (try(lexer, attrs...)?) {
 	case void =>
 		break;
 	case let t: lex::token =>
-		synassert(t.2, t.0 == ltok::ATTR_SYMBOL
-				|| t.0 == ltok::ATTR_THREADLOCAL || attr == 0,
+		synassert(t.2,
+			t.0 == ltok::ATTR_SYMBOL || t.0 == ltok::ATTR_THREADLOCAL || attr == 0,
 			"Only one of @init, @fini, or @test may be provided")?;
 		switch (t.0) {
 		case ltok::ATTR_FINI =>
@@ -173,21 +176,20 @@ export fn decl(lexer: *lex::lexer) (ast::decl | error) = {
 			sym = attr_symbol(lexer)?;
 		case ltok::ATTR_THREADLOCAL =>
 			threadlocal = true;
-		case =>
-			abort("unreachable");
+		case => abort("unreachable");
 		};
 	};
 
-	const t = want(lexer, ltok::CONST, ltok::LET,
-		ltok::DEF, ltok::TYPE, ltok::FN)?;
+	const t =
+		want(lexer, ltok::CONST, ltok::LET, ltok::DEF, ltok::TYPE, ltok::FN)?;
 	if (comment == "") {
 		comment = lex::comment(lexer);
 	};
 
 	synassert(t.2, !threadlocal || t.0 == ltok::LET || t.0 == ltok::CONST,
 		"@threadlocal is only valid on globals")?;
-	synassert(t.2, sym == "" || t.0 == ltok::LET
-			|| t.0 == ltok::CONST || t.0 == ltok::FN,
+	synassert(t.2,
+		sym == "" || t.0 == ltok::LET || t.0 == ltok::CONST || t.0 == ltok::FN,
 		"@symbol is only valid on globals and functions")?;
 	synassert(t.2, attr == ast::fndecl_attr::NONE || t.0 == ltok::FN,
 		"@init, @fini, and @test are only valid on functions")?;

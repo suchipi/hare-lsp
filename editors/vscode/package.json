@@ -6,7 +6,7 @@
   "publisher": "local",
   "license": "MPL-2.0",
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.93.0"
   },
   "categories": [
     "Programming Languages",
@@ -58,8 +58,30 @@
         "command": "hare-lsp.openStdlibFolder",
         "title": "Open Hare stdlib in New Window",
         "category": "Hare"
+      },
+      {
+        "command": "hare-lsp.runTestsInFile",
+        "title": "Run All Tests in File",
+        "category": "Hare",
+        "icon": "$(beaker)"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "hare-lsp.runTestsInFile",
+          "when": "resourceLangId == hare",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "hare-lsp.runTestsInFile",
+          "when": "resourceLangId == hare",
+          "group": "hare@1"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "hare",
@@ -241,7 +263,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@types/vscode": "^1.75.0",
+    "@types/vscode": "^1.93.0",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
     "typescript": "^6.0.3"

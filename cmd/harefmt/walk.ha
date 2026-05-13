@@ -46,7 +46,10 @@ export fn default_opts() ignore_opts = ignore_opts {
 //
 // The returned layers own their `dir` strings AND their patterns;
 // call [[finish_layers]] when done.
-export fn collect_ancestors(start_dir: str, opts: ignore_opts) []gitignore::layer = {
+export fn collect_ancestors(
+	start_dir: str,
+	opts: ignore_opts,
+) []gitignore::layer = {
 	let layers: []gitignore::layer = [];
 	let dir = strings::dup(start_dir)!;
 	for (true) {
@@ -132,24 +135,29 @@ export fn descend(
 	userdata: nullable *opaque,
 ) void = {
 	const it = match (os::iter(dir)) {
-	case let i: *fs::iterator => yield i;
-	case fs::error => return;
+	case let i: *fs::iterator =>
+		yield i;
+	case fs::error =>
+		return;
 	};
 	defer fs::finish(it);
 
 	for (true) {
 		const ent = match (fs::next(it)) {
-		case let d: fs::dirent => yield d;
-		case done => break;
-		case fs::error => return;
+		case let d: fs::dirent =>
+			yield d;
+		case done =>
+			break;
+		case fs::error =>
+			return;
 		};
 		if (ent.name == "." || ent.name == "..") continue;
 
 		const abs = strings::concat(dir, "/", ent.name)!;
 		defer free(abs);
 		const cl = classify(abs, ent.ftype);
-		const is_dir_like = (cl == classification::DIR ||
-			cl == classification::SYMLINK_DIR);
+		const is_dir_like =
+			cl == classification::DIR || cl == classification::SYMLINK_DIR;
 		if (gitignore::evaluate_layers(stack, abs, is_dir_like)) continue;
 
 		switch (cl) {
@@ -199,7 +207,13 @@ fn descend_into(
 	};
 };
 
-type classification = enum { DIR, SYMLINK_DIR, FILE, SYMLINK_FILE, OTHER };
+type classification = enum {
+	DIR,
+	SYMLINK_DIR,
+	FILE,
+	SYMLINK_FILE,
+	OTHER,
+};
 
 // Determines what `abs` actually points at, accounting for symlinks.
 // For a symlink, the chain is resolved and the final target's mode
@@ -212,13 +226,17 @@ fn classify(abs: str, dirent_ftype: fs::mode) classification = {
 		return classification::OTHER;
 	};
 	const real = match (os::realpath(abs)) {
-	case let s: str => yield strings::dup(s)!;
-	case fs::error => return classification::OTHER;
+	case let s: str =>
+		yield strings::dup(s)!;
+	case fs::error =>
+		return classification::OTHER;
 	};
 	defer free(real);
 	const st = match (os::stat(real)) {
-	case let st: fs::filestat => yield st;
-	case fs::error => return classification::OTHER;
+	case let st: fs::filestat =>
+		yield st;
+	case fs::error =>
+		return classification::OTHER;
 	};
 	if (fs::isdir(st.mode)) return classification::SYMLINK_DIR;
 	if (fs::isfile(st.mode)) return classification::SYMLINK_FILE;
@@ -229,13 +247,17 @@ fn classify(abs: str, dirent_ftype: fs::mode) classification = {
 // the file doesn't exist (or can't be read); both are non-fatal.
 fn read_ignore_file(path: str) ([]gitignore::pattern | void) = {
 	const f = match (os::open(path)) {
-	case let f: io::file => yield f;
-	case fs::error => return;
+	case let f: io::file =>
+		yield f;
+	case fs::error =>
+		return;
 	};
 	defer io::close(f)!;
 	const data = match (io::drain(f)) {
-	case let d: []u8 => yield d;
-	case io::error => return;
+	case let d: []u8 =>
+		yield d;
+	case io::error =>
+		return;
 	};
 	defer free(data);
 	return gitignore::parse_patterns(data);

@@ -17,34 +17,98 @@ use strings;
 
 // Static list of Hare keywords.
 const KEYWORDS: []str = [
-	"abort", "align", "alloc", "append", "as", "assert", "bool", "break",
-	"case", "const", "continue", "def", "defer", "delete", "done", "else",
-	"enum", "export", "f32", "f64", "false", "fn", "for", "free", "i16",
-	"i32", "i64", "i8", "if", "insert", "int", "is", "len", "let", "match",
-	"never", "nomem", "null", "nullable", "offset", "opaque", "return",
-	"rune", "size", "static", "str", "struct", "switch", "true", "type",
-	"u16", "u32", "u64", "u8", "uint", "uintptr", "union", "use", "vaarg",
-	"vaend", "valist", "vastart", "void", "yield",
+	"abort",
+	"align",
+	"alloc",
+	"append",
+	"as",
+	"assert",
+	"bool",
+	"break",
+	"case",
+	"const",
+	"continue",
+	"def",
+	"defer",
+	"delete",
+	"done",
+	"else",
+	"enum",
+	"export",
+	"f32",
+	"f64",
+	"false",
+	"fn",
+	"for",
+	"free",
+	"i16",
+	"i32",
+	"i64",
+	"i8",
+	"if",
+	"insert",
+	"int",
+	"is",
+	"len",
+	"let",
+	"match",
+	"never",
+	"nomem",
+	"null",
+	"nullable",
+	"offset",
+	"opaque",
+	"return",
+	"rune",
+	"size",
+	"static",
+	"str",
+	"struct",
+	"switch",
+	"true",
+	"type",
+	"u16",
+	"u32",
+	"u64",
+	"u8",
+	"uint",
+	"uintptr",
+	"union",
+	"use",
+	"vaarg",
+	"vaend",
+	"valist",
+	"vastart",
+	"void",
+	"yield",
 ];
 
 // LSP CompletionItemKind values.
 def CIK_TEXT: f64 = 1.0;
+
 def CIK_KEYWORD: f64 = 14.0;
+
 def CIK_FUNCTION: f64 = 3.0;
+
 def CIK_VARIABLE: f64 = 6.0;
+
 def CIK_CLASS: f64 = 7.0;
+
 def CIK_CONSTANT: f64 = 21.0;
+
 def CIK_MODULE: f64 = 9.0;
 
 export fn handle_completion(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos_comp(r.params)) {
-	case let v: (str, lsp::position) => yield v;
+	case let v: (str, lsp::position) =>
+		yield v;
 	case void =>
 		send_array_comp(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
-	case let p: *document => yield p;
+	case let p: *document =>
+		yield p;
 	case null =>
 		send_array_comp(s, r.id, []);
 		return;
@@ -90,8 +154,11 @@ type prefix_kind = enum {
 
 type prefix_info = struct {
 	kind: prefix_kind,
-	module: str,  // For QUALIFIED, the "mod" before "::"; empty otherwise.
-	partial: str, // The text already typed for the completion target.
+	module: str,
+	// For QUALIFIED, the "mod" before "::"; empty otherwise.
+	partial: str
+	// The text already typed for the completion target.
+	,
 };
 
 fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
@@ -138,7 +205,9 @@ fn is_word_byte_comp(b: u8) bool = {
 // completion text, so identical sources sort alphabetically within
 // their priority band.
 def SORT_LOCAL: str = "1-";
+
 def SORT_WORKSPACE: str = "2-";
+
 def SORT_KEYWORD: str = "3-";
 
 fn add_keywords(arr: *[]json::value, partial: str) void = {
@@ -162,7 +231,8 @@ fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 	const cache = parse_of(doc);
 	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
 		const sym = &cache.idx.symbols[i];
-		if (len(partial) > 0 && !strings::hasprefix(sym.short_name, partial)) continue;
+		if (len(partial) > 0 &&
+				!strings::hasprefix(sym.short_name, partial)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", sym.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_completion(sym.kind))!;
@@ -182,7 +252,10 @@ fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 };
 
 fn add_workspace_symbols(
-	s: *server, doc: *document, arr: *[]json::value, partial: str,
+	s: *server,
+	doc: *document,
+	arr: *[]json::value,
+	partial: str,
 ) void = {
 	let a = *arr;
 	const cap = if (len(s.workspace_index.entries) < 500z) {
@@ -296,7 +369,12 @@ fn attach_auto_import(
 	json::put(item, "additionalTextEdits", edits: json::value)!;
 };
 
-fn add_module_members(s: *server, arr: *[]json::value, module: str, partial: str) void = {
+fn add_module_members(
+	s: *server,
+	arr: *[]json::value,
+	module: str,
+	partial: str,
+) void = {
 	let a = *arr;
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const e = &s.workspace_index.entries[i];
@@ -380,19 +458,25 @@ fn fmt_size_local_comp(n: size) str = {
 	let v = n;
 	for (v > 0; v /= 10) {
 		i -= 1;
-		buf[i] = ('0': u8) + (v % 10): u8;
+		buf[i] = '0': u8 + (v % 10): u8;
 	};
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
 fn symbol_kind_to_completion(k: analysis::symbol_kind) f64 = {
 	switch (k) {
-	case analysis::symbol_kind::FUNCTION => return CIK_FUNCTION;
-	case analysis::symbol_kind::TYPE => return CIK_CLASS;
-	case analysis::symbol_kind::CONST => return CIK_CONSTANT;
-	case analysis::symbol_kind::GLOBAL => return CIK_VARIABLE;
-	case analysis::symbol_kind::DEF => return CIK_CONSTANT;
-	case => return CIK_VARIABLE;
+	case analysis::symbol_kind::FUNCTION =>
+		return CIK_FUNCTION;
+	case analysis::symbol_kind::TYPE =>
+		return CIK_CLASS;
+	case analysis::symbol_kind::CONST =>
+		return CIK_CONSTANT;
+	case analysis::symbol_kind::GLOBAL =>
+		return CIK_VARIABLE;
+	case analysis::symbol_kind::DEF =>
+		return CIK_CONSTANT;
+	case =>
+		return CIK_VARIABLE;
 	};
 };
 
@@ -402,12 +486,14 @@ export fn handle_completion_resolve(s: *server, r: lsp::request) void = {
 	const v: json::value = match (r.params) {
 	case let v: json::value =>
 		yield match (json::dup(v)) {
-		case let copy: json::value => yield copy;
+		case let copy: json::value =>
+			yield copy;
 		case nomem =>
 			send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
 			return;
 		};
-	case void => yield json::_null: json::value;
+	case void =>
+		yield json::_null: json::value;
 	};
 	defer json::finish(v);
 	match (lsp::encode_response_result(s.out, r.id, v)) {
@@ -418,36 +504,49 @@ export fn handle_completion_resolve(s: *server, r: lsp::request) void = {
 
 fn parse_pos_comp(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
-	case let v: json::value => yield v;
-	case void => return void;
+	case let v: json::value =>
+		yield v;
+	case void =>
+		return void;
 	};
 	const obj = match (v) {
-	case let o: json::object => yield o;
-	case => return void;
+	case let o: json::object =>
+		yield o;
+	case =>
+		return void;
 	};
 	const td = match (json::get(&obj, "textDocument")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
-		case => return void;
+		case let o: json::object =>
+			yield o;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const uri = match (json::get(&td, "uri")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let s: str => yield s;
-		case => return void;
+		case let s: str =>
+			yield s;
+		case =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	const pos = match (json::get(&obj, "position")) {
 	case let p: *json::value =>
 		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position => yield pos;
-		case lsp::bad_message => return void;
+		case let pos: lsp::position =>
+			yield pos;
+		case lsp::bad_message =>
+			return void;
 		};
-	case => return void;
+	case =>
+		return void;
 	};
 	return (uri, pos);
 };

@@ -7,7 +7,9 @@ use lsp;
 use memio;
 use strings;
 
-fn hard_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
+fn hard_test_server(
+
+) (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
@@ -15,7 +17,12 @@ fn hard_test_server() (server, *bufio::scanner, *memio::stream, *memio::stream) 
 	return (s, scan, in_buf, out);
 };
 
-fn hard_test_cleanup(s: *server, scan: *bufio::scanner, in_buf: *memio::stream, out: *memio::stream) void = {
+fn hard_test_cleanup(
+	s: *server,
+	scan: *bufio::scanner,
+	in_buf: *memio::stream,
+	out: *memio::stream,
+) void = {
 	finish(s);
 	bufio::finish(scan);
 	free(scan);
