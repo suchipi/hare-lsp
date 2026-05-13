@@ -112,7 +112,12 @@ fn line_for_offset(line_index: []size, off: size) size = {
 
 // Counts code units in `bytes` (a single line's content, no trailing newline)
 // according to the given encoding.
-fn column_units(bytes: []u8, enc: encoding) size = {
+fn column_units(bytes: []u8, enc: encoding) size = count_units(bytes, enc);
+
+// Returns the number of LSP code units in `bytes` (UTF-8 input) under the
+// given negotiated encoding: byte count for UTF-8, codepoint count for
+// UTF-32, UTF-16 code-unit count (surrogate pairs count as 2) for UTF-16.
+export fn count_units(bytes: []u8, enc: encoding) size = {
 	switch (enc) {
 	case encoding::UTF8 =>
 		return len(bytes);

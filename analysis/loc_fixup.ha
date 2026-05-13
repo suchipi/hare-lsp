@@ -416,7 +416,7 @@ fn translate_off(off: i64, r2b: []size, data_len: size) i64 = {
 
 // Builds a slice mapping rune index -> byte offset. Length is
 // (rune count) + 1, so the past-the-end position translates too.
-fn build_rune_to_byte_table(data: []u8) []size = {
+export fn build_rune_to_byte_table(data: []u8) []size = {
 	let out: []size = [];
 	let i = 0z;
 	for (i < len(data)) {

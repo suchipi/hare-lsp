@@ -87,6 +87,54 @@ fn cl_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	abort("response not found");
 };
 
+@test fn codelens_runtest_line_with_multibyte_chars_above() void = {
+	// Regression: hare::lex reports rune offsets, but byte_to_position
+	// wants byte offsets. A file with multi-byte UTF-8 above an @test
+	// used to land the "Run test" lens above the actual line. The first
+	// line is a comment containing six 2-byte UTF-8 chars (12 bytes /
+	// 6 runes), so without the rune→byte fixup the lens would land on
+	// line 0 instead of line 1.
+	let (s, scan, in_buf, out) = cl_test_server();
+	defer cl_test_cleanup(&s, scan, in_buf, out);
+	cl_open(&s, "file:///t.ha",
+		"// ñññññ\\n@test fn my_test() void = void;\\n");
+
+	const params = `{"textDocument":{"uri":"file:///t.ha"}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 71.0,
+		method = strings::dup("textDocument/codeLens")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_code_lens(&s, r);
+
+	const v = cl_skip_to_response(out, 71.0);
+	defer json::finish(v);
+	const arr =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(arr); i += 1) {
+		const lens = arr[i] as json::object;
+		const cmd_v = match (json::get(&lens, "command")) {
+		case let p: *json::value =>
+			yield *p;
+		case void =>
+			continue;
+		};
+		const cmd = cmd_v as json::object;
+		const cmd_str = *(json::get(&cmd, "command") as *json::value) as str;
+		if (cmd_str != "hare-lsp.runTest") continue;
+		const range = *(json::get(&lens, "range") as *json::value) as json::object;
+		const start = *(json::get(&range, "start") as *json::value) as json::object;
+		const line = *(json::get(&start, "line") as *json::value) as f64;
+		assert(line == 1.0, "run-test lens should be on line 1, not above it");
+		found = true;
+	};
+	assert(found);
+};
+
 @test fn codelens_runtest_carries_function_name() void = {
 	let (s, scan, in_buf, out) = cl_test_server();
 	defer cl_test_cleanup(&s, scan, in_buf, out);

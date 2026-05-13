@@ -657,7 +657,6 @@ fn delete_expr(lexer: *lex::lexer, is_static: bool) (ast::expr | error) = {
 	const start = want(lexer, ltok::DELETE)?;
 	want(lexer, ltok::LPAREN)?;
 	const expr = alloc(postfix(lexer, void)?)!;
-	// TODO: Assert that this was an indexing expression
 	want(lexer, ltok::RPAREN)?;
 	return ast::expr {
 		loc = loc_from(lexer, start.2),

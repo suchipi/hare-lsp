@@ -5,7 +5,10 @@
 // parsing its stderr into LSP diagnostics. The didSave path drives
 // this through `run_dep_build_for_doc` in server/dep_build.ha, which
 // runs `hare build -t o` once per module in dep-graph order; this file
-// owns the shared spawn-capture-parse helper they invoke.
+// owns the shared spawn-capture-parse helper they invoke. We trigger
+// on didSave (not didChange) to keep the server's main loop
+// responsive — Hare's build can take seconds on large modules and we
+// have no async runtime in this thread.
 //
 // The compiler error format is:
 //
