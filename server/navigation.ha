@@ -93,6 +93,9 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	// Try local file first; on miss, fall back to the workspace index.
 	let sig: str = "";
 	let docs: str = "";
+	let fact = analysis::empty_ownership_fact();
+	defer analysis::finish_ownership_fact(&fact);
+	let type_str: str = strings::dup("")!;
 	let found_local = false;
 	const qualifier_peek = analysis::qualifier_prefix_at(data, ident_range.0);
 	defer free(qualifier_peek);
@@ -101,8 +104,13 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		case let p: *analysis::symbol =>
 			match (find_decl_by_name(&cache.pr.subunit, ident_str)) {
 			case let i: size =>
-				sig = render_decl_signature(&cache.pr.subunit.decls[i]);
+				const d = &cache.pr.subunit.decls[i];
+				sig = render_decl_signature(d);
 				docs = strings::dup(p.docs)!;
+				analysis::finish_ownership_fact(&fact);
+				fact = ownership_for_local_symbol(p);
+				free(type_str);
+				type_str = rendered_type_for_decl(d);
 				found_local = true;
 			case void => void;
 			};
@@ -115,6 +123,13 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		case let rendered: str =>
 			sig = rendered;
 			docs = strings::dup("")!;
+			// Resolve the binding/param node to compute ownership.
+			const oi = local_target_ownership(s, doc, &cache.pr.subunit, ident_str,
+				ident_range.0);
+			analysis::finish_ownership_fact(&fact);
+			fact = oi.0;
+			free(type_str);
+			type_str = oi.1;
 			found_local = true;
 		case void => void;
 		};
@@ -126,15 +141,28 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 			case let b: (str, str) =>
 				sig = b.0;
 				docs = b.1;
+				analysis::finish_ownership_fact(&fact);
+				fact = ownership_for_builtin(ident_str);
+				// `alloc` is the only builtin currently classified;
+				// give the predicate something to chew on so the line
+				// actually emits.
+				if (ident_str == "alloc") {
+					free(type_str);
+					type_str = strings::dup("*T")!;
+				};
 				found_builtin = true;
 			case void => void;
 			};
 		};
 		if (!found_builtin) {
 			match (workspace_hover(s, doc, data, ident_range.0, ident_str)) {
-			case let r: (str, str) =>
+			case let r: (str, str, analysis::ownership_fact, str) =>
 				sig = r.0;
 				docs = r.1;
+				analysis::finish_ownership_fact(&fact);
+				fact = r.2;
+				free(type_str);
+				type_str = r.3;
 			case void =>
 				send_null(s, r.id);
 				return;
@@ -143,8 +171,11 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	};
 	defer free(sig);
 	defer free(docs);
+	defer free(type_str);
 
-	const md = build_hover_markdown(s, doc, sig, docs);
+	const own_line = format_ownership_line(fact, type_str, s.config.hover_use_html);
+	defer free(own_line);
+	const md = build_hover_markdown_with_facts(s, doc, sig, docs, own_line);
 	defer free(md);
 
 	let result = json::newobject();
@@ -393,8 +424,10 @@ fn send_location_for_entry(
 // Looks for ident_str in the workspace index using module-aware
 // disambiguation. If found, fetches the owning file's parse (via the
 // shared file_parse_cache so repeated hovers don't re-parse the same
-// file), locates the matching decl, and returns (sig, docs) — both
-// freshly allocated.
+// file), locates the matching decl, and returns (sig, docs, fact,
+// type_str). All strings are freshly allocated; `fact.detail` is owned
+// by the caller.
+//
 // Returns void if no workspace entry matches or the file can't be read.
 fn workspace_hover(
 	s: *server,
@@ -402,7 +435,7 @@ fn workspace_hover(
 	data: []u8,
 	ident_start: size,
 	ident_str: str,
-) ((str, str) | void) = {
+) ((str, str, analysis::ownership_fact, str) | void) = {
 	const entry = match (workspace_lookup_aware(s, doc, data, ident_start,
 		ident_str)) {
 	case let e: *analysis::workspace_entry =>
@@ -422,9 +455,12 @@ fn workspace_hover(
 	case void =>
 		return void;
 	};
-	const sig = render_decl_signature(&fpe.pr.subunit.decls[decl_idx]);
+	const d = &fpe.pr.subunit.decls[decl_idx];
+	const sig = render_decl_signature(d);
 	const docs = strings::dup(fpe.pr.subunit.decls[decl_idx].docs)!;
-	return (sig, docs);
+	const fact = ownership_for_workspace_entry(entry);
+	const type_str = rendered_type_for_decl(d);
+	return (sig, docs, fact, type_str);
 };
 
 fn send_location(
@@ -579,9 +615,23 @@ fn render_decl_signature(d: *ast::decl) str = {
 };
 
 fn build_hover_markdown(s: *server, doc: *document, sig: str, docs: str) str = {
+	return build_hover_markdown_with_facts(s, doc, sig, docs, "");
+};
+
+// Variant of build_hover_markdown that appends an `extra_facts` line
+// (e.g. an Ownership annotation) after the prose body. The doc comment
+// is usually more relevant than the ownership label, so it goes first.
+// When `extra_facts` is empty, behaves identically.
+fn build_hover_markdown_with_facts(
+	s: *server,
+	doc: *document,
+	sig: str,
+	docs: str,
+	extra_facts: str,
+) str = {
 	const cleaned = clean_doc_comment(docs);
 	defer free(cleaned);
-	return build_hover_markdown_raw(s, doc, sig, cleaned);
+	return build_hover_markdown_raw_with_facts(s, doc, sig, cleaned, extra_facts);
 };
 
 // Same as build_hover_markdown but assumes `body` is already clean
@@ -593,6 +643,16 @@ export fn build_hover_markdown_raw(
 	sig: str,
 	body: str,
 ) str = {
+	return build_hover_markdown_raw_with_facts(s, doc, sig, body, "");
+};
+
+fn build_hover_markdown_raw_with_facts(
+	s: *server,
+	doc: *document,
+	sig: str,
+	body: str,
+	extra_facts: str,
+) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
 	memio::concat(&buf, "```hare\n")!;
@@ -603,6 +663,10 @@ export fn build_hover_markdown_raw(
 		defer free(linked);
 		memio::concat(&buf, "\n\n")!;
 		memio::concat(&buf, linked)!;
+	};
+	if (len(extra_facts) > 0) {
+		memio::concat(&buf, "\n\n")!;
+		memio::concat(&buf, extra_facts)!;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };

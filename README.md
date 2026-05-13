@@ -8,6 +8,7 @@ A Language Server Protocol implementation for the [Hare programming language](ht
 
 - **Diagnostics** (push and pull): an in-process recovering parser produces diagnostics on every change. On save, `hare build` adds type-check errors. Toggle build via `diagnostics.enableBuild`.
 - **Navigation**: hover, definition, type-definition, declaration, implementation, references, document highlight, prepare-rename + rename, document & workspace symbols, document links (target resolution for workspace imports; stdlib imports resolve only when `HAREPATH` overlaps a workspace folder), call hierarchy, type hierarchy.
+- **Ownership hints on hover**: pointer / slice / `str` values get an `Ownership: owned | borrowed | unknown` line on hover, sourced from user-written `@returns:` / `@param` / `@owned` / `@borrowed` annotations, a committed stdlib lookup table, or built-in expression heuristics (`alloc`, `&x`, string literals). See [docs/ownership-annotations.md](docs/ownership-annotations.md) for the annotation syntax.
 - **Editing**: completion, signature help, formatting (full / range / on-type with reindent), code actions (organize imports), code lens (run test, N references), inlay hints (parameter names + inferred types; best-effort, currently literals and declared types), semantic tokens (full + range + delta), folding ranges, selection ranges.
 - **Workspace**: multi-root workspace folders, configuration pull, file watchers, will/did create/rename/delete, executeCommand (`hare-lsp.runTest`, `hare-lsp.runModule`).
 - **Window**: showMessage, showMessageRequest, logMessage, showDocument, work-done progress.
@@ -79,6 +80,7 @@ Settings are read from the `hare` namespace.
 | `format.indentWidth` | number | `8` | Number of spaces per indent level when `indentStyle = space`. |
 | `format.trimFinalNewlines` | boolean | `true` | Trim trailing whitespace at file end. |
 | `format.insertFinalNewline` | boolean | `true` | Ensure a trailing newline. |
+| `hover.useHtml` | boolean | `true` | Wrap the Ownership line in `<small>` so HTML-aware clients (VSCode) render it as fine print. Disable for editors that don't render HTML in hover markdown (Neovim, Helix, Emacs default renderers). |
 | `inlayHints.parameterNames` | boolean | `true` | Show parameter-name hints at call sites. |
 | `inlayHints.inferredTypes` | boolean | `true` | Show inferred-type hints on `let`/`const`. |
 | `inlayHints.inferredTypesMaxDepth` | number | `10` | Max recursion depth for inferred-type hints; follows call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe. |

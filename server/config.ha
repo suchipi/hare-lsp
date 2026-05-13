@@ -44,6 +44,11 @@ export type config = struct {
 	format_indent_width: u32,
 	format_trim_final_newlines: bool,
 	format_insert_final_newline: bool,
+	// Whether to wrap the hover Ownership line in `<small>` so HTML-aware
+	// clients (VSCode) render it as fine print. Disable for editors that
+	// don't render HTML in hover markdown (Neovim, Helix, Emacs default
+	// renderers) to avoid showing literal `<small>` tags. Default true.
+	hover_use_html: bool,
 	// Whether to render inlay hints for parameter names and inferred types.
 	inlay_hints_parameter_names: bool,
 	inlay_hints_inferred_types: bool,
@@ -75,6 +80,7 @@ export fn default_config() config = config {
 	format_indent_width = 8,
 	format_trim_final_newlines = true,
 	format_insert_final_newline = true,
+	hover_use_html = true,
 	inlay_hints_parameter_names = true,
 	inlay_hints_inferred_types = true,
 	inlay_hints_inferred_types_max_depth = 10,
@@ -398,6 +404,25 @@ export fn apply_settings(s: *server, v: json::value) void = {
 		case => void;
 		};
 	case => void;
+	};
+
+	// "hover": {"useHtml": bool}
+	match (json::get(&o, "hover")) {
+		case let p: *json::value =>
+			match (*p) {
+			case let hobj: json::object =>
+				match (json::get(&hobj, "useHtml")) {
+				case let hp: *json::value =>
+					match (*hp) {
+					case let b: bool =>
+						s.config.hover_use_html = b;
+					case => void;
+					};
+				case => void;
+				};
+			case => void;
+			};
+		case => void;
 	};
 
 	// "inlayHints": {"parameterNames": bool, "inferredTypes": bool}

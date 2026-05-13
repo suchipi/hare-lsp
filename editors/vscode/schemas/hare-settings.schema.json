@@ -75,6 +75,18 @@
         }
       }
     },
+    "hover": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Hover-rendering options.",
+      "properties": {
+        "useHtml": {
+          "type": "boolean",
+          "default": true,
+          "description": "Wrap the Ownership line in `<small>` so HTML-aware clients (VSCode) render it as fine print. Disable for editors that don't render HTML in hover markdown (Neovim, Helix, Emacs default renderers) to avoid showing literal `<small>` tags."
+        }
+      }
+    },
     "inlayHints": {
       "type": "object",
       "additionalProperties": false,

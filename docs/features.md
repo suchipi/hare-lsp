@@ -45,7 +45,14 @@ Targets LSP 3.17 and Hare v0.26.0.
 
 ## Navigation
 
-- Hover: yes, with doc-comment rendering.
+- Hover: yes, with doc-comment rendering. Pointer / slice / `str`
+  values also get an `Ownership: owned | borrowed | unknown` line,
+  derived from (in priority order) user-written `@returns:` /
+  `@param` / bare `@owned` / `@borrowed` annotations, a stdlib
+  doc-comment lookup table, and built-in expression heuristics
+  (`alloc(...)`, `&x`, string literals, slices, casts). See
+  [docs/ownership-annotations.md](ownership-annotations.md) for the
+  annotation grammar.
 - Goto definition: yes.
 - Goto declaration: yes.
 - Goto type definition: yes.
@@ -149,6 +156,7 @@ Highlights:
 | `hare.format.indentWidth` | `8` | Spaces per indent when `indentStyle = space`. |
 | `hare.format.trimFinalNewlines` | `true` | Trim trailing whitespace at file end. |
 | `hare.format.insertFinalNewline` | `true` | Ensure trailing newline. |
+| `hare.hover.useHtml` | `true` | Wrap the Ownership line in `<small>` so HTML-aware clients render it as fine print. Disable for editors whose hover renderer doesn't process HTML. |
 | `hare.inlayHints.parameterNames` | `true` | Param-name hints at call sites. |
 | `hare.inlayHints.inferredTypes` | `true` | Inferred-type hints on `let` / `const`. |
 | `hare.inlayHints.inferredTypesMaxDepth` | `10` | Max recursion depth for inferred-type hints; follows call return types and type aliases. Cycles are guarded by a visited set, so larger values are safe. |
