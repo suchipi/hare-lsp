@@ -8,7 +8,7 @@ A Language Server Protocol implementation for the [Hare programming language](ht
 
 - **Diagnostics** (push and pull): an in-process recovering parser produces diagnostics on every change. On save, `hare build` adds type-check errors. Toggle build via `diagnostics.enableBuild`.
 - **Navigation**: hover, definition, type-definition, declaration, implementation, references, document highlight, prepare-rename + rename, document & workspace symbols, document links, call hierarchy, type hierarchy.
-- **Ownership hints on hover**: pointer / slice / `str` values get an `Ownership: owned | borrowed` line on hover when the server can decide, sourced from user-written `@returns:` / `@param` / `@owned` / `@borrowed` annotations, a committed stdlib lookup table, or built-in expression heuristics (`alloc`, `&x`, string literals). Silent when none of those apply. See [docs/ownership-annotations.md](docs/ownership-annotations.md) for the annotation syntax.
+- **Ownership hints on hover**: pointer / slice / `str` values get an `Ownership: owned | borrowed` line on hover when available, sourced from user-written `@returns:` / `@param` / `@owned` / `@borrowed` annotations, a committed stdlib lookup table, or built-in expression heuristics (`alloc`, `&x`, string literals). Silent when none of those apply. See [docs/ownership-annotations.md](docs/ownership-annotations.md) for the annotation syntax.
 - **Editing**: completion, signature help, formatting (also exposed as standalone `harefmt` CLI; see below), code actions (organize imports), code lens (run test, N references), inlay hints (parameter names + inferred types), semantic tokens (full + range + delta), folding ranges, selection ranges.
 - **Workspace**: multi-root workspace folders, configuration pull, file watchers, will/did create/rename/delete, executeCommand (`hare-lsp.runTest`, `hare-lsp.runModule`).
 - **Window**: showMessage, showMessageRequest, logMessage, showDocument, work-done progress.
@@ -72,37 +72,37 @@ This runs `npm install`, packages the extension as a `.vsix`, and installs it vi
 
 Settings are read from the `hare` namespace.
 
-| Key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `path` | string | `"hare"` | Path to the `hare` binary. |
-| `harepath` | string | `""` | Colon-separated module search path (overrides `$HAREPATH`). Empty falls back to environment. |
-| `tags` | string[] | `[]` | Build tags (`-T <tag>`). |
-| `diagnostics.debounceMs` | number | `300` | Minimum ms between the last `didChange` and the next parse-diagnostics refresh. |
-| `diagnostics.enableBuild` | boolean | `true` | Whether to run `hare build` on save. |
-| `diagnostics.buildTimeoutMs` | number | `60000` | Max wall-clock ms to wait for `hare build` (or `hare test` / `hare run`) before SIGTERM. `0` disables the timeout. |
-| `format.indentStyle` | `"tab"`/`"space"` | `"tab"` | Tab vs space indent in formatting output. |
-| `format.indentWidth` | number | `8` | Number of spaces per indent level when `indentStyle = space`. |
-| `format.trimFinalNewlines` | boolean | `true` | Trim trailing whitespace at file end. |
-| `format.insertFinalNewline` | boolean | `true` | Ensure a trailing newline. |
-| `hover.useHtml` | boolean | `true` | Wrap the Ownership line in `<small>` so HTML-aware clients (VSCode) render it as fine print. Disable for editors that don't render HTML in hover markdown (Neovim, Helix, Emacs default renderers). |
-| `inlayHints.parameterNames` | boolean | `true` | Show parameter-name hints at call sites. |
-| `inlayHints.inferredTypes` | boolean | `true` | Show inferred-type hints on `let`/`const`. |
-| `inlayHints.inferredTypesMaxDepth` | number | `10` | Max recursion depth for inferred-type hints; follows call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe. |
-| `limits.maxOpenDocuments` | number | `1024` | Cap on open documents. |
-| `limits.maxTotalBufferBytes` | number | `268435456` | Cap on summed open-buffer bytes (256 MiB). |
-| `limits.maxPendingRequests` | number | `4096` | Cap on in-flight server-initiated requests. |
-| `limits.maxCancelledIds` | number | `256` | Cap on cancelled request ids retained. |
-| `limits.maxDiagnosticsPerFile` | number | `1000` | Cap on diagnostics published per file. Excess collapses into a single trailing diagnostic. |
-| `limits.maxWorkspaceIndexEntries` | number | `1000000` | Cap on workspace-index entries. Raise it if your workspace has more than ~1M decls. |
+| Key                                | Type              | Default     | Description                                                                                                                                                                                         |
+| ---------------------------------- | ----------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`                             | string            | `"hare"`    | Path to the `hare` binary.                                                                                                                                                                          |
+| `harepath`                         | string            | `""`        | Colon-separated module search path (overrides `$HAREPATH`). Empty falls back to environment.                                                                                                        |
+| `tags`                             | string[]          | `[]`        | Build tags (`-T <tag>`).                                                                                                                                                                            |
+| `diagnostics.debounceMs`           | number            | `300`       | Minimum ms between the last `didChange` and the next parse-diagnostics refresh.                                                                                                                     |
+| `diagnostics.enableBuild`          | boolean           | `true`      | Whether to run `hare build` on save.                                                                                                                                                                |
+| `diagnostics.buildTimeoutMs`       | number            | `60000`     | Max wall-clock ms to wait for `hare build` (or `hare test` / `hare run`) before SIGTERM. `0` disables the timeout.                                                                                  |
+| `format.indentStyle`               | `"tab"`/`"space"` | `"tab"`     | Tab vs space indent in formatting output.                                                                                                                                                           |
+| `format.indentWidth`               | number            | `8`         | Number of spaces per indent level when `indentStyle = space`.                                                                                                                                       |
+| `format.trimFinalNewlines`         | boolean           | `true`      | Trim trailing whitespace at file end.                                                                                                                                                               |
+| `format.insertFinalNewline`        | boolean           | `true`      | Ensure a trailing newline.                                                                                                                                                                          |
+| `hover.useHtml`                    | boolean           | `true`      | Wrap the Ownership line in `<small>` so HTML-aware clients (VSCode) render it as fine print. Disable for editors that don't render HTML in hover markdown (Neovim, Helix, Emacs default renderers). |
+| `inlayHints.parameterNames`        | boolean           | `true`      | Show parameter-name hints at call sites.                                                                                                                                                            |
+| `inlayHints.inferredTypes`         | boolean           | `true`      | Show inferred-type hints on `let`/`const`.                                                                                                                                                          |
+| `inlayHints.inferredTypesMaxDepth` | number            | `10`        | Max recursion depth for inferred-type hints; follows call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe.          |
+| `limits.maxOpenDocuments`          | number            | `1024`      | Cap on open documents.                                                                                                                                                                              |
+| `limits.maxTotalBufferBytes`       | number            | `268435456` | Cap on summed open-buffer bytes (256 MiB).                                                                                                                                                          |
+| `limits.maxPendingRequests`        | number            | `4096`      | Cap on in-flight server-initiated requests.                                                                                                                                                         |
+| `limits.maxCancelledIds`           | number            | `256`       | Cap on cancelled request ids retained.                                                                                                                                                              |
+| `limits.maxDiagnosticsPerFile`     | number            | `1000`      | Cap on diagnostics published per file. Excess collapses into a single trailing diagnostic.                                                                                                          |
+| `limits.maxWorkspaceIndexEntries`  | number            | `1000000`   | Cap on workspace-index entries. Raise it if your workspace has more than ~1M decls.                                                                                                                 |
 
 The canonical JSON Schema for these settings is checked in at [editors/vscode/schemas/hare-settings.schema.json](editors/vscode/schemas/hare-settings.schema.json). Editor integrations and external tooling should treat that document as the source of truth.
 
 ### Server environment
 
-| Variable | Description |
-| --- | --- |
-| `HARE_LSP_LOG_DIR` | Absolute directory to tee the wire-protocol stream into `hare-lsp-{in,out,err}.log`. Useful for diagnosing handshake or framing issues. |
-| `HARE_LSP_LOG_LEVEL` | Minimum stderr-log severity. One of `debug`, `info`, `warn`, `error`. Defaults to `info`. |
+| Variable                  | Description                                                                                                                               |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `HARE_LSP_LOG_DIR`        | Absolute directory to tee the wire-protocol stream into `hare-lsp-{in,out,err}.log`. Useful for diagnosing handshake or framing issues.   |
+| `HARE_LSP_LOG_LEVEL`      | Minimum stderr-log severity. One of `debug`, `info`, `warn`, `error`. Defaults to `info`.                                                 |
 | `HARE_LSP_MAX_BODY_BYTES` | Override the LSP transport's max request body size (default 32 MiB). Read at startup because the cap applies before `initialize` arrives. |
 
 ## `harefmt`: standalone formatter CLI
