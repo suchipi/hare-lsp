@@ -55,19 +55,35 @@ Targets LSP 3.17 and Hare v0.26.0.
   decls (textual workspace scan re-resolves each hit against its
   file's `use` list + workspace index to filter out same-named
   unrelated decls).
-- Document highlight: yes.
+- Document highlight: yes. Emits one `Text`-kind highlight per
+  whole-word occurrence of the cursor's identifier in the active
+  document (comments, strings, char literals, and raw strings are
+  skipped via the same scanner references uses).
 - Document symbols: yes (hierarchical).
-- Workspace symbols: yes, with `resolveProvider: true`.
+- Workspace symbols: yes, with `resolveProvider: true`. Results
+  combine the on-disk workspace index, the stdlib/third-party index
+  (lazily populated on first `workspace/symbol` request), and the
+  symbol tables of currently open documents. Open-doc entries whose
+  path is already covered by the workspace index are dropped so they
+  don't appear twice; the open-doc fallback keeps the picker useful
+  for buffers outside every workspace folder, and when no workspace
+  folder is configured at all.
 - Document links: yes (resolves `use foo::bar;` imports to file URIs
   for modules under any workspace folder or on `HAREPATH`).
 - Folding ranges: yes.
 - Selection ranges: yes.
 - Call hierarchy: yes (`prepareCallHierarchy`, `incomingCalls`,
-  `outgoingCalls`).
+  `outgoingCalls`). Each item's `selectionRange` points at the
+  function's identifier (not the whole decl span), so "navigate to
+  this caller" lands the cursor on the name. Caller detection skips
+  the function's own declaration site (`fn name(`) so an item never
+  reports itself as one of its own callers.
 - Type hierarchy: yes (`prepareTypeHierarchy`, `supertypes`, `subtypes`).
   Module-aware: each referenced type ident is re-resolved against the
   containing file's `use` list, so two unrelated types sharing a short
-  name in different modules are kept distinct.
+  name in different modules are kept distinct. Items' `selectionRange`
+  points at the type name itself, matching the call-hierarchy
+  convention.
 
 ## Editing
 
@@ -75,7 +91,12 @@ Targets LSP 3.17 and Hare v0.26.0.
   `:` and `.`. Completing a workspace symbol whose module isn't yet
   imported sets `additionalTextEdits` to insert the corresponding
   `use <module>;` line, so accepting the completion auto-imports.
-- Signature help: yes, with trigger characters `(` and `,`.
+- Signature help: yes, with trigger characters `(` and `,`. Each
+  parameter is labelled as `"<name>: <type>"` so it matches a
+  substring of the signature label - the editor uses that match to
+  highlight the active parameter as the user types the call. The
+  signature label itself comes from the same body-stripped unparse
+  hover uses, so popup and hover text stay consistent.
 - Document formatting: yes (full).
 - Document range formatting: yes.
 - Document on-type formatting: yes, with first trigger `}` and
@@ -183,13 +204,19 @@ Highlights:
   a local binding (`let` / `const` / `def` / `for` / `match` / function
   parameter), the search is bounded to that binding's lexical scope.
   For top-level decls the workspace is still scanned textually
-  (skipping comments, strings, and char literals), but every candidate
-  hit is then re-resolved against its own file's `use` list +
-  workspace index, so two unrelated top-level identifiers sharing a
-  short name in different modules are kept distinct. Textual hits in
-  unindexed files (stdlib, third-party that isn't on a workspace path)
-  are dropped, since they can't be authoritatively matched against a
-  workspace entry.
+  (skipping comments, strings, char literals, and raw strings), but
+  every candidate hit is then re-resolved against its own file's
+  `use` list + workspace index, so two unrelated top-level
+  identifiers sharing a short name in different modules are kept
+  distinct. Textual hits in unindexed files (stdlib, third-party that
+  isn't on a workspace path) are dropped, since they can't be
+  authoritatively matched against a workspace entry.
+  **Fallback case:** if the cursor's own symbol can't be resolved
+  against the workspace index (e.g. a buffer outside every workspace
+  folder, or a freshly typed symbol not yet indexed), the
+  module-aware filter is skipped and every textual hit is returned.
+  In that mode a rename can rewrite same-named decls in unrelated
+  modules - preview the `WorkspaceEdit` before applying.
 - **Formatting requires a parseable file.** Full / range formatting
   only runs when the document parses cleanly. On-type re-indent still
   fires on unparseable files (it operates on whitespace only). This is
@@ -220,6 +247,7 @@ Highlights:
 - **Resource caps are configurable.** All caps (open documents, total
   buffer bytes, in-flight requests, cancelled ids, diagnostics per
   file, workspace-index entries) are tunable via `hare.limits.*` with
-  no additional non-configurable ceiling — raise a limit if your
+  no additional non-configurable ceiling - raise a limit if your
   workload needs it. Lowering a cap below current usage applies
-  prospectively; the server does not proactively evict.
+  prospectively; the server does not proactively evict. Hitting any
+  cap is logged via `window/logMessage`.
