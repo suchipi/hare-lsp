@@ -55,5 +55,4 @@ delete this overlay and drop the `use hare::parse;` shadowing.
 ## Related
 
 See [.claude/CLAUDE.md](../../.claude/CLAUDE.md) under "Architecture →
-`hare/parse/`" for the short version, and `feedback_vendor_when_stdlib_blocks`
-in the project memory for the general "when to vendor" pattern.
+`hare/parse/`" for the short version.
