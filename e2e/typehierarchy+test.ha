@@ -37,6 +37,25 @@ use strings;
 	const item = arr[0] as json::object;
 	const name = *(json::get(&item, "name") as *json::value) as str;
 	assert(name == "my_int", "item name should match the type under the cursor");
+	const kind = *(json::get(&item, "kind") as *json::value) as f64;
+	assert(kind == 23.0, "kind must be SymbolKind.Struct (23)");
+	// selectionRange should span only the identifier `my_int` (cols
+	// 5-11 of "type my_int = int;") so editors land the cursor on the
+	// name when navigating into a hierarchy item.
+	const sel =
+		*(json::get(&item, "selectionRange") as *json::value) as json::object;
+	const sp = *(json::get(&sel, "start") as *json::value) as json::object;
+	const ep = *(json::get(&sel, "end") as *json::value) as json::object;
+	const sp_ch = *(json::get(&sp, "character") as *json::value) as f64;
+	const ep_ch = *(json::get(&ep, "character") as *json::value) as f64;
+	assert(
+		sp_ch == 5.0,
+		"selectionRange.start.character points at the identifier"
+	);
+	assert(
+		ep_ch == 11.0,
+		"selectionRange.end.character ends after the identifier"
+	);
 };
 
 @test fn e2e_type_hierarchy_supertypes_returns_array() void = {
@@ -58,12 +77,20 @@ use strings;
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	// Result must be an array (possibly empty if workspace index isn't
-	// populated for the open doc -- that's a known limitation).
-	assert(
-		*(json::get(&obj, "result") as *json::value) is []json::value,
-		"supertypes must return an array"
-	);
+	// Result must be an array. The underlying `int` is a builtin
+	// rather than a user-defined type decl, so the workspace lookup
+	// can't yield an entry and the array is expected to be empty.
+	// e2e_typehierarchy_distinguishes_same_name_across_modules covers
+	// the user-defined-supertype case with a real workspace.
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
+	// Every emitted item must have the required CallHierarchy fields
+	// so a regression that emits malformed items fails here.
+	for (let i = 0z; i < len(arr); i += 1) {
+		const it = arr[i] as json::object;
+		const _ = *(json::get(&it, "name") as *json::value) as str;
+		const _ = *(json::get(&it, "uri") as *json::value) as str;
+		const _ = *(json::get(&it, "kind") as *json::value) as f64;
+	};
 };
 
 // Two TYPE decls with the same short name in different modules must
@@ -97,9 +124,15 @@ use strings;
 	defer json::finish(v);
 	const obj = v as json::object;
 	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
+	// mod_a's `type T = X;` should resolve its supertype to mod_a's
+	// `X`. An empty array would mean the resolver silently dropped a
+	// real cross-decl link inside the same module — which would look
+	// broken to a user clicking "go to supertype".
+	let saw_mod_a_x = false;
 	for (let i = 0z; i < len(arr); i += 1) {
 		const item = arr[i] as json::object;
 		const u = *(json::get(&item, "uri") as *json::value) as str;
+		const n = *(json::get(&item, "name") as *json::value) as str;
 		assert(
 			strings::contains(u, "/mod_a/"),
 			"supertypes must come from the cursor's module"
@@ -108,7 +141,9 @@ use strings;
 			!strings::contains(u, "/mod_b/"),
 			"supertypes must not leak into the unrelated module"
 		);
+		if (n == "X") saw_mod_a_x = true;
 	};
+	assert(saw_mod_a_x, "supertypes of mod_a's T must include mod_a's X");
 
 	// Symmetric subtypes check.
 	const tmpl2 =
@@ -127,9 +162,14 @@ use strings;
 	const arr2 =
 		*(json::get(&(v2 as json::object),
 			"result") as *json::value) as []json::value;
+	// Subtypes of mod_a's X should include mod_a's T (the alias that
+	// references X). mod_b's U also references its own X but should
+	// not appear here, since the resolver disambiguates by module.
+	let saw_mod_a_t = false;
 	for (let i = 0z; i < len(arr2); i += 1) {
 		const item = arr2[i] as json::object;
 		const u = *(json::get(&item, "uri") as *json::value) as str;
+		const n = *(json::get(&item, "name") as *json::value) as str;
 		assert(
 			strings::contains(u, "/mod_a/"),
 			"subtypes must come from the cursor's module"
@@ -138,7 +178,9 @@ use strings;
 			!strings::contains(u, "/mod_b/"),
 			"subtypes must not leak into the unrelated module"
 		);
+		if (n == "T") saw_mod_a_t = true;
 	};
+	assert(saw_mod_a_t, "subtypes of mod_a's X must include mod_a's T");
 };
 
 // Lays down `.tmp/e2e-crossmod-typehier/{mod_a,mod_b}/types.ha`. mod_a
@@ -191,8 +233,16 @@ fn setup_crossmod_typehier_workspace() str = {
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	assert(
-		*(json::get(&obj, "result") as *json::value) is []json::value,
-		"subtypes must return an array"
-	);
+	// Subtypes of `int` (a builtin) in a single-doc fixture yields an
+	// empty array: the cursor's "X" doesn't resolve to a workspace
+	// entry without a workspace folder, so the resolver short-circuits.
+	// e2e_typehierarchy_distinguishes_same_name_across_modules covers
+	// the user-defined-subtype case with a real workspace.
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
+	for (let i = 0z; i < len(arr); i += 1) {
+		const it = arr[i] as json::object;
+		const _ = *(json::get(&it, "name") as *json::value) as str;
+		const _ = *(json::get(&it, "uri") as *json::value) as str;
+		const _ = *(json::get(&it, "kind") as *json::value) as f64;
+	};
 };

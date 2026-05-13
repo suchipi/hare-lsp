@@ -90,10 +90,12 @@ fn symbol_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 	};
 };
 
-// Handles textDocument/documentHighlight. Highlights the symbol's
-// declaration span. Highlighting every reference in the file would
-// duplicate handle_references' work; the LSP spec lets the client fall
-// back to references for occurrence highlighting when it wants more.
+// Handles textDocument/documentHighlight. Emits one highlight per
+// whole-word occurrence of the cursor's identifier in the document
+// (skipping strings, comments, and char literals via the references
+// scanner). LSP clients render these as occurrence highlights, so a
+// user putting the cursor on a function name sees every call site
+// echo back in the editor.
 export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position_local(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -121,25 +123,23 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
-	const cache = parse_of(doc);
-	const sym = match (analysis::find_by_short_name(&cache.idx, ident_str)) {
-	case let p: *analysis::symbol =>
-		yield p;
-	case void =>
-		send_empty_array(s, r.id);
-		return;
-	};
-
-	let arr: []json::value = [];
-	let item = json::newobject();
+	const offsets = scan_text_for_ident_offsets_in_range(data, ident_str, 0z,
+		len(data));
+	defer free(offsets);
+	const name_len = len(strings::toutf8(ident_str));
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
-		sym.span.start.off: size);
-	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
-		sym.span.end.off: size);
-	json::put(&item, "range", encode_range_pos(start_pos, end_pos))!;
-	json::put(&item, "kind", 1: f64)!; // Text
-	append(arr, item: json::value)!;
+	let arr: []json::value = [];
+	for (let i = 0z; i < len(offsets); i += 1) {
+		const off = offsets[i];
+		const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+			off);
+		const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+			off + name_len);
+		let item = json::newobject();
+		json::put(&item, "range", encode_range_pos(start_pos, end_pos))!;
+		json::put(&item, "kind", 1: f64)!; // Text
+		append(arr, item: json::value)!;
+	};
 	send_array_result(s, r.id, arr);
 };
 

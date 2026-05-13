@@ -465,7 +465,15 @@ fn build_type_item(
 		start_off);
 	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, end_off);
 	json::put(&item, "range", encode_range_th(sp, ep))!;
-	json::put(&item, "selectionRange", encode_range_th(sp, ep))!;
+	// selectionRange is the identifier itself per LSP spec (so a
+	// "navigate to this item" lands on the type name, not on `type`).
+	const ident_off = find_ident_in_type_decl(data, start_off, end_off, name);
+	const ident_len = len(strings::toutf8(name));
+	const sel_sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_off);
+	const sel_ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_off + ident_len);
+	json::put(&item, "selectionRange", encode_range_th(sel_sp, sel_ep))!;
 	return item;
 };
 
@@ -490,8 +498,49 @@ fn build_type_item_for_path(
 	const sp = analysis::byte_to_position(text, idx, enc, start_off);
 	const ep = analysis::byte_to_position(text, idx, enc, end_off);
 	json::put(&item, "range", encode_range_th(sp, ep))!;
-	json::put(&item, "selectionRange", encode_range_th(sp, ep))!;
+	const ident_off = find_ident_in_type_decl(text, start_off, end_off, name);
+	const ident_len = len(strings::toutf8(name));
+	const sel_sp = analysis::byte_to_position(text, idx, enc, ident_off);
+	const sel_ep = analysis::byte_to_position(text, idx, enc,
+		ident_off + ident_len);
+	json::put(&item, "selectionRange", encode_range_th(sel_sp, sel_ep))!;
 	return item;
+};
+
+// Returns the byte offset of `name` within data[span_start..span_end]
+// matched as a whole word. Falls back to `span_start` when not found,
+// so a malformed decl still produces a sensible (if imprecise) range.
+fn find_ident_in_type_decl(
+	data: []u8,
+	span_start: size,
+	span_end: size,
+	name: str,
+) size = {
+	const target = strings::toutf8(name);
+	if (len(target) == 0) return span_start;
+	const end = if (span_end > len(data)) len(data) else span_end;
+	if (span_start >= end) return span_start;
+	for (let i = span_start; i + len(target) <= end; i += 1) {
+		let ok = true;
+		for (let j = 0z; j < len(target); j += 1) {
+			if (data[i + j] != target[j]) {
+				ok = false;
+				break;
+			};
+		};
+		if (!ok) continue;
+		if (i > span_start && is_word_byte_th(data[i - 1])) continue;
+		if (i + len(target) < end && is_word_byte_th(data[i + len(target)])) continue;
+		return i;
+	};
+	return span_start;
+};
+
+fn is_word_byte_th(b: u8) bool = {
+	if (b >= 'a': u8 && b <= 'z': u8) return true;
+	if (b >= 'A': u8 && b <= 'Z': u8) return true;
+	if (b >= '0': u8 && b <= '9': u8) return true;
+	return b == '_': u8;
 };
 
 fn parse_pos_th(p: (json::value | void)) ((str, lsp::position) | void) = {

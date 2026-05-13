@@ -122,7 +122,14 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 		defer free(ws);
 		const stdlib = analysis::fuzzy_search(&s.stdlib_index, query_str);
 		defer free(stdlib);
-		total = len(ws) + len(stdlib);
+		// Also surface symbols from open documents so the picker
+		// works when the user has unsaved files (and especially when
+		// no workspace folder is configured — without this, neither
+		// workspace_index nor stdlib_index would reach the user's
+		// own decls).
+		let open_hits = collect_open_doc_symbol_hits(s, query_str);
+		defer free(open_hits);
+		total = len(ws) + len(stdlib) + len(open_hits);
 		cap = if (total < WORKSPACE_SYMBOL_CAP) total else WORKSPACE_SYMBOL_CAP;
 		for (let i = 0z; i < len(ws); i += 1) {
 			if (len(arr) >= cap) break;
@@ -132,6 +139,11 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 			};
 			append(arr, encode_workspace_symbol(&s.workspace_index.entries[ws[i]]))!;
 		};
+		if (!cancelled)
+			for (let i = 0z; i < len(open_hits); i += 1) {
+				if (len(arr) >= cap) break;
+				append(arr, encode_open_doc_symbol(s, open_hits[i].0, open_hits[i].1))!;
+			};
 		if (!cancelled)
 			for (let i = 0z; i < len(stdlib); i += 1) {
 				if (len(arr) >= cap) break;
@@ -182,6 +194,90 @@ export fn handle_workspace_symbol_resolve(s: *server, r: lsp::request) void = {
 	case size => void;
 	case => void;
 	};
+};
+
+// Returns (doc, sym) pairs for every open-document symbol whose
+// short_name contains `query` (case-insensitive substring). Skips
+// open docs whose URI corresponds to a path already covered by the
+// workspace index — that way an open file inside a workspace folder
+// doesn't appear twice.
+fn collect_open_doc_symbol_hits(
+	s: *server,
+	query: str,
+) [](*document, *analysis::symbol) = {
+	let out: [](*document, *analysis::symbol) = [];
+	const q_lower = wsym_ascii_lower(query);
+	defer free(q_lower);
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		const doc = &s.documents[i];
+		if (open_doc_indexed_on_disk(s, doc.uri)) continue;
+		const cache = parse_of(doc);
+		for (let j = 0z; j < len(cache.idx.symbols); j += 1) {
+			const sym = &cache.idx.symbols[j];
+			const sn_lower = wsym_ascii_lower(sym.short_name);
+			const matches = len(q_lower) == 0 || strings::contains(sn_lower, q_lower);
+			free(sn_lower);
+			if (!matches) continue;
+			append(out, (doc, sym))!;
+		};
+	};
+	return out;
+};
+
+fn wsym_ascii_lower(s: str) str = {
+	const bytes = strings::toutf8(s);
+	let buf: []u8 = alloc([], len(bytes))!;
+	defer free(buf);
+	for (let i = 0z; i < len(bytes); i += 1) {
+		let b = bytes[i];
+		if (b >= 'A': u8 && b <= 'Z': u8) {
+			b += 'a': u8 - 'A': u8;
+		};
+		append(buf, b)!;
+	};
+	return strings::dup(strings::fromutf8(buf)!)!;
+};
+
+fn open_doc_indexed_on_disk(s: *server, uri: str) bool = {
+	const path = lsp::uri_decode_path(uri);
+	defer free(path);
+	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
+		if (s.workspace_index.entries[i].path == path) return true;
+	};
+	return false;
+};
+
+fn encode_open_doc_symbol(
+	s: *server,
+	doc: *document,
+	sym: *analysis::symbol,
+) json::value = {
+	let o = json::newobject();
+	json::set(&o, "name", sym.short_name: json::value)!;
+	json::put(&o, "kind", workspace_entry_kind_to_lsp(sym.kind))!;
+	let loc = json::newobject();
+	json::set(&loc, "uri", doc.uri: json::value)!;
+	// Open docs have a live line index, so we can hand the editor a
+	// precise range instead of the degenerate 0:0 fallback used for
+	// on-disk entries.
+	const data = analysis::bytes(&doc.buf);
+	const enc = position_encoding(s);
+	const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		sym.span.start.off: size);
+	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		sym.span.end.off: size);
+	let range = json::newobject();
+	let s_obj = json::newobject();
+	json::put(&s_obj, "line", sp.line: f64)!;
+	json::put(&s_obj, "character", sp.character: f64)!;
+	let e_obj = json::newobject();
+	json::put(&e_obj, "line", ep.line: f64)!;
+	json::put(&e_obj, "character", ep.character: f64)!;
+	json::put(&range, "start", s_obj)!;
+	json::put(&range, "end", e_obj)!;
+	json::put(&loc, "range", range)!;
+	json::put(&o, "location", loc)!;
+	return o;
 };
 
 fn encode_workspace_symbol(e: *analysis::workspace_entry) json::value = {

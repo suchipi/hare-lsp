@@ -305,13 +305,55 @@ fn build_call_hierarchy_item(
 	json::set(&item, "uri", uri: json::value)!;
 	const enc = position_encoding(s);
 	const data = analysis::bytes(&doc.buf);
+	const span_start = sym.span.start.off: size;
+	const span_end = sym.span.end.off: size;
 	const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
-		sym.span.start.off: size);
-	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
-		sym.span.end.off: size);
+		span_start);
+	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, span_end);
 	json::put(&item, "range", encode_range_local(sp, ep))!;
-	json::put(&item, "selectionRange", encode_range_local(sp, ep))!;
+	// LSP: selectionRange is "the range to be selected and revealed
+	// when this symbol is being picked, e.g. the name of a function".
+	// Search the decl body for the identifier so the editor lands the
+	// cursor on the function name rather than on `export`.
+	const ident_off = find_ident_in_decl(data, span_start, span_end,
+		sym.short_name);
+	const ident_len = len(strings::toutf8(sym.short_name));
+	const ident_end = ident_off + ident_len;
+	const sel_sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_off);
+	const sel_ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_end);
+	json::put(&item, "selectionRange", encode_range_local(sel_sp, sel_ep))!;
 	return item;
+};
+
+// Returns the byte offset of `name` within data[span_start..span_end]
+// matched as a whole word. Falls back to `span_start` when not found,
+// preserving the prior behavior for malformed input.
+fn find_ident_in_decl(
+	data: []u8,
+	span_start: size,
+	span_end: size,
+	name: str,
+) size = {
+	const target = strings::toutf8(name);
+	if (len(target) == 0) return span_start;
+	const end = if (span_end > len(data)) len(data) else span_end;
+	if (span_start >= end) return span_start;
+	for (let i = span_start; i + len(target) <= end; i += 1) {
+		let ok = true;
+		for (let j = 0z; j < len(target); j += 1) {
+			if (data[i + j] != target[j]) {
+				ok = false;
+				break;
+			};
+		};
+		if (!ok) continue;
+		if (i > span_start && is_word_char(data[i - 1])) continue;
+		if (i + len(target) < end && is_word_char(data[i + len(target)])) continue;
+		return i;
+	};
+	return span_start;
 };
 
 fn parse_call_item(p: (json::value | void)) ((str, str) | void) = {
@@ -423,6 +465,10 @@ fn scan_calls_static(
 		(data[k] == ' ': u8 ||
 		data[k] == '\t': u8); k += 1) void;
 		if (k >= len(data) || data[k] != '(': u8) continue;
+		// Skip the declaration itself: `fn name(` is a definition, not
+		// a call. Without this, incomingCalls reports the symbol's own
+		// decl as a "caller" of itself.
+		if (preceded_by_fn_keyword(data, i)) continue;
 		const start_pos = analysis::byte_to_position(data, line_index,
 			analysis::encoding::UTF16, i);
 		const end_pos = analysis::byte_to_position(data, line_index,
@@ -434,6 +480,21 @@ fn scan_calls_static(
 		i += len(t) - 1;
 	};
 	return arr;
+};
+
+// True when the byte at index `i` is preceded by the standalone
+// keyword `fn` (skipping whitespace). Used to filter out function
+// declarations from the call-site scan.
+fn preceded_by_fn_keyword(data: []u8, i: size) bool = {
+	if (i < 3) return false;
+	let k = i;
+	for (k > 0 &&
+	(data[k - 1] == ' ': u8 || data[k - 1] == '\t': u8 ||
+	data[k - 1] == '\n': u8); k -= 1) void;
+	if (k < 2) return false;
+	if (data[k - 1] != 'n': u8 || data[k - 2] != 'f': u8) return false;
+	if (k == 2) return true;
+	return !is_word_char(data[k - 3]);
 };
 
 // Returns percent-decoded filesystem paths for every open document.

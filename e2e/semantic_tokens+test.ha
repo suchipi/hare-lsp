@@ -26,16 +26,25 @@ use strings;
 	defer json::finish(v);
 	const obj = v as json::object;
 	const result = *(json::get(&obj, "result") as *json::value) as json::object;
-	assert(
-		json::get(&result, "resultId") is *json::value,
-		"full semantic tokens result must include resultId"
-	);
+	// resultId is the key the client carries into /full/delta later.
+	const _ = *(json::get(&result, "resultId") as *json::value) as str;
 	const data = *(json::get(&result, "data") as *json::value) as []json::value;
 	// LSP encodes 5 u32s per token (deltaLine, deltaStart, length, type, mods).
 	assert(
 		len(data) > 0 && len(data) % 5 == 0,
 		"semantic tokens data must be a multiple of 5 elements"
 	);
+	// Pin down the first token so a regression that mis-classifies
+	// `export` (or shifts its position) fails here. Token legend
+	// position 6 is `keyword`.
+	const delta_line = data[0] as f64;
+	const delta_start = data[1] as f64;
+	const length = data[2] as f64;
+	const ttype = data[3] as f64;
+	assert(delta_line == 0.0, "first token starts on line 0");
+	assert(delta_start == 0.0, "first token starts at column 0");
+	assert(length == 6.0, "first token spans `export` (6 chars)");
+	assert(ttype == 6.0, "first token is a keyword (legend index 6)");
 };
 
 @test fn e2e_semantic_tokens_range_returns_data() void = {
@@ -62,6 +71,13 @@ use strings;
 	assert(
 		len(data) > 0 && len(data) % 5 == 0,
 		"range semantic tokens data must be a multiple of 5 elements"
+	);
+	// Pin the first token like the /full test so a classify_token
+	// regression — emitting kind=0/`namespace` for `export` — fails.
+	const ttype = data[3] as f64;
+	assert(
+		ttype == 6.0,
+		"first token from /range is `export`, a keyword (legend index 6)"
 	);
 };
 
@@ -111,4 +127,17 @@ use strings;
 		is_delta || is_full,
 		"semantic tokens delta must produce either edits or a full snapshot"
 	);
+	// The document hasn't changed between the /full and /full/delta
+	// calls, so the delta path should emit an empty `edits` array.
+	// Without this, a regression that always re-encodes the full data
+	// (defeating the purpose of delta) would still pass the
+	// either-or check above.
+	if (is_delta) {
+		const edits =
+			*(json::get(&result2, "edits") as *json::value) as []json::value;
+		assert(
+			len(edits) == 0,
+			"unchanged content must produce no edits in delta response"
+		);
+	};
 };
