@@ -652,6 +652,285 @@ fn os_repo_root() str = {
 	};
 };
 
+// Ownership line: annotated function -> Layer 1 wins, source = annotation.
+@test fn e2e_hover_ownership_annotation_owned() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `// Make a fresh widget.
+//
+// @returns: owned
+export fn make_widget() *int = alloc(0);
+`;
+	const did_open = build_did_open("file:///own_anno.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `make_widget` (line 3, char 12 -> on 'a' of make_widget).
+	const hover_req =
+		`{"jsonrpc":"2.0","id":900,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///own_anno.ha"},"position":{"line":3,"character":14}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 900.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case =>
+			fmt::fatalf("e2e: ownership-annotation hover returned null. body={}", text);
+		};
+	case void =>
+		fmt::fatalf("e2e: ownership hover missing result: {}", text);
+	};
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "Ownership: owned (annotation)"),
+		"hover should include the annotation-sourced ownership line"
+	);
+};
+
+// Ownership line: local bound to alloc(...) -> Layer 3 heuristic.
+@test fn e2e_hover_ownership_local_alloc_heuristic() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `export fn use_it() void = {
+	let x = alloc(0);
+	free(x);
+};
+`;
+	const did_open = build_did_open("file:///own_local.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `x` in `let x = alloc(0);`. Line 1, char 5 (tab + "let " then 'x').
+	const hover_req =
+		`{"jsonrpc":"2.0","id":910,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///own_local.ha"},"position":{"line":1,"character":5}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 910.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case =>
+			fmt::fatalf("e2e: ownership-local hover returned null. body={}", text);
+		};
+	case void =>
+		fmt::fatalf("e2e: ownership-local hover missing result: {}", text);
+	};
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "Ownership: owned"),
+		"alloc-initialized local should show owned"
+	);
+	assert(
+		strings::contains(md, "heuristic"),
+		"the source layer should be the heuristic walker"
+	);
+};
+
+// The Ownership line goes BELOW the doc comment, not above it: the doc
+// comment is generally more relevant than the ownership label, so it
+// should read first.
+@test fn e2e_hover_ownership_line_below_doc_comment() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `// Frobnicates the input thoroughly.
+//
+// @returns: owned
+export fn frobnicate() *int = alloc(0);
+`;
+	const did_open = build_did_open("file:///own_order.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	const hover_req =
+		`{"jsonrpc":"2.0","id":930,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///own_order.ha"},"position":{"line":3,"character":14}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 930.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj =
+		*(json::get(&obj, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	const doc_idx = strings::index(md, "Frobnicates");
+	const own_idx = strings::index(md, "Ownership:");
+	const di = match (doc_idx) {
+	case let i: size => yield i;
+	case void =>
+		fmt::fatalf("e2e: hover missing doc comment text: {}", text);
+	};
+	const oi = match (own_idx) {
+	case let i: size => yield i;
+	case void =>
+		fmt::fatalf("e2e: hover missing Ownership line: {}", text);
+	};
+	assert(
+		di < oi,
+		"doc comment must appear before the Ownership line"
+	);
+};
+
+// When the client sets `hare.hover.useHtml = false`, the Ownership line
+// must NOT be wrapped in `<small>` tags. Non-HTML clients (Neovim,
+// Helix, Emacs) opt into this to avoid showing literal tags.
+@test fn e2e_hover_ownership_html_disabled() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	// Push the setting to the server.
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"hare":{"hover":{"useHtml":false}}}}}`
+		));
+
+	const sample = `// @returns: owned
+export fn make_widget() *int = alloc(0);
+`;
+	const did_open = build_did_open("file:///own_nohtml.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	const hover_req =
+		`{"jsonrpc":"2.0","id":940,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///own_nohtml.ha"},"position":{"line":1,"character":14}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 940.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj =
+		*(json::get(&obj, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "Ownership: owned (annotation)"),
+		"plain Ownership line still shows when HTML is disabled"
+	);
+	assert(
+		!strings::contains(md, "<small>"),
+		"hover.useHtml = false must suppress the <small> wrapper"
+	);
+	assert(
+		!strings::contains(md, "</small>"),
+		"hover.useHtml = false must suppress the </small> wrapper"
+	);
+};
+
+// Ownership line: stdlib symbol via the committed Layer-2 lookup table.
+// Hovering `strings::dup` should pick up the doc-comment-sourced fact.
+@test fn e2e_hover_ownership_stdlib_strings_dup() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `use strings;
+export fn main() void = {
+	let _ = strings::dup;
+};
+`;
+	const did_open = build_did_open("file:///own_stdlib.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `dup` in `strings::dup`. Line 2, char 18.
+	const hover_req =
+		`{"jsonrpc":"2.0","id":920,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///own_stdlib.ha"},"position":{"line":2,"character":18}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 920.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object => yield o;
+		case =>
+			fmt::fatalf("e2e: stdlib ownership hover returned null. body={}", text);
+		};
+	case void =>
+		fmt::fatalf("e2e: stdlib ownership hover missing result: {}", text);
+	};
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "Ownership: owned"),
+		"strings::dup should be flagged owned via the stdlib table"
+	);
+	assert(
+		strings::contains(md, "doc comment"),
+		"source for strings::dup should be the doc-comment table"
+	);
+};
+
 fn build_did_open(uri: str, body: str) str = {
 	// JSON-encode the body. We do it the long way rather than json::dumpstr
 	// to keep this test light — the body has no embedded quotes or

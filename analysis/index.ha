@@ -42,6 +42,18 @@ export type symbol = struct {
 	// order. Empty for unnamed parameters and for non-function symbols.
 	// Used by completion to render snippet placeholders like ${1:path}.
 	param_names: []str,
+	// Ownership classification of the value the decl produces (return
+	// value for functions, the value itself for globals/consts). Populated
+	// at index time from Layer-1 annotations only. Layer 2 (stdlib doc
+	// comments) is applied later by the stdlib indexer; Layer 3
+	// (heuristics) is computed at hover time and never stored here.
+	return_ownership: ownership,
+	return_ownership_source: ownership_source,
+	return_ownership_detail: str,
+	// Parallel to `param_names`: per-parameter ownership from Layer-1
+	// `@param <name>: ...` tags. Empty slice for non-functions.
+	param_ownerships: []ownership,
+	param_ownership_details: []str,
 };
 
 // A per-file symbol index.
@@ -68,6 +80,12 @@ export fn finish_index(idx: *file_index) void = {
 			free(idx.symbols[i].param_names[j]);
 		};
 		free(idx.symbols[i].param_names);
+		free(idx.symbols[i].return_ownership_detail);
+		free(idx.symbols[i].param_ownerships);
+		for (let j = 0z; j < len(idx.symbols[i].param_ownership_details); j += 1) {
+			free(idx.symbols[i].param_ownership_details[j]);
+		};
+		free(idx.symbols[i].param_ownership_details);
 	};
 	free(idx.symbols);
 };
@@ -77,15 +95,22 @@ fn index_decl(idx: *file_index, d: *ast::decl) void = {
 	match (d.decl) {
 	case let f: ast::decl_func =>
 		const params = extract_param_names(f);
+		const fact = annotations_from_docs(docs, true);
+		const po = param_annotations_from_docs(docs, params);
 		add_symbol(idx, f.ident, symbol_kind::FUNCTION, d.loc, docs, d.exported,
-			params);
+			params, fact, po.0, po.1);
 	case let t: ast::decl_type =>
-		add_symbol(idx, t.ident, symbol_kind::TYPE, d.loc, docs, d.exported, []);
+		const fact = empty_ownership_fact();
+		add_symbol(idx, t.ident, symbol_kind::TYPE, d.loc, docs, d.exported, [], fact,
+			[], []);
 	case let g: ast::decl_global =>
 		const k = if (g.is_const) symbol_kind::CONST else symbol_kind::GLOBAL;
-		add_symbol(idx, g.ident, k, d.loc, docs, d.exported, []);
+		const fact = annotations_from_docs(docs, false);
+		add_symbol(idx, g.ident, k, d.loc, docs, d.exported, [], fact, [], []);
 	case let c: ast::decl_const =>
-		add_symbol(idx, c.ident, symbol_kind::DEF, d.loc, docs, d.exported, []);
+		const fact = annotations_from_docs(docs, false);
+		add_symbol(idx, c.ident, symbol_kind::DEF, d.loc, docs, d.exported, [], fact,
+			[], []);
 	case ast::assert_expr =>
 		// `static assert(...)` — no symbol introduced.
 		free(docs);
@@ -112,6 +137,9 @@ fn add_symbol(
 	docs: str,
 	exported: bool,
 	param_names: []str,
+	fact: ownership_fact,
+	param_ownerships: []ownership,
+	param_ownership_details: []str,
 ) void = {
 	const joined = ident_join(id);
 	const short = if (len(id) > 0) strings::dup(id[len(id) - 1])!
@@ -130,6 +158,11 @@ fn add_symbol(
 		docs = docs,
 		exported = exported,
 		param_names = param_names,
+		return_ownership = fact.kind,
+		return_ownership_source = fact.source,
+		return_ownership_detail = fact.detail,
+		param_ownerships = param_ownerships,
+		param_ownership_details = param_ownership_details,
 	})!;
 };
 

@@ -246,6 +246,10 @@ export function activate(context: vscode.ExtensionContext): void {
       // whose href is a `command:hare-lsp.openLocation?...` URI. VSCode
       // refuses to invoke `command:` URIs from hover content unless the
       // MarkdownString is marked trusted, so re-wrap the contents here.
+      // We also enable supportHtml so the server-emitted `<small>` wrapper
+      // around the Ownership line actually renders as fine print rather
+      // than as visible tags. VSCode sanitizes HTML against an allowlist
+      // (b, i, u, small, sub, sup, etc.) so this is safe.
       provideHover: async (document, position, token, next) => {
         const hover = await next(document, position, token);
         if (!hover) return hover;
@@ -255,7 +259,7 @@ export function activate(context: vscode.ExtensionContext): void {
           if (c instanceof vscode.MarkdownString) {
             const md = new vscode.MarkdownString(c.value, c.supportThemeIcons);
             md.isTrusted = { enabledCommands: ["hare-lsp.openLocation"] };
-            md.supportHtml = c.supportHtml;
+            md.supportHtml = true;
             return md;
           }
           return c;
