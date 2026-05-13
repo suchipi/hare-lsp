@@ -49,9 +49,6 @@ jobs:
 
   vscode-extension:
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: editors/vscode
     steps:
       - uses: actions/checkout@v4
 
@@ -62,10 +59,19 @@ jobs:
           cache-dependency-path: editors/vscode/package-lock.json
 
       - name: Install dependencies
+        working-directory: editors/vscode
         run: npm ci
 
-      # `npm run package` runs `tsc --noEmit` (typecheck), then esbuild
-      # (bundle), then `vsce package`, so it covers compile errors,
-      # bundling, and packaging regressions in one shot.
+      # Runs the vitest suite (currently the terminal-output parser
+      # that drives the test-status gutter). Kept separate from the
+      # `server` job because users running hare-lsp from non-VSCode
+      # editors shouldn't need Node to run `make test`.
+      - name: Run vitest suite
+        run: make vscode-test
+
+      # `npm run package` runs `tsc --noEmit` (typecheck), then vitest,
+      # then esbuild (bundle), then `vsce package`, so it covers compile
+      # errors, tests, bundling, and packaging regressions in one shot.
       - name: Typecheck and package
+        working-directory: editors/vscode
         run: npm run package

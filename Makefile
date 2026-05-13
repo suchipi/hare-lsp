@@ -72,7 +72,11 @@ harefmt: $(HA_SOURCES)
 #
 # The e2e tests guard against regressions unit tests can't catch (e.g.
 # the buffered-stdout flush bug), so ./hare-lsp must exist before this
-# runs.
+# runs. The VSCode extension's vitest suite is intentionally NOT a
+# dependency of `make test`: many users of this repo run hare-lsp from
+# editors other than VSCode and shouldn't need Node installed to run
+# the hare-side test suite. Run `make vscode-test` (or `make test
+# vscode-test`) when working on extension code.
 test: hare-lsp harefmt .tmp/all-tests
 	@mkdir -p .cache .tmp
 	@rm -f .tmp/test-shard-*.log
@@ -136,6 +140,16 @@ uninstall:
 
 VSCODE_DIR = editors/vscode
 
+# Runs the vitest suite for the VSCode extension's TypeScript-side logic
+# (currently the terminal-output parser). `npm test` invokes
+# `vitest run`. Requires `npm install` to have populated node_modules;
+# we run it lazily if vitest isn't present.
+vscode-test:
+	@if [ ! -d "$(VSCODE_DIR)/node_modules/vitest" ]; then \
+		cd $(VSCODE_DIR) && npm install; \
+	fi
+	cd $(VSCODE_DIR) && npm test
+
 vscode-extension:
 	cd $(VSCODE_DIR) && npm install && npm run package
 
@@ -145,4 +159,4 @@ vscode-install: vscode-extension
 vscode-uninstall:
 	code --uninstall-extension local.hare-lsp
 
-.PHONY: all check-deps test clean unstuck install uninstall vscode-extension vscode-install vscode-uninstall
+.PHONY: all check-deps test clean unstuck install uninstall vscode-extension vscode-test vscode-install vscode-uninstall
