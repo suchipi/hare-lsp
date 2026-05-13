@@ -43,14 +43,52 @@ export fn main() void = {
 	const sigs =
 		*(json::get(&result_obj, "signatures") as *json::value) as []json::value;
 	assert(
-		len(sigs) >= 1,
-		"signatureHelp should return at least one signature inside a call"
+		len(sigs) == 1,
+		"signatureHelp should return exactly one signature for `add`"
 	);
 	const sig = sigs[0] as json::object;
 	const label = *(json::get(&sig, "label") as *json::value) as str;
+	// The signature label must include the parameter list and return
+	// type so the editor can render a useful popup. Body must be stripped
+	// (handle_signature_help reuses render_decl_signature, which drops
+	// `= body`).
 	assert(
-		strings::contains(label, "add"),
-		"signature label should mention the callee"
+		strings::contains(label, "fn add(a: int, b: int) int"),
+		"signature label should render the full prototype with parameter types and return type"
+	);
+	assert(
+		!strings::contains(label, "a + b"),
+		"signature label must not include the function body"
+	);
+	// Each parameter label must be a substring of the signature label so
+	// the editor knows which range to highlight for the active parameter
+	// (per the LSP spec for ParameterInformation.label). `"param 0"` /
+	// `"param 1"` placeholders would render no highlight at all.
+	const params =
+		*(json::get(&sig, "parameters") as *json::value) as []json::value;
+	assert(
+		len(params) == 2,
+		"signature should have parameters matching the prototype (2)"
+	);
+	const p0 = params[0] as json::object;
+	const p0_label = *(json::get(&p0, "label") as *json::value) as str;
+	assert(
+		p0_label == "a: int",
+		"first parameter label must be its own `<name>: <type>` text"
+	);
+	assert(
+		strings::contains(label, p0_label),
+		"first parameter label must be a substring of the signature label"
+	);
+	const p1 = params[1] as json::object;
+	const p1_label = *(json::get(&p1, "label") as *json::value) as str;
+	assert(
+		p1_label == "b: int",
+		"second parameter label must be its own `<name>: <type>` text"
+	);
+	assert(
+		strings::contains(label, p1_label),
+		"second parameter label must be a substring of the signature label"
 	);
 	// activeParameter should be 1 (we are at the second argument).
 	const active =
@@ -82,10 +120,15 @@ export fn main() void = {
 	defer json::finish(v);
 	const obj = v as json::object;
 	const result = *(json::get(&obj, "result") as *json::value);
+	// LSP requires `null` here (not just "anything non-object") so the
+	// editor closes any open signature popup. Pinning to json::_null
+	// catches a regression that returned a string, array, bool, or
+	// number — all of which the previous "anything non-object" check
+	// would have accepted silently.
 	match (result) {
-	case json::object =>
-		fmt::fatalf("e2e: signatureHelp outside a call should be null, got: {}",
+	case json::_null => void;
+	case =>
+		fmt::fatalf("e2e: signatureHelp outside a call must be JSON null, got: {}",
 			text);
-	case => void;
 	};
 };

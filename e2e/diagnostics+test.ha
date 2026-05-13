@@ -76,15 +76,23 @@ use strings;
 	const items =
 		*(json::get(&result_obj, "items") as *json::value) as []json::value;
 	assert(len(items) >= 1, "broken file should produce at least one diagnostic");
-	// Sanity: first item has a `message` and a `range`.
+
+	// The fixture's missing-`}` lives on the open brace at line 0 (the
+	// `{` after `void = `). The recovering parser reports the error
+	// somewhere between that brace and EOF (line 2). Verifying the
+	// range lands on the fixture - rather than at (0, 0) or beyond
+	// EOF - catches regressions where the error is mislocated.
 	const d0 = items[0] as json::object;
+	const sev = *(json::get(&d0, "severity") as *json::value) as f64;
+	assert(sev == 1.0, "parse error must be severity 1 (Error)");
+	const msg = *(json::get(&d0, "message") as *json::value) as str;
+	assert(len(msg) > 0, "diagnostic message must be non-empty");
+	const range = *(json::get(&d0, "range") as *json::value) as json::object;
+	const start = *(json::get(&range, "start") as *json::value) as json::object;
+	const start_line = *(json::get(&start, "line") as *json::value) as f64;
 	assert(
-		json::get(&d0, "message") is *json::value,
-		"diagnostic must include message"
-	);
-	assert(
-		json::get(&d0, "range") is *json::value,
-		"diagnostic must include range"
+		start_line >= 0.0 && start_line <= 2.0,
+		"diagnostic range must land on the fixture (lines 0-2)"
 	);
 };
 
@@ -114,18 +122,26 @@ use strings;
 		len(items) == 2,
 		"workspace diagnostic should report exactly one entry per open doc"
 	);
+	let saw_a = false;
+	let saw_b = false;
 	for (let i = 0z; i < len(items); i += 1) {
 		const r = items[i] as json::object;
 		assert(
 			*(json::get(&r, "kind") as *json::value) as str == "full",
 			"each per-doc report is a full report"
 		);
-		assert(json::get(&r, "uri") is *json::value, "each report carries its uri");
+		const r_uri = *(json::get(&r, "uri") as *json::value) as str;
+		if (r_uri == "file:///ws_diag_a.ha") saw_a = true;
+		if (r_uri == "file:///ws_diag_b.ha") saw_b = true;
+		const r_items =
+			*(json::get(&r, "items") as *json::value) as []json::value;
 		assert(
-			json::get(&r, "items") is *json::value,
-			"each report carries its items array"
+			len(r_items) == 0,
+			"clean files should produce no diagnostics in workspace report"
 		);
 	};
+	assert(saw_a, "workspace diagnostic must report ws_diag_a.ha");
+	assert(saw_b, "workspace diagnostic must report ws_diag_b.ha");
 };
 
 // Reads frames until a publishDiagnostics for `uri` arrives, returning
@@ -143,6 +159,19 @@ fn wait_for_publish_diagnostics(s: *session, uri: str) []u8 = {
 		free(body);
 	};
 	fmt::fatalf("e2e: never received publishDiagnostics for {}", uri);
+};
+
+// Parses a publishDiagnostics notification frame and returns the parsed
+// JSON root alongside the params.diagnostics slice borrowed from inside
+// it. The caller must `json::finish(root)` when done; the slice becomes
+// invalid at that point.
+fn parse_publish_diagnostics(body: []u8) (json::value, []json::value) = {
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	const obj = v as json::object;
+	const params = *(json::get(&obj, "params") as *json::value) as json::object;
+	const diags = *(json::get(&params, "diagnostics") as *json::value) as []json::value;
+	return (v, diags);
 };
 
 fn write_didsave_file(path: str, body: str) void = {
@@ -204,14 +233,11 @@ fn write_didsave_file(path: str, body: str) void = {
 
 	const body = wait_for_publish_diagnostics(&s, lib_uri);
 	defer free(body);
-	const text = strings::fromutf8(body)!;
+	const (jv, diags) = parse_publish_diagnostics(body);
+	defer json::finish(jv);
 	assert(
-		!strings::contains(text, "Unknown object"),
-		"library-module didSave must not report Unknown object for sibling-file symbols"
-	);
-	assert(
-		!strings::contains(text, "no main function"),
-		"library-module didSave must not surface a missing-main error"
+		len(diags) == 0,
+		"library-module didSave must publish no diagnostics: sibling-file symbols must resolve and missing-main must not fire"
 	);
 };
 
@@ -269,14 +295,11 @@ fn write_didsave_file(path: str, body: str) void = {
 
 	const body = wait_for_publish_diagnostics(&s, main_uri);
 	defer free(body);
-	const text = strings::fromutf8(body)!;
+	const (jv, diags) = parse_publish_diagnostics(body);
+	defer json::finish(jv);
 	assert(
-		!strings::contains(text, "Unknown object"),
-		"cross-module didSave must not report Unknown object"
-	);
-	assert(
-		!strings::contains(text, "Unknown module"),
-		"cross-module didSave must resolve `use lib` against the workspace folder"
+		len(diags) == 0,
+		"cross-module didSave must publish no diagnostics: `use lib` resolves against the workspace folder and `lib::provided` is found"
 	);
 };
 
@@ -325,12 +348,13 @@ fn write_didsave_file(path: str, body: str) void = {
 
 	const published = wait_for_publish_diagnostics(&s, main_uri);
 	defer free(published);
-	const text = strings::fromutf8(published)!;
+	const (jv, diags) = parse_publish_diagnostics(published);
+	defer json::finish(jv);
 	// Stdlib modules resolve via HAREPATH; the dep walker must not
-	// fall over because there's no local `fmt/` or `io/` directory.
+	// fall over because there's no local `strings/` directory.
 	assert(
-		!strings::contains(text, "Unknown module"),
-		"stdlib uses must resolve via HAREPATH (the dep walker should treat them as external and skip)"
+		len(diags) == 0,
+		"stdlib uses must resolve via HAREPATH (dep walker treats them as external and skips); no diagnostics expected"
 	);
 };
 
@@ -385,10 +409,25 @@ fn write_didsave_file(path: str, body: str) void = {
 	send(&s, strings::toutf8(save_msg));
 	const sibling_initial = wait_for_publish_diagnostics(&s, sibling_uri);
 	defer free(sibling_initial);
-	const sibling_initial_text = strings::fromutf8(sibling_initial)!;
+	const (initial_root, initial_diags) =
+		parse_publish_diagnostics(sibling_initial);
+	defer json::finish(initial_root);
 	assert(
-		strings::contains(sibling_initial_text, "undefined_symbol"),
-		"first didSave should publish the sibling.ha build error"
+		len(initial_diags) >= 1,
+		"first didSave must publish at least one diagnostic for the broken sibling.ha"
+	);
+	let saw_undef = false;
+	for (let i = 0z; i < len(initial_diags); i += 1) {
+		const d = initial_diags[i] as json::object;
+		const dmsg = *(json::get(&d, "message") as *json::value) as str;
+		if (strings::contains(dmsg, "undefined_symbol")) {
+			saw_undef = true;
+			break;
+		};
+	};
+	assert(
+		saw_undef,
+		"first didSave's sibling.ha diagnostics must mention the undefined symbol"
 	);
 
 	// Fix sibling.ha on disk and save main.ha again. The next pass
@@ -401,9 +440,11 @@ fn write_didsave_file(path: str, body: str) void = {
 
 	const sibling_cleared = wait_for_publish_diagnostics(&s, sibling_uri);
 	defer free(sibling_cleared);
-	const sibling_cleared_text = strings::fromutf8(sibling_cleared)!;
+	const (cleared_root, cleared_diags) =
+		parse_publish_diagnostics(sibling_cleared);
+	defer json::finish(cleared_root);
 	assert(
-		strings::contains(sibling_cleared_text, `"diagnostics":[]`),
+		len(cleared_diags) == 0,
 		"second didSave must publish empty diagnostics for the now-fixed sibling.ha"
 	);
 };
@@ -472,7 +513,8 @@ fn cleanup_didsave_root(root: str) void = {
 };
 
 // Push-style: opening a broken doc produces a publishDiagnostics
-// notification. Drain frames until we see it.
+// notification carrying at least one error-severity entry. Drain frames
+// until we see it.
 @test fn e2e_push_diagnostic_published_after_didopen() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
@@ -483,15 +525,25 @@ fn cleanup_didsave_root(root: str) void = {
 `;
 	open_doc(&s, "file:///push_diag.ha", sample);
 
-	let saw = false;
-	for (let i = 0z; i < 20z && !saw; i += 1) {
-		const body = recv(&s);
-		defer free(body);
-		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, `"method":"textDocument/publishDiagnostics"`) &&
-				strings::contains(text, "push_diag.ha")) {
-			saw = true;
+	const body = wait_for_publish_diagnostics(&s, "file:///push_diag.ha");
+	defer free(body);
+	const (jv, diags) = parse_publish_diagnostics(body);
+	defer json::finish(jv);
+	assert(
+		len(diags) >= 1,
+		"push-style publishDiagnostics for a broken doc must include at least one diagnostic"
+	);
+	let saw_error = false;
+	for (let i = 0z; i < len(diags); i += 1) {
+		const d = diags[i] as json::object;
+		const sev = *(json::get(&d, "severity") as *json::value) as f64;
+		if (sev == 1.0) {
+			saw_error = true;
+			break;
 		};
 	};
-	assert(saw, "server must publish diagnostics for a broken doc after didOpen");
+	assert(
+		saw_error,
+		"broken doc must produce at least one severity-1 (Error) diagnostic"
+	);
 };

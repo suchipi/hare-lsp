@@ -74,10 +74,12 @@ export fn main() void = {
 		*(json::get(&result_obj, "contents") as *json::value) as json::object;
 	const md = *(json::get(&contents, "value") as *json::value) as str;
 	// The server should report the inferred type rather than the bare
-	// `let scan` form. bufio::newscanner returns bufio::scanner.
+	// `let scan` form. bufio::newscanner returns `scanner` (unqualified
+	// — that's the spelling in the stdlib decl, which is what
+	// hare::unparse re-emits).
 	assert(
-		strings::contains(md, "scanner"),
-		"hover on a `let x = call()` local should infer the call's return type"
+		strings::contains(md, "let scan: scanner"),
+		"hover on a `let x = call()` local should render the inferred type"
 	);
 	// And it should NOT render the source-text fallback when inference
 	// succeeded.
@@ -180,8 +182,8 @@ export fn main() void = {
 	const md = *(json::get(&contents, "value") as *json::value) as str;
 
 	assert(
-		strings::contains(md, "buffer_size") && strings::contains(md, "size"),
-		"hover must include the global's name and type"
+		strings::contains(md, "export let buffer_size: size"),
+		"hover must render the full decl form (export, name, and type)"
 	);
 	assert(
 		!strings::contains(md, "12345"),
@@ -240,9 +242,13 @@ export fn main() void = {
 	const contents =
 		*(json::get(&result_obj, "contents") as *json::value) as json::object;
 	const md = *(json::get(&contents, "value") as *json::value) as str;
+	// The decl in stdlib is `export let stdout_file: io::file = rt::...;`
+	// — the hover renderer strips the initializer, leaving the typed
+	// binding. Match that whole form so a regression that returned just
+	// `stdout_file` (the bare ident) fails.
 	assert(
-		strings::contains(md, "stdout_file"),
-		"hover should mention stdout_file"
+		strings::contains(md, "export let stdout_file: io::file"),
+		"hover should render the typed decl for os::stdout_file"
 	);
 };
 
@@ -286,14 +292,26 @@ export fn main() void = {
 	case void =>
 		fmt::fatalf("e2e: definition response missing result: {}", text);
 	};
-	match (result) {
-	case json::object => void;
+	// Extract the (first) Location and verify its URI points into the
+	// stdlib's os module under a platform tag dir (os/+darwin, os/+linux,
+	// etc.) at stdfd.ha. Just asserting non-empty would pass even if the
+	// server returned a Location pointing at the use site or a wrong file.
+	const loc = match (result) {
+	case let o: json::object =>
+		yield o;
 	case let arr: []json::value =>
 		assert(len(arr) > 0, "definition should return at least one location");
+		yield arr[0] as json::object;
 	case =>
 		fmt::fatalf("e2e: definition returned null for os::stdout_file. body={}",
 			text);
 	};
+	const uri_str = *(json::get(&loc, "uri") as *json::value) as str;
+	assert(
+		strings::contains(uri_str, "/os/+") &&
+		strings::hassuffix(uri_str, "/stdfd.ha"),
+		"definition should resolve to os/<platform-tag>/stdfd.ha"
+	);
 };
 
 // Hover on a stdlib-qualified call (`bufio::newscanner`). The server lazily
@@ -348,9 +366,16 @@ export fn main() void = {
 	const contents =
 		*(json::get(&result_obj, "contents") as *json::value) as json::object;
 	const md = *(json::get(&contents, "value") as *json::value) as str;
+	// Stdlib indexing should yield the rendered signature, not just the
+	// bare identifier. Pin the function prototype with its return type so
+	// a regression to "value contains the name" fails.
 	assert(
-		strings::contains(md, "newscanner"),
-		"hover should mention the identifier"
+		strings::contains(md, "fn newscanner("),
+		"hover should render the function signature opening"
+	);
+	assert(
+		strings::contains(md, ") scanner"),
+		"hover should render the return type after the parameter list"
 	);
 };
 
@@ -452,12 +477,8 @@ export fn main() void = {
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const md = *(json::get(&contents, "value") as *json::value) as str;
 	assert(
-		strings::contains(md, "(parameter)"),
-		"hover on parameter should mark it as a parameter"
-	);
-	assert(
-		strings::contains(md, "int"),
-		"hover on parameter should include its type"
+		strings::contains(md, "(parameter) n: int"),
+		"hover on a function parameter should render `(parameter) <name>: <type>`"
 	);
 };
 
@@ -517,18 +538,33 @@ export fn main() void = {
 	case void =>
 		fmt::fatalf("e2e: hover response has no result: {}", text);
 	};
-	match (result) {
-	case json::object => void;
+	const result_obj = match (result) {
+	case let o: json::object =>
+		yield o;
 	case =>
 		fmt::fatalf(
 			"e2e: hover on `server::run` returned null — workspace-qualified hover broken. body={}",
 			text);
 	};
+	// Just confirming the result is an object isn't enough — the bug this
+	// test reproduces was about the workspace index resolving to *some*
+	// symbol; assert that the rendered hover is actually `server::run`'s
+	// signature (declared as `export fn run(s: *server) int` in
+	// server/server.ha). A regression that returned a wrong symbol or
+	// dropped the signature would still pass an object-shape check.
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "fn run(s: *server) int"),
+		"hover on `server::run` should render the function's signature"
+	);
 };
 
-// Best-effort: wait briefly for the "indexed N file(s)" log to arrive so the
-// workspace index is populated. Times out silently — the hover test below
-// will surface the real problem.
+// Waits for the "indexed N file(s)" log to arrive so the workspace index
+// is populated before the caller queries it. Fails loudly on timeout so
+// an indexing regression manifests as a clear error rather than a
+// downstream null-hover failure that's hard to attribute.
 fn drain_until_indexed(s: *session) void = {
 	for (let i = 0z; i < 20z; i += 1) {
 		const body = recv(s);
@@ -537,6 +573,9 @@ fn drain_until_indexed(s: *session) void = {
 		if (strings::contains(text, "indexed") &&
 				strings::contains(text, "file(s)")) return;
 	};
+	fmt::fatalf(
+		"e2e: workspace indexing did not complete within 20 messages — `initialized` should trigger a scan and the server should log `indexed N file(s)`"
+	);
 };
 
 fn os_repo_root() str = {

@@ -166,7 +166,16 @@ export fn handle_folding_range(s: *server, r: lsp::request) void = {
 	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
 		const sym = &cache.idx.symbols[i];
 		const start_line = sym.span.start.line: u32;
-		const end_line = sym.span.end.line: u32;
+		// loc.end from hare::parse points one position past the decl —
+		// often the start of the next line — so end.line can be one
+		// line past the `};` or `;` that actually closes the decl.
+		// Back up over trailing whitespace to find the real last line.
+		let end_off = sym.span.end.off: size;
+		if (end_off > len(data)) end_off = len(data);
+		for (end_off > 0 && is_ws_byte(data[end_off - 1]); end_off -= 1) void;
+		const end_pos = analysis::byte_to_position(data, doc.buf.line_index,
+			position_encoding(s), end_off);
+		const end_line = (end_pos.line + 1): u32;
 		if (end_line <= start_line) continue;
 		let item = json::newobject();
 		json::put(&item, "startLine", (start_line - 1): f64)!;
@@ -326,6 +335,10 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		};
 	};
 	send_array_result(s, r.id, arr);
+};
+
+fn is_ws_byte(b: u8) bool = {
+	return b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8;
 };
 
 // Returns the [start, end) byte range of the line containing `off`,

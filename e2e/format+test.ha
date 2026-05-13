@@ -23,6 +23,10 @@ use strings;
 	send(&s,
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
+	// Non-canonical spacing (`let x  = 1;` with two spaces) forces the
+	// formatter to emit an edit, so a parse-failure or other silent-
+	// degrade path that returns `[]` will fail the test instead of
+	// passing trivially.
 	const sample =
 		`// SPDX-License-Identifier: MPL-2.0
 // (c) e2e test
@@ -31,7 +35,7 @@ use io;
 
 export fn main() void = {
 	// leading note
-	let x = 1;
+	let x  = 1;
 	let y = 2;
 	// trailing note
 	let z = x + y;
@@ -63,11 +67,11 @@ export fn main() void = {
 	case =>
 		fmt::fatalf("e2e: format result is not an array: {}", text);
 	};
-	// If the formatter returns no edit, the source is already in the
-	// canonical form — which trivially preserves every comment. The
-	// regression we guard against is a format that returns an edit
-	// missing one of the comments.
-	if (len(arr) == 0) return;
+	assert(
+		len(arr) == 1,
+		"format must emit one edit for non-canonical input "
+		"(any silent fallback path returning [] is a regression)"
+	);
 	const edit = arr[0] as json::object;
 	const new_text = match (json::get(&edit, "newText")) {
 	case let p: *json::value =>
@@ -75,6 +79,17 @@ export fn main() void = {
 	case void =>
 		fmt::fatalf("e2e: edit missing newText: {}", text);
 	};
+	// Full-document edit: range.start must be (0, 0). End is the EOF
+	// position; we only pin the start tightly because the end depends
+	// on the negotiated position encoding.
+	const range_obj = field(&edit, "range") as json::object;
+	const start_obj = field(&range_obj, "start") as json::object;
+	const start_line = field(&start_obj, "line") as f64;
+	const start_char = field(&start_obj, "character") as f64;
+	assert(
+		start_line == 0.0 && start_char == 0.0,
+		"format edit must replace the whole document, not a partial range"
+	);
 
 	assert(
 		strings::contains(new_text, "SPDX-License-Identifier"),
@@ -91,6 +106,12 @@ export fn main() void = {
 	assert(
 		strings::contains(new_text, "trailing note"),
 		"inline comment between statements must survive"
+	);
+	// The non-canonical `let x  = 1;` must be collapsed to single-space.
+	assert(
+		strings::contains(new_text, "let x = 1;") &&
+		!strings::contains(new_text, "let x  = 1;"),
+		"formatter must normalize the double space introduced in the fixture"
 	);
 };
 
@@ -109,12 +130,14 @@ export fn main() void = {
 	send(&s,
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
-	// Source has " hi" (one leading space) inside the comment. The
-	// formatter must NOT add a second leading space, so the rendered
-	// line stays "// hi" rather than "//  hi".
+	// `// hi` (one leading space) is what the formatter must emit. The
+	// `use     io;` line is intentionally non-canonical so an edit is
+	// forced — without it, the bytes_equal short-circuit in
+	// handle_formatting would return []. Then assertions actually
+	// inspect the formatter's output rather than the input.
 	const sample = `// hi
 
-use io;
+use     io;
 `;
 	const did_open = build_did_open("file:///cmt_space.ha", sample);
 	defer free(did_open);
@@ -137,24 +160,30 @@ use io;
 		fmt::fatalf("e2e: format response missing result: {}", text);
 	};
 	const arr = result as []json::value;
-	if (len(arr) == 0) {
-		// No edit means input == output, which is the ideal.
-		return;
-	};
+	assert(len(arr) == 1, "format must emit one edit for non-canonical input");
 	const edit = arr[0] as json::object;
 	const new_text = *(json::get(&edit, "newText") as *json::value) as str;
 
+	// Find the comment line in the output by splitting on '\n' and
+	// asserting it equals exactly "// hi". A substring `!contains(...)`
+	// would also be satisfied by the comment being dropped entirely.
+	const lines = strings::split(new_text, "\n")!;
+	defer free(lines);
+	let saw_comment_line = false;
+	for (let i = 0z; i < len(lines); i += 1) {
+		if (lines[i] == "// hi") {
+			saw_comment_line = true;
+			break;
+		};
+	};
 	assert(
-		strings::contains(new_text, "// hi"),
-		"comment renders with single space after //"
-	);
-	assert(
-		!strings::contains(new_text, "//  hi"),
-		"comment must not be double-spaced after //"
+		saw_comment_line,
+		"`// hi` must appear as its own line, exactly one space after //"
 	);
 	assert(
 		strings::contains(new_text, "// hi\n\nuse io;"),
-		"source blank line between comment and use must survive"
+		"source blank line between comment and use must survive,"
+		" and `use     io;` must be normalized to `use io;`"
 	);
 };
 
@@ -265,13 +294,63 @@ use io;
 		strings::contains(new_text, "argument_five);"),
 		"closing `)` stays adjacent to the last arg, no trailing comma"
 	);
-	assert(
-		strings::contains(new_text, "\n\t\t"),
-		"some continuation line is indented once past the call site"
-	);
 
 	const lines = strings::split(new_text, "\n")!;
 	defer free(lines);
+
+	// All five argument names must appear exactly once in the output —
+	// catches a regression that duplicates, drops, or reorders args.
+	const arg_names: [_]str = [
+		"argument_one",
+		"argument_two",
+		"argument_three",
+		"argument_four",
+		"argument_five",
+	];
+	for (let a = 0z; a < len(arg_names); a += 1) {
+		let count = 0;
+		for (let i = 0z; i < len(lines); i += 1) {
+			if (strings::contains(lines[i], arg_names[a])) {
+				count += 1;
+			};
+		};
+		assert(
+			count == 1,
+			"each argument must appear exactly once in the wrapped output"
+		);
+	};
+
+	// At least one continuation line must exist (the call doesn't fit
+	// on one 80-col line) and every continuation line of the call must
+	// be indented at exactly two tabs — depth 1 for `main`'s body plus
+	// one more for the call's continuation indent.
+	let call_line: size = len(lines);
+	for (let i = 0z; i < len(lines); i += 1) {
+		if (strings::contains(lines[i], "some_function(")) {
+			call_line = i;
+			break;
+		};
+	};
+	assert(call_line < len(lines), "could not find the call line");
+	let continuation_lines = 0;
+	for (let i = call_line + 1; i < len(lines); i += 1) {
+		const ln = lines[i];
+		if (len(ln) == 0) continue;
+		// Stop once we leave the call (closing `};` of `main` is at
+		// depth 0 or 1 with `};` text only).
+		const trimmed = strings::trim(ln, '\t');
+		if (trimmed == "};" || trimmed == "}") break;
+		continuation_lines += 1;
+		assert(
+			strings::hasprefix(ln, "\t\t") && !strings::hasprefix(ln, "\t\t\t"),
+			"continuation line must be indented at exactly two tabs"
+		);
+	};
+	assert(
+		continuation_lines >= 1,
+		"a >80-col call must wrap onto at least one continuation line"
+	);
+
 	for (let i = 0z; i < len(lines); i += 1) {
 		assert(len(lines[i]) <= 80, "every formatted line fits in 80 columns");
 	};
@@ -290,8 +369,10 @@ use io;
 	send(&s,
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
-	// Already-formatted file; idempotent format should produce no edits
-	// (or, at worst, a byte-identical replacement).
+	// Already-formatted file: the formatter must be idempotent here and
+	// emit no edits (the `bytes_equal` short-circuit in handle_formatting
+	// at server/formatting.ha:156 should fire). If a regression made the
+	// formatter rewrite already-canonical input, len(arr) would be 1.
 	const sample = `export fn add(a: int, b: int) int = a + b;
 `;
 	const did_open = build_did_open("file:///short_sig.ha", sample);
@@ -309,11 +390,8 @@ use io;
 	defer json::finish(v);
 	const obj = v as json::object;
 	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
-	if (len(arr) == 0) return; // identical → ideal
-	const edit = arr[0] as json::object;
-	const new_text = *(json::get(&edit, "newText") as *json::value) as str;
 	assert(
-		strings::contains(new_text, "export fn add(a: int, b: int) int = a + b;"),
-		"short signature must stay on one line"
+		len(arr) == 0,
+		"already-canonical short signature must be a no-op format"
 	);
 };

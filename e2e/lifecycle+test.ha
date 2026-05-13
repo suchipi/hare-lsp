@@ -88,31 +88,50 @@ fn f64_to_int_str(v: f64) str = {
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
-@test fn e2e_cancel_request_is_consumed() void = {
+// $/cancelRequest with an id that doesn't match any in-flight request
+// is a no-op per LSP spec. The only observable behavior is that the
+// server keeps responding to subsequent requests. A test that actually
+// cancels an in-flight request would need a long-running request to
+// race against, which we don't have a stable mechanism for here.
+@test fn e2e_cancel_request_for_unknown_id_is_noop() void = {
 	smoke_notification(
 		`{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":9999}}`,
 		"file:///lc_cancel.ha", 2601.0);
 };
 
-@test fn e2e_set_trace_is_consumed() void = {
+// $/setTrace changes server-side trace verbosity. There is no observable
+// wire effect beyond future $/logTrace notifications (which this server
+// does not emit), so the test only verifies the notification is accepted.
+@test fn e2e_set_trace_is_accepted() void = {
 	smoke_notification(
 		`{"jsonrpc":"2.0","method":"$/setTrace","params":{"value":"verbose"}}`,
 		"file:///lc_trace.ha", 2603.0);
 };
 
-@test fn e2e_workdone_progress_cancel_is_consumed() void = {
+// window/workDoneProgress/cancel for a token the server never originated
+// is a no-op. As with $/cancelRequest, exercising the active-progress
+// path would need a server-initiated progress stream to race against.
+@test fn e2e_workdone_progress_cancel_for_unknown_token_is_noop() void = {
 	smoke_notification(
 		`{"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":"my-token"}}`,
 		"file:///lc_progress.ha", 2605.0);
 };
 
-@test fn e2e_did_change_configuration_is_consumed() void = {
+// workspace/didChangeConfiguration is accepted without disturbing the
+// server. Verifying that the new debounce value actually changes the
+// diagnostics-flush timing would require timing-sensitive assertions
+// against publishDiagnostics; this test deliberately scopes itself to
+// acceptance only.
+@test fn e2e_did_change_configuration_is_accepted() void = {
 	smoke_notification(
 		`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"hare":{"diagnostics":{"debounceMs":250}}}}}`,
 		"file:///lc_config.ha", 2607.0);
 };
 
-@test fn e2e_did_change_workspace_folders_is_consumed() void = {
+// workspace/didChangeWorkspaceFolders is accepted. A full test that
+// the new folder is actually used for cross-file resolution would need
+// a real on-disk fixture; this one only checks acceptance.
+@test fn e2e_did_change_workspace_folders_is_accepted() void = {
 	smoke_notification(
 		`{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{"event":{"added":[{"uri":"file:///newfolder","name":"new"}],"removed":[]}}}`,
 		"file:///lc_folders.ha", 2609.0);

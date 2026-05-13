@@ -57,21 +57,28 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 		return;
 	};
 
-	const sig = render_decl_signature_local(&cache.pr.subunit.decls[decl_idx]);
+	// Body-stripped signature: hover already does this via
+	// render_decl_signature in navigation.ha. Reusing it here keeps the
+	// two surfaces consistent — neither should dump the function body
+	// into the editor's signature popup.
+	const sig = render_decl_signature(&cache.pr.subunit.decls[decl_idx]);
 	defer free(sig);
 
 	let signatures: []json::value = [];
 	let info = json::newobject();
 	json::set(&info, "label", sig: json::value)!;
 
-	// Build a parameters array by walking the decl's prototype.
+	// Each parameter label is `"<name>: <type>"` so it matches a
+	// substring of the signature label — that's how the LSP client
+	// figures out which range to highlight for the active parameter.
+	// The previous label `"param N"` had no relationship to the
+	// signature text and so prevented any highlight from rendering.
+	let param_labels = collect_param_labels(&cache.pr.subunit.decls[decl_idx]);
+	defer free_param_labels(param_labels);
 	let params_arr: []json::value = [];
-	const param_count = count_params(&cache.pr.subunit.decls[decl_idx]);
-	for (let i = 0z; i < param_count; i += 1) {
+	for (let i = 0z; i < len(param_labels); i += 1) {
 		let p = json::newobject();
-		const lbl = strings::concat("param ", fmt_size_local(i))!;
-		defer free(lbl);
-		json::set(&p, "label", lbl: json::value)!;
+		json::set(&p, "label", param_labels[i]: json::value)!;
 		append(params_arr, p: json::value)!;
 	};
 	json::put(&info, "parameters", params_arr: json::value)!;
@@ -80,7 +87,8 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	let result = json::newobject();
 	json::put(&result, "signatures", signatures: json::value)!;
 	json::put(&result, "activeSignature", 0: f64)!;
-	const active = if (ctx.active_param < param_count) ctx.active_param else 0z;
+	const active = if (ctx.active_param < len(param_labels)) ctx.active_param
+		else 0z;
 	json::put(&result, "activeParameter", active: u64: f64)!;
 	const v: json::value = result;
 	defer json::finish(v);
@@ -213,41 +221,51 @@ fn decl_ident_sh(d: *ast::decl) ast::ident = {
 	};
 };
 
-fn count_params(d: *ast::decl) size = {
-	match (d.decl) {
+// Renders each function parameter as `"<name>: <type>"` so the label is
+// guaranteed to be a substring of the parent signature label (the LSP
+// spec requires that for the editor to find the active-parameter range
+// to highlight). Caller frees the slice with [[free_param_labels]].
+fn collect_param_labels(d: *ast::decl) []str = {
+	let out: []str = [];
+	const f = match (d.decl) {
 	case let f: ast::decl_func =>
-		match (f.prototype.repr) {
-		case let proto: ast::func_type =>
-			return len(proto.params);
-		case =>
-			return 0;
-		};
+		yield f;
 	case =>
-		return 0;
+		return out;
 	};
+	const proto = match (f.prototype.repr) {
+	case let proto: ast::func_type =>
+		yield proto;
+	case =>
+		return out;
+	};
+	for (let i = 0z; i < len(proto.params); i += 1) {
+		append(out, render_param_label(&proto.params[i]))!;
+	};
+	return out;
 };
 
-fn render_decl_signature_local(d: *ast::decl) str = {
+fn render_param_label(p: *ast::func_param) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
-	match (unparse::decl(&buf, &unparse::syn_nowrap, d)) {
+	const name = if (len(p.name) > 0) p.name else "_";
+	match (memio::concat(&buf, name, ": ")) {
 	case size => void;
 	case =>
-		return strings::dup("<unparse error>")!;
+		return strings::dup(name)!;
+	};
+	match (unparse::_type(&buf, &unparse::syn_nowrap, p._type)) {
+	case size => void;
+	case => void;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };
 
-fn fmt_size_local(n: size) str = {
-	if (n == 0) return strings::dup("0")!;
-	let buf: [21]u8 = [0...];
-	let i = len(buf);
-	let v = n;
-	for (v > 0; v /= 10) {
-		i -= 1;
-		buf[i] = '0': u8 + (v % 10): u8;
+fn free_param_labels(labels: []str) void = {
+	for (let i = 0z; i < len(labels); i += 1) {
+		free(labels[i]);
 	};
-	return strings::dup(strings::fromutf8(buf[i..])!)!;
+	free(labels);
 };
 
 fn parse_pos_sh(p: (json::value | void)) ((str, lsp::position) | void) = {
