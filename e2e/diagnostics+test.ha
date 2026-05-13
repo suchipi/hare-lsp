@@ -415,6 +415,62 @@ fn cleanup_didsave_root(root: str) void = {
 	};
 };
 
+// Regression: the didSave dep-build path uses `hare build -t o` to type-
+// check modules. Without `-o /dev/null`, hare drops `<module>.o` into the
+// child's cwd (the workspace folder), littering the user's repo. Verifies
+// that after a save we don't leave any `.o` artifacts behind.
+@test fn e2e_didsave_does_not_leave_object_files() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-didsave-no-obj-files")!;
+	defer free(root);
+	cleanup_didsave_root(root);
+	defer cleanup_didsave_root(root);
+
+	match (os::mkdirs(root, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
+	};
+	const main_path = strings::concat(root, "/main.ha")!;
+	defer free(main_path);
+	const body = "export fn add(a: int, b: int) int = a + b;\n";
+	write_didsave_file(main_path, body);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	init_with_workspace_folder(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const main_uri = strings::concat("file://", main_path)!;
+	defer free(main_uri);
+	open_doc(&s, main_uri, body);
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	const save_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"`,
+			main_uri, `"}}}`)!;
+	defer free(save_msg);
+	send(&s, strings::toutf8(save_msg));
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	const ents = match (os::readdir(root)) {
+	case let e: []fs::dirent =>
+		yield e;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot readdir {}: {}", root, fs::strerror(e));
+	case =>
+		fmt::fatalf("e2e: out of memory reading {}", root);
+	};
+	defer fs::dirents_free(ents);
+	for (let i = 0z; i < len(ents); i += 1) {
+		assert(
+			!strings::hassuffix(ents[i].name, ".o"),
+			"didSave must not leave .o files in the workspace folder"
+		);
+	};
+};
+
 // Push-style: opening a broken doc produces a publishDiagnostics
 // notification. Drain frames until we see it.
 @test fn e2e_push_diagnostic_published_after_didopen() void = {

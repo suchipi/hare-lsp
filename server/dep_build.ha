@@ -206,6 +206,11 @@ fn run_build_obj(
 	append(argv, "build")!;
 	append(argv, "-t")!;
 	append(argv, "o")!;
+	// Discard the .o output: we only care about the diagnostics on
+	// stderr. Without -o, hare writes `<module>.o` into cwd and litters
+	// the workspace.
+	append(argv, "-o")!;
+	append(argv, "/dev/null")!;
 	for (let i = 0z; i < len(s.config.tags); i += 1) {
 		append(argv, "-T")!;
 		append(argv, s.config.tags[i])!;
