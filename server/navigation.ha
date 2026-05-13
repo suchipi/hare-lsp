@@ -71,6 +71,10 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 		case let r: (size, size) =>
 			yield r;
 		case void =>
+			// Last resort: an operator token like `||` or `&`.
+			if (try_send_operator_hover(s, r, doc, data, off)) {
+				return;
+			};
 			send_null(s, r.id);
 			return;
 		};
@@ -1138,8 +1142,7 @@ fn infer_type_from_init_at(
 	case let ba: ast::binarithm_expr =>
 		return infer_binarithm_type(srv, doc, ba, depth);
 	case let a: ast::access_expr =>
-		return infer_access_expr_type(srv, doc, a,
-			init.loc.start.off: size, depth);
+		return infer_access_expr_type(srv, doc, a, init.loc.start.off: size, depth);
 	case =>
 		return void;
 	};
@@ -1157,14 +1160,14 @@ fn infer_binarithm_type(
 ) (str | void) = {
 	switch (ba.op) {
 	case ast::binarithm_op::LAND,
-		ast::binarithm_op::LOR,
-		ast::binarithm_op::LXOR,
-		ast::binarithm_op::LEQUAL,
-		ast::binarithm_op::NEQUAL,
-		ast::binarithm_op::LESS,
-		ast::binarithm_op::LESSEQ,
-		ast::binarithm_op::GT,
-		ast::binarithm_op::GTEQ =>
+	ast::binarithm_op::LOR,
+	ast::binarithm_op::LXOR,
+	ast::binarithm_op::LEQUAL,
+	ast::binarithm_op::NEQUAL,
+	ast::binarithm_op::LESS,
+	ast::binarithm_op::LESSEQ,
+	ast::binarithm_op::GT,
+	ast::binarithm_op::GTEQ =>
 		return strings::dup("bool")!;
 	case =>
 		match (infer_type_from_init_at(srv, doc, ba.lvalue, depth)) {
