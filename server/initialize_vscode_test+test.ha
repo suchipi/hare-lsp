@@ -228,7 +228,7 @@ const VSCODE_INITIALIZE_PARAMS: str =
 		bufio::finish(scan);
 		free(scan);
 	};
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	let pv = json::loadstr(VSCODE_INITIALIZE_PARAMS)!;
@@ -300,7 +300,7 @@ const VSCODE_INITIALIZE_PARAMS: str =
 	let out = memio::dynamic();
 	defer io::close(&out)!;
 
-	let s = new(scan, &out);
+	let s = new(scan, &out, void);
 	defer finish(&s);
 
 	// run() consumes the single framed initialize, dispatches it, then

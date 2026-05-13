@@ -12,7 +12,7 @@ fn fresh_server() (server, *bufio::scanner, *memio::stream, *memio::stream) = {
 	let in_buf = alloc(memio::fixed([]))!;
 	let scan = alloc(bufio::newscanner(in_buf))!;
 	let out = alloc(memio::dynamic())!;
-	let s = new(scan, out);
+	let s = new(scan, out, void);
 	return (s, scan, in_buf, out);
 };
 

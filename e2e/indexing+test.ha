@@ -12,6 +12,7 @@ use fmt;
 use fs;
 use os;
 use strings;
+use time;
 
 // Generates `count` Hare source files under `dir`, each declaring a
 // unique top-level function. Returns the directory path.
@@ -154,6 +155,60 @@ fn drain_until_indexed_with_cap(s: *session, max: size) bool = {
 	assert(
 		drain_until_indexed_with_cap(&s, 200z),
 		"cancelled job must still publish a completion log"
+	);
+};
+
+// Indexing must continue advancing while the editor is silent. Pre-fix,
+// `drain_index_job` only ran after a dispatched message, so a quiet client
+// left the workspace permanently under-indexed. The fix polls stdin with
+// timeout 0 between batches; this test reproduces the regression by
+// staging a workspace larger than the inline-batch budget (4 * 50 = 200
+// files), sleeping without sending anything, then querying for a symbol
+// that the inline drain alone would not have reached.
+//
+// Note: we don't assert `isIncomplete: false`, because the workspace/symbol
+// handler enqueues a stdlib index job on every cold call, so a job is
+// always "in flight" the first time. The meaningful regression signal is
+// whether the deep workspace symbol is present at all.
+@test fn e2e_indexing_drains_while_client_is_idle() void = {
+	// 600 files: the inline drain covers 200, so 8 more background
+	// batches must happen during the idle sleep below.
+	const root = gen_index_workspace("idle", 600z);
+	defer cleanup_crossmod_workspace(root);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	init_with_workspace_folder(&s, root);
+
+	// Generous margin: 8 background batches of tiny files complete in
+	// well under a second even on slow hardware.
+	time::sleep(2 * time::SECOND);
+
+	const req =
+		`{"jsonrpc":"2.0","id":1731,"method":"workspace/symbol","params":{"query":"f_550"}}`;
+	send(&s, strings::toutf8(req));
+	const body = wait_for_response(&s, 1731.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj =
+		*(json::get(&obj, "result") as *json::value) as json::object;
+	const items =
+		*(json::get(&result_obj, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const name = *(json::get(&it, "name") as *json::value) as str;
+		if (name == "f_550") {
+			found = true;
+			break;
+		};
+	};
+	assert(
+		found,
+		"deep workspace symbol must be reachable after idle-time indexing"
 	);
 };
 
