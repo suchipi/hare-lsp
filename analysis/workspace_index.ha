@@ -41,19 +41,21 @@ export type workspace_entry = struct {
 	param_names: []str,
 };
 
-// Cap on the total number of entries the workspace index will hold.
-// Once exceeded, [[index_file]] refuses to add new entries for new files
-// (existing files can still be re-indexed). Matches
-// `server/limits.ha:MAX_WORKSPACE_INDEX_ENTRIES`.
-export def MAX_INDEX_ENTRIES: size = 1_000_000;
+// Default cap on the total number of entries the workspace index will
+// hold when no `hare.limits.maxWorkspaceIndexEntries` is configured.
+// Once `max_entries` is exceeded, [[index_file]] refuses to add new
+// entries for new files (existing files can still be re-indexed).
+// Matches `server/limits.ha:default_limits().max_workspace_index_entries`.
+export def DEFAULT_MAX_INDEX_ENTRIES: size = 1_000_000;
 
 // The workspace index.
 export type workspace_index = struct {
 	entries: []workspace_entry,
 	// File paths whose directories were scanned. Used to avoid re-indexing.
 	indexed_files: []str,
-	// Runtime cap; never exceeds [[MAX_INDEX_ENTRIES]]. Settable via
-	// [[set_max_entries]]; defaults to MAX_INDEX_ENTRIES.
+	// Runtime cap. Settable via [[set_max_entries]]; defaults to
+	// [[DEFAULT_MAX_INDEX_ENTRIES]]. Whatever value the user configures
+	// is used verbatim — there is no additional non-configurable ceiling.
 	max_entries: size,
 };
 
@@ -61,15 +63,14 @@ export type workspace_index = struct {
 export fn new_workspace_index() workspace_index = workspace_index {
 	entries = [],
 	indexed_files = [],
-	max_entries = MAX_INDEX_ENTRIES,
+	max_entries = DEFAULT_MAX_INDEX_ENTRIES,
 };
 
-// Lowers the runtime cap below the absolute ceiling. Values above
-// [[MAX_INDEX_ENTRIES]] are clamped (the analysis-side cap is a
-// hard guard against runaway memory). No-op if `n` is zero.
+// Sets the runtime cap on entries. The value is stored verbatim; there
+// is no additional hard ceiling. No-op if `n` is zero.
 export fn set_max_entries(idx: *workspace_index, n: size) void = {
 	if (n == 0) return;
-	idx.max_entries = if (n > MAX_INDEX_ENTRIES) MAX_INDEX_ENTRIES else n;
+	idx.max_entries = n;
 };
 
 // Releases owned memory.
@@ -121,7 +122,7 @@ export fn drop_file(idx: *workspace_index, path_str: str) void = {
 // Adds entries for a single file. text is the file contents.
 //
 // Refuses to add new entries (silently) once the index has grown past
-// [[MAX_INDEX_ENTRIES]]. drop_file always runs first so re-indexing an
+// `max_entries`. drop_file always runs first so re-indexing an
 // already-tracked file still works.
 export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 	drop_file(idx, file_path);
