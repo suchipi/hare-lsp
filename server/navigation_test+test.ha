@@ -239,6 +239,1341 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(value, "before `main`"));
 };
 
+@test fn hover_on_operator_logical_or_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op1.ha",
+		`export fn f() bool = { return true || false; };`);
+
+	// Position is on the first '|' of '||' — character 35.
+	const params =
+		`{"textDocument":{"uri":"file:///op1.ha"},"position":{"line":0,"character":35}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 160.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 160.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Operator"));
+	assert(strings::contains(value, "Logical OR"));
+	assert(strings::contains(value, "Precedence: 2"));
+	assert(strings::contains(value, "Short-circuits"));
+};
+
+@test fn hover_on_operator_logical_and_prefers_two_chars() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op2.ha",
+		`export fn f() bool = { return true && false; };`);
+
+	// Position is on the first '&' of '&&' — character 35. The
+	// scanner must pick up `&&`, not the single `&`.
+	const params =
+		`{"textDocument":{"uri":"file:///op2.ha"},"position":{"line":0,"character":35}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 161.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 161.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Logical AND"));
+	assert(strings::contains(value, "Precedence: 4"));
+	assert(strings::contains(value, "a && b"));
+};
+
+@test fn hover_on_operator_bitwise_and_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op3.ha", `export fn f() int = { return 1 & 2; };`);
+
+	// Position is on the lone '&' — character 31.
+	const params =
+		`{"textDocument":{"uri":"file:///op3.ha"},"position":{"line":0,"character":31}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 162.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 162.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Bitwise AND"));
+	assert(strings::contains(value, "Precedence: 9"));
+	// Disambiguation: binary context must not surface the address-of meaning.
+	assert(!strings::contains(value, "Address-of"));
+};
+
+@test fn hover_on_operator_equality_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op4.ha", `export fn f() bool = { return 1 == 2; };`);
+
+	// Position is on the first '=' of '==' — character 32.
+	const params =
+		`{"textDocument":{"uri":"file:///op4.ha"},"position":{"line":0,"character":32}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 163.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 163.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Equality"));
+	assert(strings::contains(value, "Precedence: 5"));
+};
+
+@test fn hover_on_operator_compound_assign_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op5.ha",
+		`export fn f() void = { let x = 1; x <<= 2; };`);
+
+	// Position is on the first '<' of '<<=' — character 36.
+	// The scanner must prefer `<<=` over `<<` or `<`.
+	const params =
+		`{"textDocument":{"uri":"file:///op5.ha"},"position":{"line":0,"character":36}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 164.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 164.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Compound assignment"));
+	assert(strings::contains(value, "left shift"));
+	assert(strings::contains(value, "a <<= b"));
+	assert(strings::contains(value, "Precedence: 1"));
+};
+
+@test fn hover_on_star_binary_shows_only_multiplication() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_starb.ha", `export fn f() int = { return 2 * 3; };`);
+
+	// '*' is at character 31, with '2 ' before it.
+	const params =
+		`{"textDocument":{"uri":"file:///op_starb.ha"},"position":{"line":0,"character":31}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 165.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 165.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Multiplication"));
+	assert(strings::contains(value, "Precedence: 12"));
+	assert(!strings::contains(value, "Pointer dereference"));
+	assert(!strings::contains(value, "Pointer type modifier"));
+};
+
+@test fn hover_on_star_prefix_shows_only_dereference() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_starp.ha",
+		`export fn g(p: *int) int = { return *p; };`);
+
+	// '*' at character 36 — the prefix dereference of `p`.
+	const params =
+		`{"textDocument":{"uri":"file:///op_starp.ha"},"position":{"line":0,"character":36}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 166.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 166.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Pointer dereference"));
+	assert(strings::contains(value, "Precedence: 13"));
+	assert(!strings::contains(value, "Multiplication"));
+};
+
+@test fn hover_on_star_type_shows_only_pointer_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_start.ha",
+		`export fn g(p: *int) int = { return *p; };`);
+
+	// '*' at character 15 — the pointer-type marker in `*int`.
+	const params =
+		`{"textDocument":{"uri":"file:///op_start.ha"},"position":{"line":0,"character":15}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 167.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 167.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Pointer type modifier"));
+	assert(!strings::contains(value, "Multiplication"));
+	assert(!strings::contains(value, "Pointer dereference"));
+};
+
+@test fn hover_on_address_of_shows_only_address_of() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_addr.ha",
+		`export fn h() void = { let x = 1; let p = &x; };`);
+
+	// '&' at character 42 — address-of x.
+	const params =
+		`{"textDocument":{"uri":"file:///op_addr.ha"},"position":{"line":0,"character":42}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 168.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 168.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Address-of"));
+	assert(strings::contains(value, "Precedence: 13"));
+	assert(!strings::contains(value, "Bitwise AND"));
+};
+
+@test fn hover_on_logical_not_shows_only_logical_not() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_not.ha",
+		`export fn f(b: bool) bool = { return !b; };`);
+
+	// '!' at character 37 — logical NOT prefix on b.
+	const params =
+		`{"textDocument":{"uri":"file:///op_not.ha"},"position":{"line":0,"character":37}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 169.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 169.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Logical NOT"));
+	assert(strings::contains(value, "Precedence: 13"));
+	assert(!strings::contains(value, "Error-assert"));
+};
+
+@test fn hover_on_error_assert_postfix_shows_only_error_assert() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_eassert.ha",
+		`export fn f() int = { let x: (int | void) = 1; return x!; };`);
+
+	// '!' at character 55 — postfix error-assert on x.
+	const params =
+		`{"textDocument":{"uri":"file:///op_eassert.ha"},"position":{"line":0,"character":55}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 170.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 170.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Error-assert"));
+	assert(strings::contains(value, "Precedence: 14"));
+	assert(!strings::contains(value, "Logical NOT"));
+};
+
+@test fn hover_on_pipe_in_type_position_shows_tagged_union() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_pipetype.ha",
+		`export fn f() void = { let x: (int | void) = 1; };`);
+
+	// '|' at character 35 — separates tagged-union members.
+	const params =
+		`{"textDocument":{"uri":"file:///op_pipetype.ha"},"position":{"line":0,"character":35}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 171.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 171.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Tagged-union"));
+	assert(!strings::contains(value, "Bitwise OR"));
+};
+
+@test fn hover_on_pipe_in_value_position_shows_bitwise_or() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_pipeval.ha",
+		`export fn f() int = { return 1 | 2; };`);
+
+	// '|' at character 31.
+	const params =
+		`{"textDocument":{"uri":"file:///op_pipeval.ha"},"position":{"line":0,"character":31}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 172.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 172.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Bitwise OR"));
+	assert(strings::contains(value, "Precedence: 7"));
+	assert(!strings::contains(value, "Tagged-union"));
+};
+
+@test fn hover_on_slice_double_dot_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_dd.ha",
+		`export fn f(s: []int) []int = { return s[1..3]; };`);
+
+	// '..' first dot is at character 42.
+	const params =
+		`{"textDocument":{"uri":"file:///op_dd.ha"},"position":{"line":0,"character":42}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 173.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 173.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Slice/range separator"));
+	// Disambiguation: the slice meaning must not surface the for-header
+	// each-value-binding meaning.
+	assert(!strings::contains(value, "iterator binding"));
+};
+
+@test fn hover_on_variadic_ellipsis_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_ell.ha", `export fn f(args: int...) void = void;`);
+
+	// '...' first dot is at character 21.
+	const params =
+		`{"textDocument":{"uri":"file:///op_ell.ha"},"position":{"line":0,"character":21}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 174.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 174.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Variadic parameter"));
+	assert(!strings::contains(value, "Slice/range"));
+	// Disambiguation: variadic-decl context must not surface call-site
+	// spread, array fill, or struct autofill meanings.
+	assert(!strings::contains(value, "Call-site spread"));
+	assert(!strings::contains(value, "Array-literal fill"));
+	assert(!strings::contains(value, "Struct-literal autofill"));
+};
+
+@test fn hover_on_field_access_dot_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_dot.ha",
+		`type t = struct { x: int }; export fn f(v: t) int = { return v.x; };`);
+
+	// '.' at character 62 between v and x.
+	const params =
+		`{"textDocument":{"uri":"file:///op_dot.ha"},"position":{"line":0,"character":62}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 175.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 175.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Field access"));
+	// Disambiguation: a struct-field `.` must not surface tuple-index docs.
+	assert(!strings::contains(value, "Tuple positional"));
+};
+
+@test fn hover_on_open_brace_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_lbrace.ha", `export fn f() void = { return; };`);
+
+	// '{' at character 21.
+	const params =
+		`{"textDocument":{"uri":"file:///op_lbrace.ha"},"position":{"line":0,"character":21}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 176.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 176.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Function body opener"));
+	// Disambiguation: function-body `{` must not list the other block
+	// constructs (struct/union/enum/match/switch/literal/compound).
+	assert(!strings::contains(value, "Struct type body"));
+	assert(!strings::contains(value, "Match body"));
+	assert(!strings::contains(value, "Compound expression"));
+};
+
+@test fn hover_on_close_brace_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_rbrace.ha", `export fn f() void = { return; };`);
+
+	// '}' at character 31.
+	const params =
+		`{"textDocument":{"uri":"file:///op_rbrace.ha"},"position":{"line":0,"character":31}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 177.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 177.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Function body closer"));
+	assert(!strings::contains(value, "Struct type body"));
+	assert(!strings::contains(value, "Match body"));
+};
+
+@test fn hover_on_type_annotation_colon_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_colon.ha",
+		`export fn f() void = { let x: int = 1; };`);
+
+	// ':' at character 28 in 'let x: int'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_colon.ha"},"position":{"line":0,"character":28}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 178.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 178.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Type annotation"));
+	// Disambiguation: the binding-annotation case must NOT surface the
+	// cast or label meanings.
+	assert(!strings::contains(value, "Cast expression"));
+	assert(!strings::contains(value, "Label prefix"));
+};
+
+@test fn hover_on_cast_colon_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_cast.ha", `export fn f() u8 = { return 5: u8; };`);
+
+	// ':' at character 29 in '5: u8'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_cast.ha"},"position":{"line":0,"character":29}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 179.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 179.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Cast expression"));
+	assert(!strings::contains(value, "Type annotation"));
+	assert(!strings::contains(value, "Label prefix"));
+};
+
+@test fn hover_on_label_colon_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_label.ha",
+		`export fn f() void = { for :outer (false) { break :outer; }; };`);
+
+	// First ':' at character 27 — the label declaration ':outer'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_label.ha"},"position":{"line":0,"character":27}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 180.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 180.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Label prefix"));
+	assert(!strings::contains(value, "Type annotation"));
+	assert(!strings::contains(value, "Cast expression"));
+};
+
+@test fn hover_on_for_header_double_dot_returns_iter_binding() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_forval.ha",
+		`export fn f(xs: []int) void = { for (let v .. xs) void; };`);
+
+	// '..' first dot is at character 44 in 'let v .. xs'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_forval.ha"},"position":{"line":0,"character":44}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 181.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 181.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "By-value iterator binding"));
+	// Disambiguation: the for-header case must not mention slice docs.
+	assert(!strings::contains(value, "Slice/range separator"));
+};
+
+@test fn hover_on_for_iterator_arrow_returns_iter_binding() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_foriter.ha",
+		`export fn f(it: int) void = { for (let v => it) void; };`);
+
+	// '=>' first byte at character 42 in 'let v => it'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_foriter.ha"},"position":{"line":0,"character":42}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 182.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 182.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Iterator-protocol binding"));
+	// Disambiguation: the for-iterator case must not mention case-arrow docs.
+	assert(!strings::contains(value, "Case arrow"));
+};
+
+@test fn hover_on_case_arrow_returns_case_arrow() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_case.ha",
+		`export fn f(v: (int | void)) void = { match (v) { case int => void; case => void; }; };`
+	);
+
+	// First '=>' first byte at character 59 (the '=' of 'case int => void').
+	const params =
+		`{"textDocument":{"uri":"file:///op_case.ha"},"position":{"line":0,"character":59}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 183.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 183.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Case arrow"));
+	assert(!strings::contains(value, "Iterator-protocol binding"));
+};
+
+@test fn hover_on_tuple_index_dot_returns_tuple_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_tup.ha",
+		`export fn f(t: (int, int)) int = { return t.0; };`);
+
+	// '.' at character 43 in 't.0'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_tup.ha"},"position":{"line":0,"character":43}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 184.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 184.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Tuple positional"));
+	// Disambiguation: tuple `.` must not mention struct-field docs.
+	assert(!strings::contains(value, "Field access"));
+};
+
+@test fn hover_on_struct_body_brace_returns_struct_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_struct.ha", `type t = struct { x: int };`);
+
+	// '{' at character 16.
+	const params =
+		`{"textDocument":{"uri":"file:///op_struct.ha"},"position":{"line":0,"character":16}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 185.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 185.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Struct type body opener"));
+	assert(!strings::contains(value, "Function body"));
+	assert(!strings::contains(value, "Match body"));
+};
+
+@test fn hover_on_match_body_brace_returns_match_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_match.ha",
+		`export fn f(v: (int | void)) void = { match (v) { case => void; }; };`);
+
+	// '{' opening the match body at character 48.
+	const params =
+		`{"textDocument":{"uri":"file:///op_match.ha"},"position":{"line":0,"character":48}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 186.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 186.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Match body opener"));
+	assert(!strings::contains(value, "Function body"));
+	assert(!strings::contains(value, "Switch body"));
+};
+
+@test fn hover_on_index_lbracket_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_idx.ha",
+		`export fn f(xs: []int) int = { return xs[0]; };`);
+
+	// '[' at character 40 (just after 'xs').
+	const params =
+		`{"textDocument":{"uri":"file:///op_idx.ha"},"position":{"line":0,"character":40}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 187.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 187.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Index / slice opener"));
+	assert(!strings::contains(value, "Array / slice type"));
+	assert(!strings::contains(value, "Array literal"));
+};
+
+@test fn hover_on_array_type_lbracket_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_atype.ha",
+		`export fn f() void = { let x: [3]int = [1, 2, 3]; };`);
+
+	// First '[' at character 30 — the array-type bracket in '[3]int'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_atype.ha"},"position":{"line":0,"character":30}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 188.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 188.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Array type opener"));
+	assert(!strings::contains(value, "Index / slice"));
+	assert(!strings::contains(value, "Array literal"));
+	// Length-bearing array type must not surface the empty-bracket
+	// slice-type meaning.
+	assert(!strings::contains(value, "Slice type opener"));
+};
+
+@test fn hover_on_array_literal_lbracket_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_alit.ha",
+		`export fn f() void = { let x: [3]int = [1, 2, 3]; };`);
+
+	// Second '[' at character 39 — the array-literal bracket in '[1, 2, 3]'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_alit.ha"},"position":{"line":0,"character":39}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 189.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 189.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Array literal opener"));
+	assert(!strings::contains(value, "Index / slice"));
+	assert(!strings::contains(value, "Array / slice type"));
+};
+
+@test fn hover_on_index_rbracket_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_idxc.ha",
+		`export fn f(xs: []int) int = { return xs[0]; };`);
+
+	// ']' at character 42, matching the index '[' at 40.
+	const params =
+		`{"textDocument":{"uri":"file:///op_idxc.ha"},"position":{"line":0,"character":42}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 190.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 190.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Index / slice closer"));
+};
+
+@test fn hover_on_call_lparen_returns_call_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_call.ha",
+		`export fn f() void = { let x: size = len(\"hi\"); };`);
+
+	// '(' at character 40 — len's argument list opener.
+	const params =
+		`{"textDocument":{"uri":"file:///op_call.ha"},"position":{"line":0,"character":40}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 191.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 191.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Call argument list opener"));
+	assert(!strings::contains(value, "Function parameter list"));
+	assert(!strings::contains(value, "if condition"));
+};
+
+@test fn hover_on_param_list_lparen_returns_param_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_par.ha", `export fn f(x: int) void = void;`);
+
+	// '(' at character 11 — function declaration parameter list.
+	const params =
+		`{"textDocument":{"uri":"file:///op_par.ha"},"position":{"line":0,"character":11}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 192.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 192.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Function parameter list opener"));
+	assert(!strings::contains(value, "Call argument list"));
+};
+
+@test fn hover_on_if_lparen_returns_if_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_if.ha", `export fn f() void = { if (true) void; };`);
+
+	// '(' at character 26 — if's condition opener.
+	const params =
+		`{"textDocument":{"uri":"file:///op_if.ha"},"position":{"line":0,"character":26}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 193.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 193.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(value, "if condition opener") ||
+		strings::contains(value, "`if` condition opener")
+	);
+	assert(!strings::contains(value, "Call argument list"));
+};
+
+@test fn hover_on_type_parens_lparen_returns_type_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_tparen.ha",
+		`export fn f() void = { let x: (int | void) = 1; };`);
+
+	// '(' at character 30 — opens the tagged-union type.
+	const params =
+		`{"textDocument":{"uri":"file:///op_tparen.ha"},"position":{"line":0,"character":30}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 194.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 194.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Type-grouping opener"));
+	assert(!strings::contains(value, "Expression-grouping"));
+};
+
+@test fn hover_on_terminator_semicolon_returns_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_semi.ha", `export fn f() void = { let x = 1; };`);
+
+	// ';' at character 32 after `let x = 1`.
+	const params =
+		`{"textDocument":{"uri":"file:///op_semi.ha"},"position":{"line":0,"character":32}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 195.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 195.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Statement terminator"));
+	assert(!strings::contains(value, "for header separator"));
+};
+
+@test fn hover_on_for_header_semicolon_returns_separator_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_forsemi.ha",
+		`export fn f() void = { for (let i = 0; i < 3; i += 1) void; };`);
+
+	// First ';' inside the for header — at character 37.
+	const params =
+		`{"textDocument":{"uri":"file:///op_forsemi.ha"},"position":{"line":0,"character":37}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 196.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 196.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "header separator"));
+	assert(!strings::contains(value, "Statement terminator"));
+};
+
+@test fn hover_on_func_body_brace_mentions_return() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_fbret.ha", `export fn f() void = { return; };`);
+
+	// '{' at character 21.
+	const params =
+		`{"textDocument":{"uri":"file:///op_fbret.ha"},"position":{"line":0,"character":21}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 197.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 197.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Function body opener"));
+	assert(strings::contains(value, "return"));
+};
+
+@test fn hover_on_comma_after_rbracket_does_not_show_rbracket_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	// Mirrors the analysis/buffer.ha case: `[0...], grow`. The cursor
+	// on the comma must not back off and surface the array-literal
+	// closer's tooltip.
+	nav_open(&s, "file:///op_combr.ha",
+		`export fn f(b: []u8) void = { append(b, [0...], 3)!; };`);
+
+	// ',' immediately after the ']' of '[0...]'. The bytes '[0...]'
+	// sit at characters 40-45, so the comma is at character 46.
+	const params =
+		`{"textDocument":{"uri":"file:///op_combr.ha"},"position":{"line":0,"character":46}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 198.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 198.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	// The comma sits inside the call to `append(...)`, so its tooltip
+	// should be the call-arg separator, not the array-literal closer.
+	assert(strings::contains(value, "Argument separator"));
+	assert(!strings::contains(value, "Array literal closer"));
+};
+
+@test fn hover_on_param_list_comma_returns_param_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_compar.ha",
+		`export fn f(a: int, b: int) void = void;`);
+
+	// ',' between params at character 18.
+	const params =
+		`{"textDocument":{"uri":"file:///op_compar.ha"},"position":{"line":0,"character":18}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 199.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 199.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Parameter separator"));
+	assert(!strings::contains(value, "Argument separator"));
+};
+
+@test fn hover_on_array_literal_comma_returns_element_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_comar.ha",
+		`export fn f() void = { let x: [3]int = [1, 2, 3]; };`);
+
+	// First ',' inside [1, 2, 3] at character 41.
+	const params =
+		`{"textDocument":{"uri":"file:///op_comar.ha"},"position":{"line":0,"character":41}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 200.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 200.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Array element separator"));
+	assert(!strings::contains(value, "Argument separator"));
+	assert(!strings::contains(value, "Parameter separator"));
+};
+
+@test fn hover_on_slice_type_lbracket_returns_slice_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_slt.ha", `export fn f(b: []u8) void = void;`);
+
+	// '[' at character 15 — opens the slice type '[]u8'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_slt.ha"},"position":{"line":0,"character":15}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 201.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 201.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Slice type opener"));
+	assert(!strings::contains(value, "Array type opener"));
+	assert(!strings::contains(value, "Index / slice opener"));
+};
+
+@test fn hover_on_slice_type_rbracket_returns_slice_docs() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	nav_open(&s, "file:///op_slc.ha", `export fn f(b: []u8) void = void;`);
+
+	// ']' at character 16 — closes the slice type '[]u8'.
+	const params =
+		`{"textDocument":{"uri":"file:///op_slc.ha"},"position":{"line":0,"character":16}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 202.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 202.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result = *(json::get(&o, "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "Slice type closer"));
+	assert(!strings::contains(value, "Array type closer"));
+	assert(!strings::contains(value, "Index / slice"));
+};
+
 @test fn hover_on_whitespace_returns_null() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
@@ -906,8 +2241,7 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
-	const src =
-		"fn f(a: size, b: size) void = { let cmp = a < b; };\\n";
+	const src = "fn f(a: size, b: size) void = { let cmp = a < b; };\\n";
 	nav_open(&s, "file:///cmp.ha", src);
 
 	const params =
