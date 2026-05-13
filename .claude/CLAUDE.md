@@ -18,6 +18,8 @@ The project is driven entirely by the [Makefile](Makefile). It pins `HAREPATH` t
 
 There is no separate lint step; rely on `hare build` errors, `make test`, and `make vscode-test`.
 
+Before committing, run `./harefmt --write .` to format Hare files in the repo.
+
 ### Running a single test
 
 `hare test` accepts a name filter. Tests live alongside source as `*_test+test.ha` (unit) or under [e2e/](e2e/) (e2e). Example:
