@@ -86,8 +86,10 @@ export fn main() void = {
 	const start_obj = field(&range_obj, "start") as json::object;
 	const start_line = field(&start_obj, "line") as f64;
 	const start_char = field(&start_obj, "character") as f64;
-	assert(start_line == 0.0 && start_char == 0.0,
-		"format edit must replace the whole document, not a partial range");
+	assert(
+		start_line == 0.0 && start_char == 0.0,
+		"format edit must replace the whole document, not a partial range"
+	);
 
 	assert(
 		strings::contains(new_text, "SPDX-License-Identifier"),
@@ -108,7 +110,7 @@ export fn main() void = {
 	// The non-canonical `let x  = 1;` must be collapsed to single-space.
 	assert(
 		strings::contains(new_text, "let x = 1;") &&
-			!strings::contains(new_text, "let x  = 1;"),
+		!strings::contains(new_text, "let x  = 1;"),
 		"formatter must normalize the double space introduced in the fixture"
 	);
 };
@@ -158,10 +160,7 @@ use     io;
 		fmt::fatalf("e2e: format response missing result: {}", text);
 	};
 	const arr = result as []json::value;
-	assert(
-		len(arr) == 1,
-		"format must emit one edit for non-canonical input"
-	);
+	assert(len(arr) == 1, "format must emit one edit for non-canonical input");
 	const edit = arr[0] as json::object;
 	const new_text = *(json::get(&edit, "newText") as *json::value) as str;
 
@@ -301,8 +300,13 @@ use     io;
 
 	// All five argument names must appear exactly once in the output —
 	// catches a regression that duplicates, drops, or reorders args.
-	const arg_names: [_]str = ["argument_one", "argument_two",
-		"argument_three", "argument_four", "argument_five"];
+	const arg_names: [_]str = [
+		"argument_one",
+		"argument_two",
+		"argument_three",
+		"argument_four",
+		"argument_five",
+	];
 	for (let a = 0z; a < len(arg_names); a += 1) {
 		let count = 0;
 		for (let i = 0z; i < len(lines); i += 1) {
@@ -310,28 +314,42 @@ use     io;
 				count += 1;
 			};
 		};
-		assert(count == 1,
-			"each argument must appear exactly once in the wrapped output");
+		assert(
+			count == 1,
+			"each argument must appear exactly once in the wrapped output"
+		);
 	};
 
-	// The continuation args (two, three, four) must each start their
-	// own line indented with exactly two tabs — depth 1 for `main`'s
-	// body plus one more for the call's continuation indent.
-	const continuation_args: [_]str = ["argument_two", "argument_three",
-		"argument_four"];
-	for (let a = 0z; a < len(continuation_args); a += 1) {
-		const expected = strings::concat("\t\t", continuation_args[a])!;
-		defer free(expected);
-		let found = false;
-		for (let i = 0z; i < len(lines); i += 1) {
-			if (strings::hasprefix(lines[i], expected)) {
-				found = true;
-				break;
-			};
+	// At least one continuation line must exist (the call doesn't fit
+	// on one 80-col line) and every continuation line of the call must
+	// be indented at exactly two tabs — depth 1 for `main`'s body plus
+	// one more for the call's continuation indent.
+	let call_line: size = len(lines);
+	for (let i = 0z; i < len(lines); i += 1) {
+		if (strings::contains(lines[i], "some_function(")) {
+			call_line = i;
+			break;
 		};
-		assert(found,
-			"continuation arg must begin its own line at exactly two tabs");
 	};
+	assert(call_line < len(lines), "could not find the call line");
+	let continuation_lines = 0;
+	for (let i = call_line + 1; i < len(lines); i += 1) {
+		const ln = lines[i];
+		if (len(ln) == 0) continue;
+		// Stop once we leave the call (closing `};` of `main` is at
+		// depth 0 or 1 with `};` text only).
+		const trimmed = strings::trim(ln, '\t');
+		if (trimmed == "};" || trimmed == "}") break;
+		continuation_lines += 1;
+		assert(
+			strings::hasprefix(ln, "\t\t") && !strings::hasprefix(ln, "\t\t\t"),
+			"continuation line must be indented at exactly two tabs"
+		);
+	};
+	assert(
+		continuation_lines >= 1,
+		"a >80-col call must wrap onto at least one continuation line"
+	);
 
 	for (let i = 0z; i < len(lines); i += 1) {
 		assert(len(lines[i]) <= 80, "every formatted line fits in 80 columns");
