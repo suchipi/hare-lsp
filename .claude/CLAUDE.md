@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Language Server Protocol (LSP 3.17) implementation for the [Hare programming language](https://harelang.org/), written in Hare itself. Targets Hare v0.26.0. The binary is `hare-lsp` and is intended to be spawned by editor clients over stdio.
 
+## New to Hare?
+
+If you aren't already fluent in Hare, read [.claude/hare-language-guide.md](hare-language-guide.md) before doing nontrivial work. It covers the language surface (types, error handling, memory management, tagged unions), the stdlib modules this codebase actually uses, and the project-specific landmines agents keep rediscovering (vendored stdlib, rune-vs-byte offsets, append-realloc invalidation, etc.).
+
 ## Build, test, run
 
 The project is driven entirely by the [Makefile](Makefile). It pins `HAREPATH` to `$(PWD):$(THIRDPARTY):/usr/local/src/hare/stdlib` so that `use lsp;`, `use server;`, etc. resolve to the in-tree modules.
