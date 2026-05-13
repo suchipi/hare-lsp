@@ -5,7 +5,6 @@
 // stderr into LSP diagnostics. We trigger this on didSave (not didChange)
 // to keep the server's main loop responsive — Hare's build can take
 // seconds on large modules and we have no async runtime in this thread.
-// The plan describes an async kill-and-restart variant; see TODOs.
 //
 // The compiler error format is:
 //
