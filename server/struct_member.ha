@@ -1006,15 +1006,12 @@ export fn try_send_struct_member_hover(
 	const name = strings::fromutf8(m.owner_text[m.name_start..m.name_end])!;
 	const sig = render_field_signature(name, m.field_type);
 	defer free(sig);
-	// Struct fields: type carries ownership iff the field's type does.
-	// The field's docs may carry a bare `@owned` / `@borrowed` (treated
-	// as a non-function decl).
-	const type_str = bare_type_for_ast_type(m.field_type);
-	defer free(type_str);
+	// Struct fields: a bare `@owned` / `@borrowed` in the field's docs
+	// (treated as a non-function decl) populates the Ownership line.
 	const field_fact = analysis::annotations_from_docs(m.docs, false);
 	let field_fact_mut = field_fact;
 	defer analysis::finish_ownership_fact(&field_fact_mut);
-	const own_line = format_ownership_line(field_fact_mut, type_str,
+	const own_line = format_ownership_line(field_fact_mut,
 		s.config.hover_use_html);
 	defer free(own_line);
 	const md = build_hover_markdown_with_facts(s, doc, sig, m.docs, own_line);

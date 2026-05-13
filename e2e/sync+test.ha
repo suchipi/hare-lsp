@@ -171,8 +171,7 @@ use strings;
 	// true) the handler must return at least one TextEdit. Accepting
 	// just a present-but-empty result here would silently regress the
 	// auto-fix-on-save integration in editors.
-	const edits =
-		*(json::get(&obj, "result") as *json::value) as []json::value;
+	const edits = *(json::get(&obj, "result") as *json::value) as []json::value;
 	assert(
 		len(edits) >= 1,
 		"willSaveWaitUntil on a file with trailing whitespace must return at least one edit"

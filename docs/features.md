@@ -46,11 +46,13 @@ Targets LSP 3.17 and Hare v0.26.0.
 ## Navigation
 
 - Hover: yes, with doc-comment rendering. Pointer / slice / `str`
-  values also get an `Ownership: owned | borrowed | unknown` line,
-  derived from (in priority order) user-written `@returns:` /
-  `@param` / bare `@owned` / `@borrowed` annotations, a stdlib
-  doc-comment lookup table, and built-in expression heuristics
-  (`alloc(...)`, `&x`, string literals, slices, casts). See
+  values also get an `Ownership: owned | borrowed` line when the
+  server can decide, derived from (in priority order) user-written
+  `@returns:` / `@param` / bare `@owned` / `@borrowed` annotations,
+  a stdlib doc-comment lookup table, and built-in expression
+  heuristics (`alloc(...)`, `&x`, string literals, slices, casts).
+  When no layer fires the line is omitted entirely — silence reads
+  as "I don't know," not a guess. See
   [docs/ownership-annotations.md](ownership-annotations.md) for the
   annotation grammar.
 - Goto definition: yes.

@@ -42,13 +42,19 @@ use strings;
 	const end_line = *(json::get(&fold0, "endLine") as *json::value) as f64;
 	// `main`'s declaration spans source lines 1..5 (1-indexed). The
 	// server emits LSP 0-indexed lines, so {start=0, end=4}.
-	assert(start_line == 0.0,
-		"fold must start at line 0 (the `export fn ... {` line)");
-	assert(end_line == 4.0,
-		"fold must end at line 4 (the `};` line) so the body is collapsible");
+	assert(
+		start_line == 0.0,
+		"fold must start at line 0 (the `export fn ... {` line)"
+	);
+	assert(
+		end_line == 4.0,
+		"fold must end at line 4 (the `};` line) so the body is collapsible"
+	);
 	const kind = *(json::get(&fold0, "kind") as *json::value) as str;
-	assert(kind == "region",
-		"a function-body fold must carry FoldingRangeKind=\"region\"");
+	assert(
+		kind == "region",
+		"a function-body fold must carry FoldingRangeKind=\"region\""
+	);
 };
 
 @test fn e2e_folding_range_emits_imports_region() void = {
@@ -77,19 +83,21 @@ export fn main() void = void;
 	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
 	// `main` is single-line so no symbol fold; only the imports fold
 	// should be emitted.
-	assert(len(arr) == 1,
-		"only the imports region should be folded (main is single-line)");
+	assert(
+		len(arr) == 1,
+		"only the imports region should be folded (main is single-line)"
+	);
 	const fold0 = arr[0] as json::object;
 	const kind = *(json::get(&fold0, "kind") as *json::value) as str;
-	assert(kind == "imports",
-		"the lone fold must be the imports region");
+	assert(kind == "imports", "the lone fold must be the imports region");
 	const start_line = *(json::get(&fold0, "startLine") as *json::value) as f64;
 	const end_line = *(json::get(&fold0, "endLine") as *json::value) as f64;
 	// `use io;`..`use strings;` span source lines 1..3 → LSP 0..2.
-	assert(start_line == 0.0,
-		"imports fold must start at line 0 (the first `use`)");
-	assert(end_line == 2.0,
-		"imports fold must end at line 2 (the last `use`)");
+	assert(
+		start_line == 0.0,
+		"imports fold must start at line 0 (the first `use`)"
+	);
+	assert(end_line == 2.0, "imports fold must end at line 2 (the last `use`)");
 };
 
 @test fn e2e_selection_range_returns_nested_ranges() void = {
@@ -128,12 +136,16 @@ export fn main() void = void;
 	const innermost_range = field(&r0, "range") as json::object;
 	const inner_start = field(&innermost_range, "start") as json::object;
 	const inner_end = field(&innermost_range, "end") as json::object;
-	assert((field(&inner_start, "line") as f64) == 1.0 &&
-		(field(&inner_start, "character") as f64) == 5.0,
-		"innermost range must start at the `x` ident (line 1, char 5)");
-	assert((field(&inner_end, "line") as f64) == 1.0 &&
-		(field(&inner_end, "character") as f64) == 6.0,
-		"innermost range must end after the `x` ident (line 1, char 6)");
+	assert(
+		field(&inner_start, "line") as f64 == 1.0 &&
+		field(&inner_start, "character") as f64 == 5.0,
+		"innermost range must start at the `x` ident (line 1, char 5)"
+	);
+	assert(
+		field(&inner_end, "line") as f64 == 1.0 &&
+		field(&inner_end, "character") as f64 == 6.0,
+		"innermost range must end after the `x` ident (line 1, char 6)"
+	);
 
 	// Walk the `parent` chain outward. We expect at least three levels
 	// (ident → line → decl → subunit, deduped if any are equal) and
@@ -163,29 +175,36 @@ export fn main() void = void;
 		// wider on at least one side (the dedup pass in
 		// server/symbols.ha:290-303 drops equal ranges, so equal here
 		// would be a bug).
-		const starts_earlier = sl < prev_start_line ||
-			(sl == prev_start_line && sc < prev_start_char);
-		const ends_later = el > prev_end_line ||
-			(el == prev_end_line && ec > prev_end_char);
-		const not_narrower = !(sl > prev_start_line ||
-			(sl == prev_start_line && sc > prev_start_char)) &&
-			!(el < prev_end_line ||
-			(el == prev_end_line && ec < prev_end_char));
-		assert(not_narrower,
-			"parent range must contain the inner range, not be narrower");
-		assert(starts_earlier || ends_later,
-			"parent range must be strictly wider than the inner range");
+		const starts_earlier =
+			sl < prev_start_line || sl == prev_start_line && sc < prev_start_char;
+		const ends_later =
+			el > prev_end_line || el == prev_end_line && ec > prev_end_char;
+		const not_narrower =
+			!(sl > prev_start_line || sl == prev_start_line && sc > prev_start_char) &&
+			!(el < prev_end_line || el == prev_end_line && ec < prev_end_char);
+		assert(
+			not_narrower,
+			"parent range must contain the inner range, not be narrower"
+		);
+		assert(
+			starts_earlier || ends_later,
+			"parent range must be strictly wider than the inner range"
+		);
 		prev_start_line = sl;
 		prev_start_char = sc;
 		prev_end_line = el;
 		prev_end_char = ec;
 	};
-	assert(depth >= 3,
+	assert(
+		depth >= 3,
 		"selectionRange must expose at least 3 nested levels"
-		" (ident → enclosing line/decl → subunit)");
+		" (ident → enclosing line/decl → subunit)"
+	);
 	// Outermost level must cover from the start of the document
 	// onwards. Subunit range is (0, len(data)) per
 	// server/symbols.ha:284, so its LSP range starts at {0, 0}.
-	assert(prev_start_line == 0.0 && prev_start_char == 0.0,
-		"outermost range must begin at the start of the document");
+	assert(
+		prev_start_line == 0.0 && prev_start_char == 0.0,
+		"outermost range must begin at the start of the document"
+	);
 };

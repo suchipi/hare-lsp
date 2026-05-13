@@ -1,6 +1,6 @@
 # Doc-comment ownership annotations
 
-hare-lsp shows a one-line **Ownership** indicator on hover for values whose type carries memory ownership semantics — pointers (`*T`, `nullable *T`), slices (`[]T`), and `str`. The line tells you whether the value is **owned** (you must free it), **borrowed** (someone else owns it; don't free), or **unknown** (the LSP looked but couldn't decide).
+hare-lsp shows a one-line **Ownership** indicator on hover for pointer / slice / `str` values whose ownership the server can decide. The line tells you whether the value is **owned** (you must free it) or **borrowed** (someone else owns it; don't free). When the server has no signal, the line is omitted entirely — silence means "I don't know," not a guess.
 
 This page documents the annotation syntax you can put in your own doc comments so the LSP picks up your intent.
 
@@ -41,7 +41,7 @@ When you hover an identifier whose type carries ownership, the LSP runs three la
 2. **Stdlib doc comment** — a committed lookup table maintained offline that captures phrases like "the caller must free" or "borrowed from `in`" from the Hare stdlib's documentation. Only applies to stdlib symbols; the LSP runtime itself does no natural-language matching.
 3. **Heuristic** — built-in rules for expressions: `alloc(...)` returns owned, `&x` borrows local storage, a string literal is borrowed (it lives in static storage), and so on.
 
-If none of those fire, hover shows `Ownership: unknown` (when the type carries ownership) or no line at all (when it doesn't, like `int`).
+If none of those fire, hover renders no Ownership line at all. Silence reads as "I don't know"; the line is reserved for positive answers.
 
 ## Annotation syntax
 
@@ -122,14 +122,12 @@ Hovering the field shows the line.
 
 ```
 Ownership: owned (annotation)
-Ownership: owned (annotation: borrowed from `in`)   // narrow case
 Ownership: borrowed (annotation)
 Ownership: borrowed (annotation: borrowed from `in`)
 Ownership: owned (doc comment: the caller must free the return value)
 Ownership: borrowed (doc comment: borrowed from `in`)
 Ownership: owned (heuristic: alloc returns owned memory)
 Ownership: borrowed (heuristic: address-of borrows local storage)
-Ownership: unknown
 ```
 
 The trailer in parentheses always tells you **which layer decided**:
@@ -137,13 +135,12 @@ The trailer in parentheses always tells you **which layer decided**:
 - `annotation` — you (or someone) wrote a tag.
 - `doc comment` — the stdlib docs contained a recognized phrase.
 - `heuristic` — the LSP inferred from the expression's structure.
-- (No trailer when the line is `unknown`.)
 
-That trailer is the confidence signal. `(annotation)` and `(doc comment: …)` are explicit human intent. `(heuristic: …)` is the LSP guessing from structural cues; usually right, but not promised. `unknown` means the LSP couldn't tell and didn't want to guess.
+That trailer is the confidence signal. `(annotation)` and `(doc comment: …)` are explicit human intent. `(heuristic: …)` is the LSP guessing from structural cues; usually right, but not promised.
 
 ## When the LSP stays silent
 
-- The hovered value's type doesn't carry ownership (`int`, `bool`, `size`, plain structs, etc.). No line — silence is reserved for "this question doesn't apply."
+- No layer fired (the docs are silent, the symbol isn't in the stdlib table, no heuristic matched). Silence reads as "I don't know"; the line is reserved for positive answers.
 - The hovered subject isn't a value (a module name, a keyword, an attribute).
 
 ## Why this exists
@@ -154,7 +151,7 @@ Hare has no syntactic marker for ownership. Reading code, you can usually tell w
 
 - **`@owned` on a function is silently dropped.** Use `@returns: owned`.
 - **`@returns: borrowed from <name>` requires the named parameter to exist.** If it doesn't, the LSP still shows the line, but the trailer won't help your reader.
-- **Don't annotate if you don't know.** "Unknown" is a legitimate answer and is more useful than a wrong guess.
+- **Don't annotate if you don't know.** Omitting the tag is a legitimate answer — the LSP just stays silent — and is better than a wrong guess.
 - **The bare form is fine on fields.** Field doc comments use the same syntax as globals.
 
 ## See also

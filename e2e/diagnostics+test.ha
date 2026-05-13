@@ -133,8 +133,7 @@ use strings;
 		const r_uri = *(json::get(&r, "uri") as *json::value) as str;
 		if (r_uri == "file:///ws_diag_a.ha") saw_a = true;
 		if (r_uri == "file:///ws_diag_b.ha") saw_b = true;
-		const r_items =
-			*(json::get(&r, "items") as *json::value) as []json::value;
+		const r_items = *(json::get(&r, "items") as *json::value) as []json::value;
 		assert(
 			len(r_items) == 0,
 			"clean files should produce no diagnostics in workspace report"
@@ -170,7 +169,8 @@ fn parse_publish_diagnostics(body: []u8) (json::value, []json::value) = {
 	let v = json::loadstr(text)!;
 	const obj = v as json::object;
 	const params = *(json::get(&obj, "params") as *json::value) as json::object;
-	const diags = *(json::get(&params, "diagnostics") as *json::value) as []json::value;
+	const diags =
+		*(json::get(&params, "diagnostics") as *json::value) as []json::value;
 	return (v, diags);
 };
 
@@ -409,8 +409,8 @@ fn write_didsave_file(path: str, body: str) void = {
 	send(&s, strings::toutf8(save_msg));
 	const sibling_initial = wait_for_publish_diagnostics(&s, sibling_uri);
 	defer free(sibling_initial);
-	const (initial_root, initial_diags) =
-		parse_publish_diagnostics(sibling_initial);
+	const (initial_root, initial_diags) = parse_publish_diagnostics(
+		sibling_initial);
 	defer json::finish(initial_root);
 	assert(
 		len(initial_diags) >= 1,
@@ -440,8 +440,8 @@ fn write_didsave_file(path: str, body: str) void = {
 
 	const sibling_cleared = wait_for_publish_diagnostics(&s, sibling_uri);
 	defer free(sibling_cleared);
-	const (cleared_root, cleared_diags) =
-		parse_publish_diagnostics(sibling_cleared);
+	const (cleared_root, cleared_diags) = parse_publish_diagnostics(
+		sibling_cleared);
 	defer json::finish(cleared_root);
 	assert(
 		len(cleared_diags) == 0,

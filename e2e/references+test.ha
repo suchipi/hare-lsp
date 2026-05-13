@@ -39,7 +39,8 @@ export fn echo() int = answer();
 	//   line 0 col 10 (decl), line 2 col 22 (call in ask), line 3 col 23 (call in echo).
 	// A `>=3` bound would let the server emit duplicates and pass; require an exact count.
 	if (len(arr) != 3) {
-		fmt::fatalf("e2e: references returned {} hits; fixture has exactly 3 `answer` occurrences. body={}",
+		fmt::fatalf(
+			"e2e: references returned {} hits; fixture has exactly 3 `answer` occurrences. body={}",
 			len(arr), text);
 	};
 	// Every Location must be in refs.ha. Collect (line, char) pairs and
@@ -66,12 +67,15 @@ export fn echo() int = answer();
 		} else if (sl == 3.0 && sc == 23.0) {
 			seen_line3 = true;
 		} else {
-			fmt::fatalf("e2e: unexpected references hit at ({}, {}); expected one of (0,10) (2,22) (3,23). body={}",
+			fmt::fatalf(
+				"e2e: unexpected references hit at ({}, {}); expected one of (0,10) (2,22) (3,23). body={}",
 				sl, sc, text);
 		};
 	};
-	assert(seen_line0 && seen_line2 && seen_line3,
-		"references should cover the decl and both call sites with distinct positions");
+	assert(
+		seen_line0 && seen_line2 && seen_line3,
+		"references should cover the decl and both call sites with distinct positions"
+	);
 };
 
 @test fn e2e_prepare_rename_returns_ident_range() void = {
@@ -112,7 +116,8 @@ export fn echo() int = answer();
 	// `answer` is on line 0, cols 10..16.
 	if (start_line != 0.0 || end_line != 0.0 || start_char != 10.0 ||
 			end_char != 16.0) {
-		fmt::fatalf("e2e: prepareRename range = ({},{}..{},{}), expected (0,10..0,16). body={}",
+		fmt::fatalf(
+			"e2e: prepareRename range = ({},{}..{},{}), expected (0,10..0,16). body={}",
 			start_line, start_char, end_line, end_char, text);
 	};
 };
@@ -149,7 +154,8 @@ export fn ask() int = answer();
 	// call line 2 col 22..28). Require an exact count; `>= 2` would let a
 	// regression that emitted duplicate edits slip past and corrupt the user's file.
 	if (len(edits) != 2) {
-		fmt::fatalf("e2e: rename produced {} edits; fixture has exactly 2 `answer` occurrences. body={}",
+		fmt::fatalf(
+			"e2e: rename produced {} edits; fixture has exactly 2 `answer` occurrences. body={}",
 			len(edits), text);
 	};
 	// Iterate every edit (not just edits[0]) -- a regression that mangled
@@ -174,7 +180,8 @@ export fn ask() int = answer();
 		const ec = *(json::get(&end, "character") as *json::value) as f64;
 		// Each edit must span exactly `answer` (6 chars) on one line.
 		if (el != sl || ec - sc != 6.0) {
-			fmt::fatalf("e2e: rename edit[{}] range = ({},{}..{},{}); expected a single-line 6-char span. body={}",
+			fmt::fatalf(
+				"e2e: rename edit[{}] range = ({},{}..{},{}); expected a single-line 6-char span. body={}",
 				i, sl, sc, el, ec, text);
 		};
 		if (sl == 0.0 && sc == 10.0) {
@@ -182,12 +189,15 @@ export fn ask() int = answer();
 		} else if (sl == 2.0 && sc == 22.0) {
 			seen_call = true;
 		} else {
-			fmt::fatalf("e2e: unexpected rename edit at ({}, {}); expected (0,10) decl or (2,22) call. body={}",
+			fmt::fatalf(
+				"e2e: unexpected rename edit at ({}, {}); expected (0,10) decl or (2,22) call. body={}",
 				sl, sc, text);
 		};
 	};
-	assert(seen_decl && seen_call,
-		"rename should edit both the decl and the call site, at distinct positions");
+	assert(
+		seen_decl && seen_call,
+		"rename should edit both the decl and the call site, at distinct positions"
+	);
 };
 
 @test fn e2e_rename_respects_local_scope() void = {
@@ -230,7 +240,8 @@ export fn shadow() void = {
 	// permitted any line at or below 7 (including off-buffer positions),
 	// so collect both lines and assert the exact set {(7, 5), (8, 1)}.
 	if (len(edits) != 2) {
-		fmt::fatalf("e2e: local rename produced {} edits; expected exactly 2. body={}",
+		fmt::fatalf(
+			"e2e: local rename produced {} edits; expected exactly 2. body={}",
 			len(edits), text);
 	};
 	let seen_decl = false;
@@ -239,8 +250,9 @@ export fn shadow() void = {
 		const e = edits[i] as json::object;
 		const new_text = *(json::get(&e, "newText") as *json::value) as str;
 		if (new_text != "bar") {
-			fmt::fatalf("e2e: local rename edit[{}].newText = {}, expected `bar`. body={}",
-				i, new_text, text);
+			fmt::fatalf(
+				"e2e: local rename edit[{}].newText = {}, expected `bar`. body={}", i,
+				new_text, text);
 		};
 		const r = *(json::get(&e, "range") as *json::value) as json::object;
 		const start = *(json::get(&r, "start") as *json::value) as json::object;
@@ -250,7 +262,8 @@ export fn shadow() void = {
 		const el = *(json::get(&end, "line") as *json::value) as f64;
 		const ec = *(json::get(&end, "character") as *json::value) as f64;
 		if (el != sl || ec - sc != 3.0) {
-			fmt::fatalf("e2e: local rename edit[{}] range = ({},{}..{},{}); expected single-line 3-char (`foo`) span. body={}",
+			fmt::fatalf(
+				"e2e: local rename edit[{}] range = ({},{}..{},{}); expected single-line 3-char (`foo`) span. body={}",
 				i, sl, sc, el, ec, text);
 		};
 		if (sl == 7.0 && sc == 5.0) {
@@ -258,12 +271,15 @@ export fn shadow() void = {
 		} else if (sl == 8.0 && sc == 1.0) {
 			seen_assign = true;
 		} else {
-			fmt::fatalf("e2e: unexpected local-rename edit at ({}, {}); the global decl on line 0 and the use_globals body on line 3 must NOT be touched. body={}",
+			fmt::fatalf(
+				"e2e: unexpected local-rename edit at ({}, {}); the global decl on line 0 and the use_globals body on line 3 must NOT be touched. body={}",
 				sl, sc, text);
 		};
 	};
-	assert(seen_decl && seen_assign,
-		"local rename should hit both `let foo` (line 7) and `foo = 11` (line 8) at distinct positions");
+	assert(
+		seen_decl && seen_assign,
+		"local rename should hit both `let foo` (line 7) and `foo = 11` (line 8) at distinct positions"
+	);
 };
 
 // Two top-level functions named `samename` in different modules must not
@@ -303,7 +319,8 @@ export fn shadow() void = {
 	// loop, an empty `arr` (server returned no references at all -- a real
 	// regression) would slip past. Require at least the decl.
 	if (len(arr) == 0) {
-		fmt::fatalf("e2e: cross-module references returned no hits; expected at least the decl in mod_a. body={}",
+		fmt::fatalf(
+			"e2e: cross-module references returned no hits; expected at least the decl in mod_a. body={}",
 			text);
 	};
 	for (let i = 0z; i < len(arr); i += 1) {
@@ -315,7 +332,8 @@ export fn shadow() void = {
 		// to contain `mod_a` in their name; `hassuffix` pins the exact
 		// per-module file.
 		if (!strings::hassuffix(u, "/mod_a/file.ha")) {
-			fmt::fatalf("e2e: references[{}].uri = {}; expected suffix /mod_a/file.ha", i, u);
+			fmt::fatalf("e2e: references[{}].uri = {}; expected suffix /mod_a/file.ha",
+				i, u);
 		};
 	};
 };
@@ -363,16 +381,17 @@ export fn shadow() void = {
 	// A presence-only `has_field` check would pass even on `{uri_a: []}`
 	// (rename silently does nothing while VSCode reports success);
 	// extract the array and verify its contents.
-	const edits =
-		*(json::get(&changes, uri_a) as *json::value) as []json::value;
+	const edits = *(json::get(&changes, uri_a) as *json::value) as []json::value;
 	if (len(edits) < 1) {
-		fmt::fatalf("e2e: cross-module rename returned 0 edits for mod_a; expected at least the decl edit. body={}",
+		fmt::fatalf(
+			"e2e: cross-module rename returned 0 edits for mod_a; expected at least the decl edit. body={}",
 			text);
 	};
 	const e0 = edits[0] as json::object;
 	const new_text = *(json::get(&e0, "newText") as *json::value) as str;
 	if (new_text != "renamed") {
-		fmt::fatalf("e2e: cross-module rename edit[0].newText = {}, expected `renamed`. body={}",
+		fmt::fatalf(
+			"e2e: cross-module rename edit[0].newText = {}, expected `renamed`. body={}",
 			new_text, text);
 	};
 	const range = *(json::get(&e0, "range") as *json::value) as json::object;
@@ -384,7 +403,8 @@ export fn shadow() void = {
 	const ec = *(json::get(&end, "character") as *json::value) as f64;
 	// `samename` in `export fn samename() int = 1;` is at line 0 cols 10..18.
 	if (sl != 0.0 || el != 0.0 || sc != 10.0 || ec != 18.0) {
-		fmt::fatalf("e2e: cross-module rename edit[0] range = ({},{}..{},{}); expected (0,10..0,18) covering `samename`. body={}",
+		fmt::fatalf(
+			"e2e: cross-module rename edit[0] range = ({},{}..{},{}); expected (0,10..0,18) covering `samename`. body={}",
 			sl, sc, el, ec, text);
 	};
 };
@@ -488,16 +508,17 @@ fn drain_until_indexed_ref(s: *session) void = {
 	// -32602) and the message text so VSCode's user-facing toast remains
 	// the actionable "not a valid Hare identifier" string rather than a
 	// generic internal-error message.
-	const err =
-		*(json::get(&obj, "error") as *json::value) as json::object;
+	const err = *(json::get(&obj, "error") as *json::value) as json::object;
 	const code = *(json::get(&err, "code") as *json::value) as f64;
 	const message = *(json::get(&err, "message") as *json::value) as str;
 	if (code != -32602.0) {
-		fmt::fatalf("e2e: rename error code = {}, expected -32602 (InvalidParams). body={}",
+		fmt::fatalf(
+			"e2e: rename error code = {}, expected -32602 (InvalidParams). body={}",
 			code, text);
 	};
 	if (!strings::contains(message, "valid Hare identifier")) {
-		fmt::fatalf("e2e: rename error message = {}, expected to mention `valid Hare identifier`. body={}",
+		fmt::fatalf(
+			"e2e: rename error message = {}, expected to mention `valid Hare identifier`. body={}",
 			message, text);
 	};
 };

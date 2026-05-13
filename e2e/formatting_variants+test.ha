@@ -58,8 +58,10 @@ export fn two()    int = 2;
 	const start = *(json::get(&range, "start") as *json::value) as json::object;
 	const sl = *(json::get(&start, "line") as *json::value) as f64;
 	const sc = *(json::get(&start, "character") as *json::value) as f64;
-	assert(sl == 0.0 && sc == 0.0,
-		"range-format edit must start at the first decl ({0,0})");
+	assert(
+		sl == 0.0 && sc == 0.0,
+		"range-format edit must start at the first decl ({0,0})"
+	);
 };
 
 @test fn e2e_range_formatting_outside_decls_returns_empty() void = {
@@ -121,12 +123,16 @@ export fn two()    int = 2;
 	defer json::finish(v);
 	const obj = v as json::object;
 	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
-	assert(len(arr) == 1,
-		"closing `}` at the wrong indent must produce exactly one edit");
+	assert(
+		len(arr) == 1,
+		"closing `}` at the wrong indent must produce exactly one edit"
+	);
 	const edit = arr[0] as json::object;
 	const new_text = *(json::get(&edit, "newText") as *json::value) as str;
-	assert(new_text == "",
-		"the reindent edit should erase the over-indent down to depth 0");
+	assert(
+		new_text == "",
+		"the reindent edit should erase the over-indent down to depth 0"
+	);
 	const range = *(json::get(&edit, "range") as *json::value) as json::object;
 	const start = *(json::get(&range, "start") as *json::value) as json::object;
 	const end = *(json::get(&range, "end") as *json::value) as json::object;
@@ -134,10 +140,14 @@ export fn two()    int = 2;
 	const sc = *(json::get(&start, "character") as *json::value) as f64;
 	const el = *(json::get(&end, "line") as *json::value) as f64;
 	const ec = *(json::get(&end, "character") as *json::value) as f64;
-	assert(sl == 2.0 && sc == 0.0,
-		"reindent edit must start at column 0 of the brace's line");
-	assert(el == 2.0 && ec == 2.0,
-		"reindent edit must end after the leading two-tab over-indent");
+	assert(
+		sl == 2.0 && sc == 0.0,
+		"reindent edit must start at column 0 of the brace's line"
+	);
+	assert(
+		el == 2.0 && ec == 2.0,
+		"reindent edit must end after the leading two-tab over-indent"
+	);
 };
 
 @test fn e2e_on_type_formatting_ignores_semicolon_trigger() void = {

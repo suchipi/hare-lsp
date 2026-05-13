@@ -79,7 +79,9 @@ export fn ask() int = answer();
 // that handler gap is closed, this test pins the current null behavior
 // precisely so any change (positive or negative) surfaces. When the
 // handler is fixed, update this test to assert the resulting Location.
-@test fn e2e_type_definition_on_variable_returns_null_pending_handler_fix() void = {
+@test fn e2e_type_definition_on_variable_returns_null_pending_handler_fix(
+
+) void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 	do_init(&s);
@@ -178,7 +180,8 @@ fn check_decl_location(
 		// is more useful than allowing both forms silently. The server
 		// returns a single Location object today; flag the array form as
 		// a deliberate shape change.
-		fmt::fatalf("e2e: {} result was Location[] (len {}); expected a single Location object: {}",
+		fmt::fatalf(
+			"e2e: {} result was Location[] (len {}); expected a single Location object: {}",
 			label, len(arr), body_text);
 	case =>
 		fmt::fatalf("e2e: {} returned null/non-Location: {}", label, body_text);

@@ -665,7 +665,8 @@ fn os_repo_root() str = {
 	send(&s,
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
-	const sample = `// Make a fresh widget.
+	const sample =
+		`// Make a fresh widget.
 //
 // @returns: owned
 export fn make_widget() *int = alloc(0);
@@ -688,7 +689,8 @@ export fn make_widget() *int = alloc(0);
 	const result_obj = match (json::get(&obj, "result")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
+		case let o: json::object =>
+			yield o;
 		case =>
 			fmt::fatalf("e2e: ownership-annotation hover returned null. body={}", text);
 		};
@@ -740,7 +742,8 @@ export fn make_widget() *int = alloc(0);
 	const result_obj = match (json::get(&obj, "result")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
+		case let o: json::object =>
+			yield o;
 		case =>
 			fmt::fatalf("e2e: ownership-local hover returned null. body={}", text);
 		};
@@ -775,7 +778,8 @@ export fn make_widget() *int = alloc(0);
 	send(&s,
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
-	const sample = `// Frobnicates the input thoroughly.
+	const sample =
+		`// Frobnicates the input thoroughly.
 //
 // @returns: owned
 export fn frobnicate() *int = alloc(0);
@@ -802,19 +806,18 @@ export fn frobnicate() *int = alloc(0);
 	const doc_idx = strings::index(md, "Frobnicates");
 	const own_idx = strings::index(md, "Ownership:");
 	const di = match (doc_idx) {
-	case let i: size => yield i;
+	case let i: size =>
+		yield i;
 	case void =>
 		fmt::fatalf("e2e: hover missing doc comment text: {}", text);
 	};
 	const oi = match (own_idx) {
-	case let i: size => yield i;
+	case let i: size =>
+		yield i;
 	case void =>
 		fmt::fatalf("e2e: hover missing Ownership line: {}", text);
 	};
-	assert(
-		di < oi,
-		"doc comment must appear before the Ownership line"
-	);
+	assert(di < oi, "doc comment must appear before the Ownership line");
 };
 
 // When the client sets `hare.hover.useHtml = false`, the Ownership line
@@ -888,7 +891,8 @@ export fn make_widget() *int = alloc(0);
 	send(&s,
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
-	const sample = `use strings;
+	const sample =
+		`use strings;
 export fn main() void = {
 	let _ = strings::dup;
 };
@@ -911,7 +915,8 @@ export fn main() void = {
 	const result_obj = match (json::get(&obj, "result")) {
 	case let p: *json::value =>
 		yield match (*p) {
-		case let o: json::object => yield o;
+		case let o: json::object =>
+			yield o;
 		case =>
 			fmt::fatalf("e2e: stdlib ownership hover returned null. body={}", text);
 		};
