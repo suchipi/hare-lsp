@@ -328,14 +328,41 @@ export fn main() void = {
 	case void =>
 		fmt::fatalf("e2e: definition response missing result: {}", text);
 	};
-	assert(
-		result is json::object,
-		"definition on a real qualified call must return a Location"
-	);
-	const loc = result as json::object;
+	// Definition for a single, in-file decl should be a Location object
+	// (not an array, not null). If the server changes to LocationLink[],
+	// update this test deliberately.
+	const loc = match (result) {
+	case let o: json::object =>
+		yield o;
+	case =>
+		fmt::fatalf("e2e: definition result not a Location object: {}", text);
+	};
 	const uri = *(json::get(&loc, "uri") as *json::value) as str;
+	// Tight URI check: must land in stdlib's `strings` module, on the
+	// `dup.ha` file specifically. `strings::contains(.../strings/)`
+	// would also match unrelated paths that happen to contain `/strings/`.
 	assert(
-		strings::contains(uri, "/strings/"),
-		"definition should point into the strings module"
+		strings::hassuffix(uri, "/strings/dup.ha"),
+		"definition should point at stdlib's strings/dup.ha specifically"
+	);
+	// Range must be non-degenerate and within the dup() decl region.
+	// `dup` is the first decl in dup.ha (the file also contains
+	// `dupall` further down); locking the line range to the dup() block
+	// guards against the handler returning `dupall`'s location or a
+	// zero-default range pointing at the file header.
+	const range = *(json::get(&loc, "range") as *json::value) as json::object;
+	const start = *(json::get(&range, "start") as *json::value) as json::object;
+	const end = *(json::get(&range, "end") as *json::value) as json::object;
+	const start_line = *(json::get(&start, "line") as *json::value) as f64;
+	const start_char = *(json::get(&start, "character") as *json::value) as f64;
+	const end_line = *(json::get(&end, "line") as *json::value) as f64;
+	const end_char = *(json::get(&end, "character") as *json::value) as f64;
+	assert(
+		start_line >= 4.0 && start_line < 20.0,
+		"definition's range.start.line should land in dup()'s decl, not dupall() or the file header"
+	);
+	assert(
+		end_line > start_line || end_char > start_char,
+		"definition's range must be non-empty"
 	);
 };

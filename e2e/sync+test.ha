@@ -101,27 +101,34 @@ use strings;
 	assert(len(arr) == 0, "after didClose the doc should no longer be served");
 };
 
-@test fn e2e_did_save_smoke() void = {
+@test fn e2e_did_save_triggers_publish_diagnostics() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 	do_init(&s);
 
 	open_doc(&s, "file:///save.ha", "export fn s() void = void;\n");
+	// Drain the didOpen-driven publishDiagnostics so the next wait
+	// observes the publish that didSave itself triggers, not the
+	// stale didOpen one.
+	free(wait_for_publish_diagnostics(&s, "file:///save.ha"));
 
 	send(&s,
 		strings::toutf8(
 			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"file:///save.ha"}}}`
 		));
 
-	// Sanity: server still answers requests.
-	send(&s,
-		strings::toutf8(
-			`{"jsonrpc":"2.0","id":2503,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///save.ha"}}}`
-		));
-	free(wait_for_response(&s, 2503.0));
+	// A successful didSave handler republishes diagnostics for the
+	// saved URI. If the notification were silently dropped, this
+	// wait would time out.
+	free(wait_for_publish_diagnostics(&s, "file:///save.ha"));
 };
 
-@test fn e2e_will_save_smoke() void = {
+// willSave is a notification the client sends before saving. The server's
+// handler is intentionally a no-op (see server/documents.ha:handle_will_save);
+// there's no response and no observable wire effect. This test asserts only
+// that accepting the notification doesn't put the server into a bad state,
+// by round-tripping a follow-up request afterwards.
+@test fn e2e_will_save_is_accepted_as_noop() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 	do_init(&s);
@@ -159,10 +166,31 @@ use strings;
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	// `result` may be either an array of edits or null; both are
-	// wire-valid. Just confirm the field exists.
+	// The fixture has trailing whitespace and no final newline; with
+	// default config (trim_final_newlines + insert_final_newline both
+	// true) the handler must return at least one TextEdit. Accepting
+	// just a present-but-empty result here would silently regress the
+	// auto-fix-on-save integration in editors.
+	const edits =
+		*(json::get(&obj, "result") as *json::value) as []json::value;
 	assert(
-		json::get(&obj, "result") is *json::value,
-		"willSaveWaitUntil must include a result field"
+		len(edits) >= 1,
+		"willSaveWaitUntil on a file with trailing whitespace must return at least one edit"
+	);
+	let saw_trim_or_newline = false;
+	for (let i = 0z; i < len(edits); i += 1) {
+		const e = edits[i] as json::object;
+		const new_text = *(json::get(&e, "newText") as *json::value) as str;
+		// A trim edit replaces the trailing whitespace with "" or
+		// with "\n" (when insert_final_newline is also on); a
+		// pure final-newline append uses "\n".
+		if (new_text == "" || strings::contains(new_text, "\n")) {
+			saw_trim_or_newline = true;
+			break;
+		};
+	};
+	assert(
+		saw_trim_or_newline,
+		"willSaveWaitUntil edits must include a trim (newText=\"\") or a final-newline append (newText contains \"\\n\")"
 	);
 };

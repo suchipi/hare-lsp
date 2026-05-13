@@ -111,6 +111,101 @@ def HAREFMT_PATH: str = "./harefmt";
 		assert(false, "harefmt must preserve AST for every file "
 			"in the repo");
 	};
+	// Guard against the silent-pass failure mode where every file is
+	// either unreadable or unparseable: a `parse::subunit` regression
+	// that rejected all real input would otherwise look like a green
+	// pass with `checked = 0`.
+	assert(checked > 0,
+		"AST roundtrip must check at least one file"
+		" (no files survived to the comparison step)");
+};
+
+// Direct test of harefmt's normalization behavior on synthetic input.
+// The repo-walk test above only proves AST is preserved when the input
+// is already harefmt-clean (every committed file is, by repo policy).
+// Here we feed in deliberately-messy source and assert that:
+//   - the formatter actually rewrites it (output != input)
+//   - every line comment in the input is still present
+//   - blank lines between top-level decls are preserved
+//   - the parsed AST is identical before and after
+// This catches regressions that the repo-walk test cannot, because
+// comments and blank lines are not part of the AST and so are
+// invisible to `parse_to_canonical`.
+@test fn e2e_harefmt_normalizes_and_preserves_comments() void = {
+	const messy = strings::toutf8(
+		`// header comment
+use     io;
+
+// between header and first decl
+
+export fn one() void  = void;
+
+// between the two decls
+export fn two() void = void;
+
+// trailing comment
+`);
+
+	const formatted = match (run_harefmt_stdin_stdout(messy)) {
+	case let b: []u8 =>
+		yield b;
+	case let e: str =>
+		fmt::fatalf("harefmt failed on synthetic input: {}", e);
+	};
+	defer free(formatted);
+
+	// Formatter must actually do something: input has `use     io;`
+	// (multiple spaces) and `void  = void` (double space) which are
+	// not canonical. If output == input, either the formatter is a
+	// no-op or it failed silently.
+	assert(!bytes_equal_local(messy, formatted),
+		"harefmt must rewrite non-canonical whitespace");
+
+	const formatted_str = strings::fromutf8(formatted)!;
+
+	// Every line comment in the input must appear in the output.
+	const required_comments: [_]str = [
+		"// header comment",
+		"// between header and first decl",
+		"// between the two decls",
+		"// trailing comment",
+	];
+	for (let i = 0z; i < len(required_comments); i += 1) {
+		assert(strings::contains(formatted_str, required_comments[i]),
+			"every comment in the input must survive harefmt");
+	};
+
+	// At least one blank line (`\n\n`) must remain — otherwise the
+	// formatter collapsed all of the source's intentional spacing.
+	assert(strings::contains(formatted_str, "\n\n"),
+		"intentional blank-line separators between decls must be preserved");
+
+	// AST equivalence: the canonical unparsed form of input and output
+	// must match. Catches regressions that change tokens or structure.
+	const before = match (parse_to_canonical(messy)) {
+	case let s: str =>
+		yield s;
+	case void =>
+		fmt::fatalf("synthetic input failed to parse — fix the fixture");
+	};
+	defer free(before);
+	const after = match (parse_to_canonical(formatted)) {
+	case let s: str =>
+		yield s;
+	case void =>
+		fmt::fatalf("harefmt output failed to reparse");
+	};
+	defer free(after);
+	assert(before == after,
+		"harefmt must preserve AST across the rewrite of the synthetic input");
+};
+
+fn bytes_equal_local(a: []u8, b: []u8) bool = {
+	if (len(a) != len(b)) return false;
+	for (let i = 0z; i < len(a); i += 1) {
+		if (a[i] != b[i]) return false;
+	};
+	return true;
 };
 
 // Renders the parsed AST of `data` into the canonical text form

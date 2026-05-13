@@ -33,15 +33,37 @@ export fn main() void = {
 	defer json::finish(v);
 	const obj = v as json::object;
 	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const inc = *(json::get(&result, "isIncomplete") as *json::value) as bool;
 	assert(
-		json::get(&result, "isIncomplete") is *json::value,
-		"completion result must include isIncomplete"
+		inc == false,
+		"completion result must report isIncomplete=false (server is not truncating)"
 	);
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let saw_my_function = false, saw_my_other = false;
 	for (let i = 0z; i < len(items); i += 1) {
 		const it = items[i] as json::object;
 		const label = *(json::get(&it, "label") as *json::value) as str;
+		if (label != "my_function" && label != "my_other") continue;
+		// Each local fn decl must carry enough metadata for the editor to
+		// render it as a function: kind=Function(3), a non-empty detail,
+		// and an insertText snippet beginning with the name.
+		const kind = *(json::get(&it, "kind") as *json::value) as f64;
+		assert(kind == 3.0, "local fn completion must have kind=Function(3)");
+		const detail = *(json::get(&it, "detail") as *json::value) as str;
+		assert(
+			len(detail) > 0,
+			"local fn completion must populate `detail` so the editor can show the signature"
+		);
+		const it_text = *(json::get(&it, "insertText") as *json::value) as str;
+		assert(
+			strings::hasprefix(it_text, label),
+			"function snippet insertText should start with the function name"
+		);
+		const fmt_kind = *(json::get(&it, "insertTextFormat") as *json::value) as f64;
+		assert(
+			fmt_kind == 2.0,
+			"function completion items must be Snippet (insertTextFormat=2)"
+		);
 		if (label == "my_function") saw_my_function = true;
 		if (label == "my_other") saw_my_other = true;
 	};
@@ -80,9 +102,18 @@ export fn main() void = {
 		const label = *(json::get(&it, "label") as *json::value) as str;
 		if (label == "return") {
 			saw_return = true;
-			// Should be marked CompletionItemKind=Keyword(14).
+			// Should be marked CompletionItemKind=Keyword(14) with
+			// the `detail` label "keyword" so editors can render
+			// the item distinctly from local symbols. Without the
+			// detail check, a regression that emitted keywords as
+			// plain text would still pass.
 			const kind = *(json::get(&it, "kind") as *json::value) as f64;
 			assert(kind == 14.0, "`return` completion item must have kind=Keyword");
+			const detail = *(json::get(&it, "detail") as *json::value) as str;
+			assert(
+				detail == "keyword",
+				"keyword completion items must set detail=\"keyword\""
+			);
 		};
 	};
 	assert(saw_return, "completion should include Hare keywords");
@@ -109,8 +140,13 @@ export fn main() void = {
 		json::get(&obj, "error") is void,
 		"completionItem/resolve must not error on a well-formed item"
 	);
-	assert(
-		json::get(&obj, "result") is *json::value,
-		"completionItem/resolve must include a result"
-	);
+	// Resolve is a passthrough today: the server should echo the input
+	// item's `label` and `kind` so the editor's lazy-resolve flow keeps
+	// working. A regression to `result: null` or `result: {}` (which
+	// drops the popup contents) must fail this test.
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const label = *(json::get(&result, "label") as *json::value) as str;
+	assert(label == "foo", "completionItem/resolve must echo the input label");
+	const kind = *(json::get(&result, "kind") as *json::value) as f64;
+	assert(kind == 3.0, "completionItem/resolve must echo the input kind");
 };
