@@ -193,6 +193,62 @@ export fn main() void = {
 	);
 };
 
+@test fn e2e_completion_member_access_returns_struct_fields() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	const sample = `type buffer = struct { data: []u8, line_index: []size };
+export fn main(b: buffer) void = {
+	b.
+};
+`;
+	open_doc(&s, "file:///comp_mem.ha", sample);
+
+	// Line 2 = "\tb."; column 3 sits right after the dot.
+	const req =
+		`{"jsonrpc":"2.0","id":1803,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///comp_mem.ha"},"position":{"line":2,"character":3}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1803.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let saw_data = false, saw_line_index = false, saw_keyword = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		if (label == "data") {
+			saw_data = true;
+			// Member completion items must carry kind=Field(5) so
+			// editors can render them distinctly from locals/keywords.
+			const kind = *(json::get(&it, "kind") as *json::value) as f64;
+			assert(kind == 5.0,
+				"struct field completion item must have kind=Field(5)");
+		};
+		if (label == "line_index") saw_line_index = true;
+		// MEMBER completion is exclusive - keywords/locals must NOT leak in.
+		match (json::get(&it, "detail")) {
+		case let p: *json::value =>
+			match (*p) {
+			case let d: str =>
+				if (d == "keyword") saw_keyword = true;
+			case => void;
+			};
+		case void => void;
+		};
+	};
+	assert(saw_data && saw_line_index,
+		"member completion must enumerate the struct's fields over the wire");
+	assert(!saw_keyword,
+		"member completion is exclusive and must not include keyword items");
+};
+
+
 @test fn e2e_completion_resolve_passthrough() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
