@@ -806,6 +806,61 @@ fn free_labels(labels: []str) void = {
 		"member completion must work inside match value expressions");
 };
 
+@test fn completion_struct_field_after_postfix_error_assert() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// Postfix `!` (error-assert) before `.` is a valid receiver
+	// terminator: `make_buf()!.<field>`. Use a real `!`-tagged error
+	// variant so [[strip_errors_located]] can collapse the result type
+	// back to `buffer`.
+	comp_open(&s, "file:///mexc.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\ntype err = !void;\nfn make_buf() (buffer | err) = buffer { ... };\nfn main() void = {\n\tmake_buf()!.\n};\n`);
+
+	// Line 4 = `\tmake_buf()!.`; position 13 sits right after the dot.
+	const items = run_completion(&s, out, "file:///mexc.ha", 4, 13, 1015.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "data"),
+		"postfix `!` before `.` must still trigger member completion");
+	assert(labels_contains(labels, "line_index"));
+};
+
+@test fn completion_struct_field_inside_assert_message() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// The receiver sits inside an `assert(...)` builtin expression;
+	// the AST walker must descend into assert_expr.cond.
+	comp_open(&s, "file:///masrt.ha",
+		`type holder = struct { ok: bool };\nfn main(h: holder) void = {\n\tassert(h.);\n};\n`);
+
+	// Line 2 = `\tassert(h.);`; position 10 sits right after the dot.
+	const items = run_completion(&s, out, "file:///masrt.ha", 2, 10, 1016.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "ok"),
+		"member completion must work inside assert() arguments");
+};
+
+@test fn completion_struct_field_inside_struct_literal() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// The receiver appears as an init expression inside a struct
+	// literal; the walker must descend into literal_expr -> struct_literal.
+	comp_open(&s, "file:///mlit.ha",
+		`type inner = struct { x: int };\ntype outer = struct { v: int };\nfn main(i: inner) void = {\n\tlet _ = outer { v = i. };\n};\n`);
+
+	// Line 3 = `\tlet _ = outer { v = i. };`; position 23 sits right
+	// after the dot (1 tab + 21 ASCII chars + dot = position 23).
+	const items = run_completion(&s, out, "file:///mlit.ha", 3, 23, 1017.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "x"),
+		"member completion must work inside struct-literal initializers");
+};
+
 @test fn completion_keyword_has_keyword_sortText() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);

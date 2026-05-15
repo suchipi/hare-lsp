@@ -277,24 +277,22 @@ fn is_word_byte_comp(b: u8) bool = {
 	return b == '_': u8;
 };
 
-// Returns true when the byte immediately before a `.` could plausibly
-// terminate an expression — the test we use to distinguish a member
-// access (`recv.field`) from a `.` that isn't one (whitespace, `..`,
-// `1.0`). We deliberately exclude digits: in Hare a digit followed by
-// `.` is a number literal, and the tuple access `t.0` doesn't need
-// field-name completion.
 // Returns true when the byte slice ending at `dot_off` (exclusive)
 // looks like an expression a member access could chain off, given that
-// `data[dot_off] == '.'`. We accept `)`, `]`, or a word ending in any
-// alphanumeric/underscore - but if the preceding word is all digits we
-// reject it, because `1.` is a float literal, not a member access on
-// `1`. Identifiers like `buf1` or `hash32` end in a digit but still
-// have non-digit characters earlier in the word, so they pass.
+// `data[dot_off] == '.'`. We accept `)`, `]`, `!`, `?` (postfix
+// error-assert / propagate, as in `foo()!.field`), or a word ending in
+// any alphanumeric/underscore - but if the preceding word is all
+// digits we reject it, because `1.` is a float literal, not a member
+// access on `1`. Identifiers like `buf1` or `hash32` end in a digit
+// but still have non-digit characters earlier in the word, so they
+// pass.
 fn receiver_ends_before_dot(data: []u8, dot_off: size) bool = {
 	if (dot_off == 0) return false;
 	const b = data[dot_off - 1];
 	if (b == ')': u8) return true;
 	if (b == ']': u8) return true;
+	if (b == '!': u8) return true;
+	if (b == '?': u8) return true;
 	if (!is_word_byte_comp(b)) return false;
 	// Walk back over the word and check whether any byte is non-digit.
 	// Pure-digit prefix means this `.` belongs to a numeric literal.
@@ -307,70 +305,6 @@ fn receiver_ends_before_dot(data: []u8, dot_off: size) bool = {
 	return false;
 };
 
-// When we splice the completion sentinel into the buffer, the surrounding
-// context determines whether a `;` must follow it. In a block like
-// `{ b.| }` the parser would otherwise refuse the decl ("Unexpected '}',
-// was expecting ';'"). But mid-expression - `foo(a, b.|, c)` or
-// `b.| + 5` - adding a `;` would break the parse. Skip whitespace and
-// comments after the existing identifier and only ask for `;` when the
-// next significant byte isn't one that naturally chains off an
-// expression.
-fn needs_semicolon_after_sentinel(data: []u8, ident_end: size) bool = {
-	let i = ident_end;
-	for (i < len(data)) {
-		const b = data[i];
-		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8
-				|| b == '\r': u8) {
-			i += 1;
-			continue;
-		};
-		if (i + 1 < len(data) && b == '/': u8
-				&& data[i + 1] == '/': u8) {
-			i += 2;
-			for (i < len(data) && data[i] != '\n': u8; i += 1) void;
-			continue;
-		};
-		if (i + 1 < len(data) && b == '/': u8
-				&& data[i + 1] == '*': u8) {
-			i += 2;
-			for (i + 1 < len(data)) {
-				if (data[i] == '*': u8
-						&& data[i + 1] == '/': u8) {
-					i += 2;
-					break;
-				};
-				i += 1;
-			};
-			continue;
-		};
-		break;
-	};
-	if (i >= len(data)) return true;
-	const b = data[i];
-	if (b == ';': u8) return false;
-	if (b == ',': u8) return false;
-	if (b == ')': u8) return false;
-	if (b == ']': u8) return false;
-	if (b == '(': u8) return false;
-	if (b == '[': u8) return false;
-	if (b == '.': u8) return false;
-	if (b == '?': u8) return false;
-	if (b == '!': u8) return false;
-	if (b == ':': u8) return false;
-	if (b == '+': u8) return false;
-	if (b == '-': u8) return false;
-	if (b == '*': u8) return false;
-	if (b == '/': u8) return false;
-	if (b == '%': u8) return false;
-	if (b == '&': u8) return false;
-	if (b == '|': u8) return false;
-	if (b == '^': u8) return false;
-	if (b == '<': u8) return false;
-	if (b == '>': u8) return false;
-	if (b == '=': u8) return false;
-	if (b == '~': u8) return false;
-	return true;
-};
 
 // sortText prefixes: clients rank lexicographically. We bias toward
 // what the user typed in this file first, then workspace symbols,
@@ -582,6 +516,27 @@ fn add_module_members(
 // of the buffer may contain unrelated parse errors that must not block
 // the synthesis. The parser is fast enough at hare-lsp's typical file
 // sizes that paying a full re-parse per completion request is fine.
+fn parse_with_sentinel(
+	data: []u8,
+	info: *prefix_info,
+	uri: str,
+	add_semi: bool,
+) analysis::parse_result = {
+	const sentinel_bytes = strings::toutf8(COMPLETION_SENTINEL);
+	let synth: []u8 = alloc([],
+		len(data) + len(sentinel_bytes) + 1)!;
+	defer free(synth);
+	append(synth, data[..info.partial_start]...)!;
+	append(synth, sentinel_bytes...)!;
+	if (add_semi) {
+		append(synth, ';': u8)!;
+	};
+	if (info.ident_end < len(data)) {
+		append(synth, data[info.ident_end..]...)!;
+	};
+	return analysis::parse_recover(synth, uri);
+};
+
 fn add_struct_members(
 	s: *server,
 	doc: *document,
@@ -589,32 +544,22 @@ fn add_struct_members(
 	info: *prefix_info,
 	arr: *[]json::value,
 ) void = {
-	const sentinel_bytes = strings::toutf8(COMPLETION_SENTINEL);
-	// In contexts like `{ b.| }` the sentinel sits before a `}` with no
-	// intervening `;`; the parser would then reject the whole decl. Peek
-	// at what follows the existing word and, if it isn't a token that
-	// naturally chains off an expression, splice a `;` after the sentinel.
-	const need_semi = needs_semicolon_after_sentinel(data, info.ident_end);
-	let synth: []u8 = alloc([],
-		len(data) + len(sentinel_bytes) + 1)!;
-	defer free(synth);
-	append(synth, data[..info.partial_start]...)!;
-	append(synth, sentinel_bytes...)!;
-	if (need_semi) {
-		append(synth, ';': u8)!;
+	// We try two splices: one with just the sentinel, and one with an
+	// extra `;` after it. The bare splice handles mid-expression cases
+	// like `foo(a, b.|, c)`, struct literal initializers (`{ v = b.| }`),
+	// and match heads (`match (b.|)`). The `;`-suffixed splice handles
+	// end-of-statement cases like `{ b.| }` where the parser would
+	// otherwise reject the missing terminator. Whichever variant the
+	// AST walker finds the sentinel in is the right one.
+	let pr = parse_with_sentinel(data, info, doc.uri, false);
+	let af_match = find_sentinel_access_field(&pr.subunit);
+	if (af_match is void) {
+		analysis::finish_parse_result(&pr);
+		pr = parse_with_sentinel(data, info, doc.uri, true);
+		af_match = find_sentinel_access_field(&pr.subunit);
 	};
-	if (info.ident_end < len(data)) {
-		append(synth, data[info.ident_end..]...)!;
-	};
-
-	let pr = analysis::parse_recover(synth, doc.uri);
 	defer analysis::finish_parse_result(&pr);
-
-	// Walk the AST for the access_field whose name is the sentinel.
-	// Matching on field name avoids depending on `loc.end.off`'s exact
-	// semantics (it points at the start of the *last rune* of the last
-	// token, which is off-by-(len - 1) for multi-character names).
-	const af = match (find_sentinel_access_field(&pr.subunit)) {
+	const af = match (af_match) {
 	case let af: ast::access_field =>
 		yield af;
 	case void =>
@@ -839,9 +784,139 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 			};
 		};
 		return void;
+	case let ae: ast::assert_expr =>
+		match (ae.cond) {
+		case let p: *ast::expr =>
+			match (scan_expr_for_sentinel(p)) {
+			case let af: ast::access_field => return af;
+			case void => void;
+			};
+		case null => void;
+		};
+		match (ae.message) {
+		case let p: *ast::expr =>
+			return scan_expr_for_sentinel(p);
+		case null => void;
+		};
+		return void;
+	case let l: ast::len_expr =>
+		return scan_expr_for_sentinel(l);
+	case let a: ast::alloc_expr =>
+		match (scan_expr_for_sentinel(a.init)) {
+		case let af: ast::access_field => return af;
+		case void => void;
+		};
+		match (a.capacity) {
+		case let p: *ast::expr =>
+			return scan_expr_for_sentinel(p);
+		case null => void;
+		};
+		return void;
+	case let a: ast::append_expr =>
+		match (scan_expr_for_sentinel(a.object)) {
+		case let af: ast::access_field => return af;
+		case void => void;
+		};
+		match (scan_expr_for_sentinel(a.value)) {
+		case let af: ast::access_field => return af;
+		case void => void;
+		};
+		match (a.length) {
+		case let p: *ast::expr =>
+			return scan_expr_for_sentinel(p);
+		case null => void;
+		};
+		return void;
+	case let ie: ast::insert_expr =>
+		match (scan_expr_for_sentinel(ie.object)) {
+		case let af: ast::access_field => return af;
+		case void => void;
+		};
+		match (scan_expr_for_sentinel(ie.value)) {
+		case let af: ast::access_field => return af;
+		case void => void;
+		};
+		match (ie.length) {
+		case let p: *ast::expr =>
+			return scan_expr_for_sentinel(p);
+		case null => void;
+		};
+		return void;
+	case let d: ast::delete_expr =>
+		return scan_expr_for_sentinel(d.object);
+	case let f: ast::free_expr =>
+		return scan_expr_for_sentinel(f);
+	case let sl: ast::slice_expr =>
+		match (scan_expr_for_sentinel(sl.object)) {
+		case let af: ast::access_field => return af;
+		case void => void;
+		};
+		match (sl.start) {
+		case let p: *ast::expr =>
+			match (scan_expr_for_sentinel(p)) {
+			case let af: ast::access_field => return af;
+			case void => void;
+			};
+		case null => void;
+		};
+		match (sl.end) {
+		case let p: *ast::expr =>
+			return scan_expr_for_sentinel(p);
+		case null => void;
+		};
+		return void;
+	case let lit: ast::literal_expr =>
+		return scan_literal_for_sentinel(lit);
 	case =>
 		return void;
 	};
+};
+
+fn scan_literal_for_sentinel(
+	l: ast::literal_expr,
+) (ast::access_field | void) = {
+	match (l) {
+	case ast::plain_literal =>
+		return void;
+	case let a: ast::array_literal =>
+		for (let i = 0z; i < len(a.values); i += 1) {
+			match (scan_expr_for_sentinel(a.values[i])) {
+			case let af: ast::access_field => return af;
+			case void => void;
+			};
+		};
+		return void;
+	case let s: ast::struct_literal =>
+		return scan_struct_literal_for_sentinel(&s);
+	case let t: ast::tuple_literal =>
+		for (let i = 0z; i < len(t); i += 1) {
+			match (scan_expr_for_sentinel(t[i])) {
+			case let af: ast::access_field => return af;
+			case void => void;
+			};
+		};
+		return void;
+	};
+};
+
+fn scan_struct_literal_for_sentinel(
+	s: *ast::struct_literal,
+) (ast::access_field | void) = {
+	for (let i = 0z; i < len(s.fields); i += 1) {
+		match (s.fields[i]) {
+		case let v: ast::struct_value =>
+			match (scan_expr_for_sentinel(v.init)) {
+			case let af: ast::access_field => return af;
+			case void => void;
+			};
+		case let nested: *ast::struct_literal =>
+			match (scan_struct_literal_for_sentinel(nested)) {
+			case let af: ast::access_field => return af;
+			case void => void;
+			};
+		};
+	};
+	return void;
 };
 
 // Walks the receiver type, chasing pointer and alias wrappers, and
