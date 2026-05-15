@@ -18,8 +18,11 @@ use time;
 
 // An open document.
 export type document = struct {
+	// @owned
 	uri: str,
 	// Language id reported by the client (e.g., "hare").
+	//
+	// @owned
 	language_id: str,
 	// Monotonically-increasing version reported by the client.
 	version: i64,
@@ -28,7 +31,9 @@ export type document = struct {
 	// Previously-issued semantic tokens for this document, used by
 	// /full/delta to emit minimal edits. result_id is empty when no
 	// /full has been issued yet.
+	// @owned
 	prev_tokens: []u32,
+	// @owned
 	prev_result_id: str,
 	// Timestamp of the last buffer-mutating event (didOpen/didChange/
 	// didSave). Used by the diagnostics debouncer.
@@ -47,12 +52,16 @@ export type document = struct {
 	// runs in a single thread. Any future background work that
 	// observes documents needs to lock or copy this pointer before
 	// the next mutation can free the underlying entry.
+	//
+	// @owned
 	parse_cache: nullable *parse_cache_entry,
 	// Set of URIs the last build pass for this doc published
 	// diagnostics for. On the next pass any URI here that isn't in
 	// the new set gets an empty publishDiagnostics so previously-
 	// reported errors don't linger in the client after they've been
 	// fixed in source.
+	//
+	// @owned
 	last_build_uris: []str,
 };
 
@@ -65,6 +74,7 @@ export type parse_cache_entry = struct {
 	scope: analysis::scope_graph,
 };
 
+// @param c: owned
 fn finish_parse_cache(c: nullable *parse_cache_entry) void = {
 	match (c) {
 	case null => void;
@@ -80,6 +90,9 @@ fn finish_parse_cache(c: nullable *parse_cache_entry) void = {
 // scope graph, building them on demand. The returned pointer is
 // invalidated on the next call to [[invalidate_parse_cache]] (any buffer
 // mutation).
+//
+// @param doc: borrowed
+// @returns: borrowed from doc
 export fn parse_of(doc: *document) *parse_cache_entry = {
 	match (doc.parse_cache) {
 	case let p: *parse_cache_entry =>
@@ -101,6 +114,7 @@ export fn parse_of(doc: *document) *parse_cache_entry = {
 	return entry;
 };
 
+// @param doc: borrowed
 fn invalidate_parse_cache(doc: *document) void = {
 	finish_parse_cache(doc.parse_cache);
 	doc.parse_cache = null;
@@ -108,6 +122,10 @@ fn invalidate_parse_cache(doc: *document) void = {
 
 // Looks up a document by URI. Returns nullable so callers can check before
 // dereferencing.
+//
+// @param s: borrowed
+// @param uri: borrowed
+// @returns: borrowed from s
 export fn find_document(s: *server, uri: str) nullable *document = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		if (s.documents[i].uri == uri) {
@@ -118,11 +136,16 @@ export fn find_document(s: *server, uri: str) nullable *document = {
 };
 
 // Returns true if a document is currently open with the given URI.
+//
+// @param s: borrowed
+// @param uri: borrowed
 export fn has_document(s: *server, uri: str) bool = {
 	return find_document(s, uri) != null;
 };
 
 // Inserts or replaces a document. Used by didOpen.
+//
+// @param s: borrowed
 fn upsert_document(s: *server, doc: document) void = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		if (s.documents[i].uri == doc.uri) {
@@ -134,6 +157,8 @@ fn upsert_document(s: *server, doc: document) void = {
 	append(s.documents, doc)!;
 };
 
+// @param s: borrowed
+// @param uri: borrowed
 fn remove_document(s: *server, uri: str) void = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		if (s.documents[i].uri == uri) {
@@ -145,6 +170,8 @@ fn remove_document(s: *server, uri: str) void = {
 };
 
 // Releases memory for a single document.
+//
+// @param d: borrowed
 export fn finish_document(d: *document) void = {
 	free(d.uri);
 	free(d.language_id);
@@ -157,6 +184,8 @@ export fn finish_document(d: *document) void = {
 
 // --- handlers --------------------------------------------------------
 // Handles textDocument/didOpen.
+//
+// @param s: borrowed
 export fn handle_did_open(s: *server, n: lsp::notification) void = {
 	const obj = match (params_object(n.params)) {
 	case let o: json::object =>
@@ -236,6 +265,8 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 };
 
 // Handles textDocument/didChange. Applies each content change in order.
+//
+// @param s: borrowed
 export fn handle_did_change(s: *server, n: lsp::notification) void = {
 	const obj = match (params_object(n.params)) {
 	case let o: json::object =>
@@ -328,6 +359,9 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 // Publishes diagnostics for `doc` if the configured debounce window since
 // the last publish has elapsed. Otherwise leaves diagnostics_pending true
 // so a subsequent message will flush.
+//
+// @param s: borrowed
+// @param doc: borrowed
 fn maybe_flush_diagnostics(s: *server, doc: *document) void = {
 	if (!doc.diagnostics_pending) return;
 	const debounce_ms = s.config.diagnostics_debounce_ms: i64;
@@ -346,12 +380,17 @@ fn maybe_flush_diagnostics(s: *server, doc: *document) void = {
 // deadline has passed. Called from the dispatcher between messages so
 // rapid keystrokes coalesce but a single trailing edit still publishes
 // once the user stops typing and the next message arrives.
+//
+// @param s: borrowed
 export fn flush_pending_diagnostics(s: *server) void = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		maybe_flush_diagnostics(s, &s.documents[i]);
 	};
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param change: borrowed
 fn apply_content_change(
 	s: *server,
 	doc: *document,
@@ -400,11 +439,15 @@ fn apply_content_change(
 };
 
 // Returns the position encoding negotiated at initialize.
+//
+// @param s: borrowed
 export fn position_encoding(s: *server) analysis::encoding = {
 	return s.negotiated_encoding;
 };
 
 // Handles textDocument/didClose.
+//
+// @param s: borrowed
 export fn handle_did_close(s: *server, n: lsp::notification) void = {
 	const obj = match (params_object(n.params)) {
 	case let o: json::object =>
@@ -440,6 +483,8 @@ export fn handle_did_close(s: *server, n: lsp::notification) void = {
 
 // Handles textDocument/didSave. If the client included `text` (we requested
 // it), use that as authoritative.
+//
+// @param s: borrowed
 export fn handle_did_save(s: *server, n: lsp::notification) void = {
 	const obj = match (params_object(n.params)) {
 	case let o: json::object =>
@@ -488,11 +533,15 @@ export fn handle_did_save(s: *server, n: lsp::notification) void = {
 // Handles textDocument/willSave (notification). LSP allows the client to
 // notify us right before a save. We currently don't act on this, but
 // consuming the notification keeps us consistent with the spec.
+//
+// @param s: borrowed
 export fn handle_will_save(s: *server, n: lsp::notification) void = void;
 
 // Handles textDocument/willSaveWaitUntil (request). Returns text edits to
 // apply before saving — currently trim trailing whitespace and ensure final
 // newline per config.
+//
+// @param s: borrowed
 export fn handle_will_save_wait_until(s: *server, r: lsp::request) void = {
 	const obj = match (params_object(r.params)) {
 	case let o: json::object =>
@@ -559,6 +608,7 @@ type text_edit = struct {
 	new_text: str,
 };
 
+// @param edits: owned
 fn free_text_edits(edits: []text_edit) void = {
 	for (let i = 0z; i < len(edits); i += 1) {
 		free(edits[i].new_text);
@@ -566,6 +616,8 @@ fn free_text_edits(edits: []text_edit) void = {
 	free(edits);
 };
 
+// @param s: borrowed
+// @param doc: borrowed
 fn compute_will_save_edits(s: *server, doc: *document) []text_edit = {
 	let edits: []text_edit = [];
 	const data = analysis::bytes(&doc.buf);
@@ -638,11 +690,16 @@ fn encode_pos(p: lsp::position) json::value = {
 	return o;
 };
 
+// @param s: borrowed
+// @param id: borrowed
 fn send_null_result(s: *server, id: lsp::id) void = {
 	const r: json::value = json::_null;
 	send_result(s, id, r);
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param result: borrowed
 fn send_result(s: *server, id: lsp::id, result: json::value) void = {
 	match (lsp::encode_response_result(s.out, id, result)) {
 	case size => void;
@@ -655,6 +712,10 @@ fn send_result(s: *server, id: lsp::id, result: json::value) void = {
 // Emits a window/logMessage(Warning) noting that a notification arrived
 // for a URI the server doesn't have open. Per LSP spec
 // didChange/didClose for an unopened document is a client error.
+//
+// @param s: borrowed
+// @param method: borrowed
+// @param uri: borrowed
 fn warn_unknown_uri(s: *server, method: str, uri: str) void = {
 	const msg = fmt::asprintf("{}: no open document for uri {}", method, uri)!;
 	defer free(msg);
@@ -665,6 +726,9 @@ fn warn_unknown_uri(s: *server, method: str, uri: str) void = {
 // Enforces [[MAX_OPEN_DOCUMENTS]] and [[MAX_TOTAL_BUFFER_BYTES]]. On
 // rejection, warns via window/logMessage and leaves the document store
 // untouched.
+//
+// @param s: borrowed
+// @param uri: borrowed
 fn check_open_capacity(s: *server, uri: str, incoming_bytes: size) bool = {
 	const replacing = has_document(s, uri);
 	if (!replacing && len(s.documents) >= s.config.limits.max_open_documents) {
@@ -696,6 +760,9 @@ fn check_open_capacity(s: *server, uri: str, incoming_bytes: size) bool = {
 // After applying didChange edits we recheck total buffer size. Returns
 // false when the cap has been exceeded; on false the caller should
 // abandon the document so we don't keep churning on a runaway buffer.
+//
+// @param s: borrowed
+// @param uri: borrowed
 fn check_buffer_capacity(s: *server, uri: str) bool = {
 	let total: size = 0;
 	for (let i = 0z; i < len(s.documents); i += 1) {
@@ -716,17 +783,25 @@ fn check_buffer_capacity(s: *server, uri: str) bool = {
 // --- json helpers ----------------------------------------------------
 // Thin aliases over the shared lsp::json_* helpers so this file's call
 // sites stay unchanged.
+//
+// @param p: borrowed
 fn params_object(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
 
+// @param o: borrowed
+// @param key: borrowed
 fn object_field_object(
 	o: *json::object,
 	key: str,
 ) (json::object | void) = lsp::json_obj(o, key);
 
+// @param o: borrowed
+// @param key: borrowed
 fn object_string(o: *json::object, key: str) (str | void) = lsp::json_str(o,
 	key);
 
+// @param o: borrowed
+// @param key: borrowed
 fn object_number(o: *json::object, key: str) (f64 | void) = lsp::json_num(o,
 	key);

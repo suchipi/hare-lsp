@@ -16,6 +16,11 @@ use strings;
 // Rewrites `[[name]]` / `[[mod::name]]` occurrences in `text` into
 // markdown links (when resolvable against the open `doc`'s scope) or
 // inline code (when not). The result is freshly allocated.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param text: borrowed
+// @returns: owned
 export fn render_doc_refs(s: *server, doc: *document, text: str) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
@@ -47,11 +52,15 @@ export fn render_doc_refs(s: *server, doc: *document, text: str) str = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
+// @param buf: borrowed
+// @param b: borrowed
 fn append_bytes(buf: *memio::stream, b: []u8) void = {
 	memio::concat(buf, strings::fromutf8(b)!)!;
 };
 
 // Returns the byte offset of the next `[[` at or after `from`, or void.
+//
+// @param bytes: borrowed
 fn find_ref_open(bytes: []u8, from: size) (size | void) = {
 	let i = from;
 	for (i + 1 < len(bytes); i += 1) {
@@ -61,6 +70,8 @@ fn find_ref_open(bytes: []u8, from: size) (size | void) = {
 };
 
 // Returns the byte offset of the matching `]]` at or after `from`, or void.
+//
+// @param bytes: borrowed
 fn find_ref_close(bytes: []u8, from: size) (size | void) = {
 	let i = from;
 	for (i + 1 < len(bytes); i += 1) {
@@ -73,6 +84,11 @@ fn find_ref_close(bytes: []u8, from: size) (size | void) = {
 // resolution hit, returns a markdown link with a `command:` URI that the
 // VSCode extension turns into a goto-location jump. On a miss, returns
 // the ref as inline code so it stays visible.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param ref: borrowed
+// @returns: owned
 fn render_one_ref(s: *server, doc: *document, ref: str) str = {
 	const trimmed = strings::trim(ref);
 	if (len(trimmed) == 0) {
@@ -91,11 +107,13 @@ fn render_one_ref(s: *server, doc: *document, ref: str) str = {
 // A resolved doc-ref target. `uri` is a file:// URI; `line` and `character`
 // are zero-based and use the server's negotiated position encoding.
 type ref_target = struct {
+	// @owned
 	uri: str,
 	line: u32,
 	character: u32,
 };
 
+// @param t: owned
 fn free_ref_target(t: ref_target) void = {
 	free(t.uri);
 };
@@ -104,6 +122,11 @@ fn free_ref_target(t: ref_target) void = {
 // `workspace_lookup_aware` but operates on the textual ref instead of an
 // in-document byte offset. Accepts bare names (`finish`) and module-
 // qualified ones (`bufio::scanner`, `unix::poll::pollfd`).
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param ref: borrowed
+// @returns: owned
 fn resolve_ref(s: *server, doc: *document, ref: str) (ref_target | void) = {
 	const segments = split_qualified(ref);
 	defer free(segments);
@@ -180,6 +203,9 @@ fn resolve_ref(s: *server, doc: *document, ref: str) (ref_target | void) = {
 // Splits `a::b::c` into `[a, b, c]`. Empty segments are dropped. Caller
 // frees the slice (entries are borrowed from `s` via strings::split, so
 // no per-element free needed).
+//
+// @param s: borrowed
+// @returns: owned
 fn split_qualified(s: str) []str = {
 	const raw = strings::split(s, "::")!;
 	defer free(raw);
@@ -190,8 +216,14 @@ fn split_qualified(s: str) []str = {
 	return out;
 };
 
+// @param segs: borrowed
+// @returns: owned
 fn join_segments(segs: []str) str = strings::join("::", segs...)!;
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param sym: borrowed
+// @returns: owned
 fn target_for_local(
 	s: *server,
 	doc: *document,
@@ -208,6 +240,9 @@ fn target_for_local(
 	};
 };
 
+// @param s: borrowed
+// @param e: borrowed
+// @returns: owned
 fn target_for_entry(
 	s: *server,
 	e: *analysis::workspace_entry,
@@ -233,6 +268,9 @@ fn target_for_entry(
 // Builds the markdown link `[label](command:hare-lsp.openLocation?<args>)`.
 // `args` is a JSON array `[uri, {line, character}]` percent-encoded so it
 // survives transit as part of a URI.
+//
+// @param label: borrowed
+// @returns: owned
 fn format_ref_link(label: str, t: ref_target) str = {
 	let args: []json::value = [];
 	let pos = json::newobject();
@@ -255,6 +293,9 @@ fn format_ref_link(label: str, t: ref_target) str = {
 // Percent-encodes `s` for use inside a URI's query/path component.
 // Conservatively encodes everything that isn't an ASCII unreserved
 // character (alphanumeric, `-`, `_`, `.`, `~`). Caller frees.
+//
+// @param s: borrowed
+// @returns: owned
 fn percent_encode_uri_component(s: str) str = {
 	const bytes = strings::toutf8(s);
 	let out: []u8 = [];

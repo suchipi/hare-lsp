@@ -26,6 +26,8 @@ use strings;
 // source set, but the LSP doesn't parse assembly, and watching it picks
 // up build artifacts (e.g. qbe's `.cache/*.o.tmp.s`) that we'd then
 // dispatch as bogus index updates.
+//
+// @param s: borrowed
 export fn register_file_watchers(s: *server) (i64 | void) = {
 	let opts = json::newobject();
 	let opts_owned = true;
@@ -62,6 +64,8 @@ export fn register_file_watchers(s: *server) (i64 | void) = {
 // is logged at the configured trace level and forwarded to
 // workspace_handle_file_event which refreshes the index entry on the
 // affected file.
+//
+// @param s: borrowed
 export fn handle_did_change_watched_files(
 	s: *server,
 	n: lsp::notification,
@@ -125,6 +129,8 @@ export fn handle_did_change_watched_files(
 	};
 };
 
+// @param uri: borrowed
+// @returns: owned
 fn fmt_watcher_event(uri: str, kind: int) str = {
 	const kind_str = switch (kind) {
 	case 1 =>
@@ -143,12 +149,16 @@ fn fmt_watcher_event(uri: str, kind: int) str = {
 // workspace/willCreateFiles request. Per spec, returns a WorkspaceEdit (or
 // null) to apply before the file is created. We don't need to mutate
 // existing files when a new .ha file is created, so we always return null.
+//
+// @param s: borrowed
 export fn handle_will_create_files(s: *server, r: lsp::request) void = {
 	send_workspace_edit_or_null(s, r.id, void);
 };
 
 // workspace/didCreateFiles notification. The workspace index picks up
 // new files lazily on the next watcher event for them; nothing to do here.
+//
+// @param s: borrowed
 export fn handle_did_create_files(s: *server, n: lsp::notification) void = void;
 
 // workspace/willRenameFiles request. The LSP spec lets us return a
@@ -156,12 +166,16 @@ export fn handle_did_create_files(s: *server, n: lsp::notification) void = void;
 // We don't currently rewrite imports — module paths are determined by
 // directory layout, so a single-file rename usually leaves imports
 // intact. Returns null so the client proceeds with the rename.
+//
+// @param s: borrowed
 export fn handle_will_rename_files(s: *server, r: lsp::request) void = {
 	send_workspace_edit_or_null(s, r.id, void);
 };
 
 // workspace/didRenameFiles notification. Update the document store for any
 // open documents whose URI changed.
+//
+// @param s: borrowed
 export fn handle_did_rename_files(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
 	case let v: json::value =>
@@ -219,6 +233,9 @@ export fn handle_did_rename_files(s: *server, n: lsp::notification) void = {
 	};
 };
 
+// @param s: borrowed
+// @param old_uri: borrowed
+// @param new_uri: borrowed
 fn rename_open_document(s: *server, old_uri: str, new_uri: str) void = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		if (s.documents[i].uri == old_uri) {
@@ -232,6 +249,8 @@ fn rename_open_document(s: *server, old_uri: str, new_uri: str) void = {
 // workspace/willDeleteFiles request. Could return a WorkspaceEdit with
 // modifications to dependent files; for now returns null. Affected
 // modules will show broken-import diagnostics on the next parse.
+//
+// @param s: borrowed
 export fn handle_will_delete_files(s: *server, r: lsp::request) void = {
 	send_workspace_edit_or_null(s, r.id, void);
 };
@@ -244,6 +263,8 @@ export fn handle_will_delete_files(s: *server, r: lsp::request) void = {
 // file watcher registered won't deliver it at all - which would otherwise
 // leave references, workspace symbols, and the call/type hierarchies
 // reporting locations in files that no longer exist.
+//
+// @param s: borrowed
 export fn handle_did_delete_files(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
 	case let v: json::value =>
@@ -307,6 +328,9 @@ export fn handle_did_delete_files(s: *server, n: lsp::notification) void = {
 // from `uri`. If `uri` names a single .ha file the matching entry is
 // dropped directly; otherwise the URI is treated as a directory and every
 // entry whose path is under it is dropped.
+//
+// @param s: borrowed
+// @param uri: borrowed
 fn drop_index_for_deleted_uri(s: *server, uri: str) void = {
 	const path = lsp::uri_decode_path(uri);
 	defer free(path);
@@ -346,6 +370,9 @@ fn drop_index_for_deleted_uri(s: *server, uri: str) void = {
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param edit: owned
 fn send_workspace_edit_or_null(
 	s: *server,
 	id: lsp::id,
@@ -365,6 +392,9 @@ fn send_workspace_edit_or_null(
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param result: borrowed
 fn send_result_local(s: *server, id: lsp::id, result: json::value) void = {
 	match (lsp::encode_response_result(s.out, id, result)) {
 	case size => void;

@@ -23,9 +23,11 @@ use strings;
 // via [[format_error_finish]] after consuming the error.
 export type format_error = !struct {
 	location: (lex::location | void),
+	// @owned
 	message: str,
 };
 
+// @param e: borrowed
 export fn format_error_finish(e: *format_error) void = {
 	free(e.message);
 };
@@ -47,6 +49,10 @@ export fn format_error_finish(e: *format_error) void = {
 // the wrap, etc.); a guaranteed second pass converges those rare
 // drifts so a single user-facing `harefmt --write .` invocation
 // always produces output that `harefmt --check .` immediately accepts.
+//
+// @param data: borrowed
+// @param path: borrowed
+// @returns: owned
 export fn format_source(data: []u8, path: str) (str | format_error) = {
 	const first = format_source_once(data, path)?;
 	defer free(first);
@@ -56,6 +62,9 @@ export fn format_source(data: []u8, path: str) (str | format_error) = {
 
 // Single formatting pass. Internal; callers want `format_source`,
 // which runs this twice for idempotency.
+//
+// @param data: borrowed
+// @param path: borrowed
 fn format_source_once(data: []u8, path: str) (str | format_error) = {
 	let pr = analysis::parse_recover(data, path);
 	defer analysis::finish_parse_result(&pr);
@@ -88,6 +97,7 @@ fn format_source_once(data: []u8, path: str) (str | format_error) = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
+// @param s: borrowed
 export fn handle_formatting(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_request(r.params)) {
 	case let s: str =>
@@ -181,6 +191,7 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	send_array_fmt(s, r.id, arr);
 };
 
+// @param s: borrowed
 export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	const obj = match (params_obj_fmt(r.params)) {
 	case let o: json::object =>
@@ -316,6 +327,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	send_array_fmt(s, r.id, arr);
 };
 
+// @param s: borrowed
 export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	const obj = match (params_obj_fmt(r.params)) {
 	case let o: json::object =>
@@ -468,6 +480,8 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 // comments so braces inside any of those don't fool us. Avoids hare::lex
 // here because the stdlib lexer can hit double-unlex aborts when fed a
 // truncated buffer mid-token.
+//
+// @param data: borrowed
 fn brace_depth_before(data: []u8, off: size) u32 = {
 	let depth: u32 = 0;
 	const limit = if (off > len(data)) len(data) else off;
@@ -490,6 +504,8 @@ fn brace_depth_before(data: []u8, off: size) u32 = {
 	return depth;
 };
 
+// @param a: borrowed
+// @param b: borrowed
 fn slices_equal(a: []u8, b: []u8) bool = {
 	if (len(a) != len(b)) return false;
 	for (let i = 0z; i < len(a); i += 1) {
@@ -498,6 +514,8 @@ fn slices_equal(a: []u8, b: []u8) bool = {
 	return true;
 };
 
+// @param a: borrowed
+// @param b: borrowed
 fn bytes_equal(a: []u8, b: []u8) bool = {
 	if (len(a) != len(b)) return false;
 	for (let i = 0z; i < len(a); i += 1) {
@@ -506,6 +524,7 @@ fn bytes_equal(a: []u8, b: []u8) bool = {
 	return true;
 };
 
+// @param p: borrowed
 fn uri_from_request(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -543,6 +562,9 @@ fn uri_from_request(p: (json::value | void)) (str | void) = {
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param arr: owned
 fn send_array_fmt(s: *server, id: lsp::id, arr: []json::value) void = {
 	const v: json::value = arr;
 	defer json::finish(v);
@@ -552,6 +574,7 @@ fn send_array_fmt(s: *server, id: lsp::id, arr: []json::value) void = {
 	};
 };
 
+// @param p: borrowed
 fn params_obj_fmt(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
@@ -563,6 +586,8 @@ fn params_obj_fmt(
 // Returns the input string unchanged when style == TAB, otherwise a
 // freshly-allocated string the caller must free if it differs from the
 // input.
+//
+// @param source: borrowed
 export fn apply_indent_style(
 	source: str,
 	style: indent_style,

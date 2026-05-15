@@ -28,6 +28,11 @@ use strings;
 // decl. Returns void to suppress the hint (no first-hop inference
 // possible); otherwise returns a freshly-allocated label the caller
 // must free.
+//
+// @returns: owned
+// @param s: borrowed
+// @param doc: borrowed
+// @param init: borrowed
 export fn infer_let_type_deep(
 	s: *server,
 	doc: *document,
@@ -49,6 +54,9 @@ export fn infer_let_type_deep(
 // to `budget` more times. Stops as soon as the current label doesn't
 // match a workspace TYPE entry or its underlying isn't easily rendered.
 // `current` is consumed; the returned string is freshly allocated.
+//
+// @param s: borrowed
+// @param current: owned
 fn follow_alias_chain(s: *server, current: str, budget: u32) str = {
 	let label = current;
 	let visited: []str = [];
@@ -76,6 +84,9 @@ fn follow_alias_chain(s: *server, current: str, budget: u32) str = {
 // underlying type. Returns void when the name doesn't resolve, isn't a
 // TYPE, doesn't have an underlying, or the underlying can't be
 // rendered.
+//
+// @param s: borrowed
+// @param name: borrowed
 fn resolve_alias_once(s: *server, name: str) (str | void) = {
 	const entry = match (analysis::find_first_by_short_name(&s.workspace_index,
 		name)) {
@@ -106,6 +117,8 @@ fn resolve_alias_once(s: *server, name: str) (str | void) = {
 	return render_type_ih(underlying);
 };
 
+// @param su: borrowed
+// @param name: borrowed
 fn find_type_decl_by_name(su: *ast::subunit, name: str) (*ast::decl | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
@@ -120,6 +133,7 @@ fn find_type_decl_by_name(su: *ast::subunit, name: str) (*ast::decl | void) = {
 	return void;
 };
 
+// @param t: borrowed
 fn render_type_ih(t: *ast::_type) (str | void) = {
 	let buf = memio::dynamic();
 	defer match (io::close(&buf)) {
@@ -133,6 +147,8 @@ fn render_type_ih(t: *ast::_type) (str | void) = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
+// @param haystack: borrowed
+// @param needle: borrowed
 fn contains_str_ih(haystack: []str, needle: str) bool = {
 	for (let i = 0z; i < len(haystack); i += 1) {
 		if (haystack[i] == needle) return true;

@@ -32,17 +32,23 @@ use unix::signal;
 
 // One diagnostic emitted by the compiler.
 export type build_diagnostic = struct {
+	// @owned
 	path: str,
 	line: u32,
 	col: u32,
 	// "error", "syntax error", or "warning" — preserved verbatim from
 	// the compiler line, used by build_diag_to_lsp to set severity and
 	// the LSP `code` field.
+	//
+	// @owned
 	kind: str,
+	// @owned
 	message: str,
 };
 
 // Frees a slice of build_diagnostics.
+//
+// @param d: owned
 export fn finish_build_diagnostics(d: []build_diagnostic) void = {
 	for (let i = 0z; i < len(d); i += 1) {
 		free(d[i].path);
@@ -68,6 +74,12 @@ export fn finish_build_diagnostics(d: []build_diagnostic) void = {
 // inherited. `timeout_ms` is the wall-clock deadline in milliseconds
 // before the subprocess is terminated with SIGTERM and the partial
 // output returned; zero disables the timeout.
+//
+// @param hare_path: borrowed
+// @param argv: borrowed
+// @param cwd: borrowed
+// @param harepath: borrowed
+// @returns: owned
 export fn spawn_hare_capture_stderr(
 	hare_path: str,
 	argv: []str,
@@ -203,6 +215,10 @@ export fn spawn_hare_capture_stderr(
 // Parses the compiler's stderr text into diagnostics. `cwd` (if non-empty)
 // is prepended to relative paths so callers can match against absolute file
 // URIs.
+//
+// @param text: borrowed
+// @param cwd: borrowed
+// @returns: owned
 export fn parse_compiler_output(text: str, cwd: str) []build_diagnostic = {
 	let out: []build_diagnostic = [];
 	const lines = strings::split(text, "\n")!;
@@ -217,6 +233,9 @@ export fn parse_compiler_output(text: str, cwd: str) []build_diagnostic = {
 	return out;
 };
 
+// @param line: borrowed
+// @param cwd: borrowed
+// @returns: owned
 fn parse_diagnostic_line(line: str, cwd: str) (build_diagnostic | void) = {
 	// Find ":line:col: <kind>: <message>". The path may itself contain
 	// ':' on Windows-ish setups, but on Unix is a colon-free token.
@@ -289,6 +308,7 @@ fn parse_diagnostic_line(line: str, cwd: str) (build_diagnostic | void) = {
 	};
 };
 
+// @param p: borrowed
 fn path_is_absolute(p: str) bool = {
 	if (len(p) == 0) return false;
 	const b = strings::toutf8(p);
@@ -304,6 +324,8 @@ fn path_is_absolute(p: str) bool = {
 // clients can filter/suppress per category. When the message looks like
 // an unused-import diagnostic, the `Unnecessary` (1) tag is added so
 // editors grey it out.
+//
+// @returns: owned
 export fn build_diag_to_lsp(d: build_diagnostic) json::value = {
 	let o = json::newobject();
 	let s_obj = json::newobject();
@@ -326,6 +348,9 @@ export fn build_diag_to_lsp(d: build_diagnostic) json::value = {
 };
 
 // Translates a filesystem path into a file:// URI.
+//
+// @param p: borrowed
+// @returns: owned
 export fn path_to_uri(p: str) str = {
 	if (path_is_absolute(p)) {
 		return strings::concat("file://", p)!;
@@ -336,4 +361,7 @@ export fn path_to_uri(p: str) str = {
 // Translates a file:// URI back into a filesystem path. Strips the
 // scheme and percent-decodes the rest. Returns a freshly-allocated
 // string; caller frees.
+//
+// @param uri: borrowed
+// @returns: owned
 export fn uri_to_path(uri: str) str = lsp::uri_decode_path(uri);

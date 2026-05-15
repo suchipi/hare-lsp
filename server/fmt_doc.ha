@@ -22,12 +22,18 @@ use strings;
 // OWNED by the doc and freed via `finish`. Use `text()`, `line()`, and
 // `comment()` constructors to allocate-and-dup.
 // Literal text that always renders the same.
-export type doc_text = struct { content: str };
+export type doc_text = struct {
+	// @owned
+	content: str,
+};
 
 // Softline: renders as `flat` in flat mode and as `\n` + indent in
 // broken mode. Common choices for `flat`: " " for "space when flat",
 // "" for "nothing when flat".
-export type doc_line = struct { flat: str };
+export type doc_line = struct {
+	// @owned
+	flat: str,
+};
 
 // Hard line: always renders as a newline + indent. Forces any
 // enclosing group into broken mode.
@@ -36,13 +42,23 @@ export type doc_hardline = struct { tag: u8 };
 // A group: renders all contents in flat mode if width fits, broken
 // otherwise. Groups can nest — each is decided independently based on
 // the remaining columns at its render position.
-export type doc_group = struct { items: []doc };
+export type doc_group = struct {
+	// @owned
+	items: []doc,
+};
 
 // Increase the indent by `delta` levels while rendering `inner`.
-export type doc_nest = struct { delta: i32, inner: *doc };
+export type doc_nest = struct {
+	delta: i32,
+	// @owned
+	inner: *doc,
+};
 
 // Sequence concatenation. Unlike `doc_group`, it never changes mode.
-export type doc_concat = struct { items: []doc };
+export type doc_concat = struct {
+	// @owned
+	items: []doc,
+};
 
 // A line comment, e.g. "foo bar" rendered as "// foo bar". Always
 // forces enclosing groups into broken mode (because trailing tokens
@@ -54,6 +70,7 @@ export type doc_concat = struct { items: []doc };
 // break to a fresh line first; non-trailing comments break to a fresh
 // line at the current indent before emitting.
 export type doc_comment = struct {
+	// @owned
 	text: str,
 	trailing: bool,
 };
@@ -62,7 +79,10 @@ export type doc_comment = struct {
 // trailing-comma-when-wrapped pattern in arg / field / member lists.
 // Has flat width 0 (it disappears in flat mode), so it doesn't
 // contribute to fit decisions.
-export type doc_if_broken = struct { text: str };
+export type doc_if_broken = struct {
+	// @owned
+	text: str,
+};
 
 // Fill: a flat sequence of items separated by softlines, where each
 // softline decides flat-or-broken INDEPENDENTLY based on whether the
@@ -75,7 +95,10 @@ export type doc_if_broken = struct { text: str };
 // in-line spacer (typically " "). The renderer treats every
 // even-indexed item as content and every odd-indexed item as a
 // separator.
-export type doc_fill = struct { items: []doc };
+export type doc_fill = struct {
+	// @owned
+	items: []doc,
+};
 
 export type doc = (
 	doc_text |
@@ -91,34 +114,46 @@ export type doc = (
 
 // Constructors. Each dup's any input strings so the caller doesn't
 // have to worry about ownership.
+//
+// @param s: borrowed
 export fn text(s: str) doc = doc_text { content = strings::dup(s)! };
 
+// @param flat: borrowed
 export fn line(flat: str) doc = doc_line { flat = strings::dup(flat)! };
 
 export fn hardline() doc = doc_hardline { tag = 0 };
 
+// @param items: owned
 export fn group(items: []doc) doc = doc_group { items = items };
 
+// @param inner: owned
 export fn nest(
 	delta: i32,
 	inner: doc,
 ) doc = doc_nest { delta = delta, inner = alloc(inner)! };
 
+// @param items: owned
 export fn concat(items: []doc) doc = doc_concat { items = items };
 
+// @param text: borrowed
 export fn comment(
 	text: str,
 ) doc = doc_comment { text = strings::dup(text)!, trailing = false };
 
+// @param text: borrowed
 export fn trailing_comment(
 	text: str,
 ) doc = doc_comment { text = strings::dup(text)!, trailing = true };
 
+// @param s: borrowed
 export fn if_broken(s: str) doc = doc_if_broken { text = strings::dup(s)! };
 
+// @param items: owned
 export fn fill(items: []doc) doc = doc_fill { items = items };
 
 // Frees all memory owned by `d` (recursively).
+//
+// @param d: borrowed
 export fn doc_finish(d: *doc) void = {
 	match (*d) {
 	case let t: doc_text =>
@@ -159,6 +194,8 @@ type render_mode = enum {
 
 // Returns true if `d` can be rendered flat at all — i.e. it contains
 // no doc_hardline or doc_comment, both of which always force a break.
+//
+// @param d: borrowed
 fn fits_flat(d: *doc) bool = {
 	match (*d) {
 	case doc_text =>
@@ -197,6 +234,8 @@ fn fits_flat(d: *doc) bool = {
 const WIDTH_INFINITY: size = ~0z;
 
 // size's max value
+//
+// @param d: borrowed
 fn flat_width(d: *doc) size = {
 	match (*d) {
 	case let t: doc_text =>
@@ -220,6 +259,7 @@ fn flat_width(d: *doc) size = {
 	};
 };
 
+// @param items: borrowed
 fn sum_flat_width(items: []doc) size = {
 	let total = 0z;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -236,6 +276,8 @@ fn sum_flat_width(items: []doc) size = {
 // is the starting indent level (one indent unit = one tab character
 // emitted; tab-vs-space expansion happens in apply_indent_style
 // after the pretty-printer returns).
+//
+// @param d: borrowed
 export fn pretty(
 	out: io::handle,
 	d: *doc,
@@ -255,6 +297,11 @@ export fn pretty(
 // `doc_group` so its fit decision accounts for trailing text — e.g.
 // a group `(args)` followed by `?.0)` knows to break when `(args)`
 // fits but `(args)?.0)` doesn't.
+//
+// @param d: borrowed
+// @param cur_col: borrowed
+// @param written: borrowed
+// @param pending_tabs: borrowed
 fn render(
 	out: io::handle,
 	d: *doc,
@@ -343,6 +390,10 @@ fn render(
 // independent, which is what gives fill its greedy line-packing
 // behavior - in contrast to `doc_group` which makes one all-or-nothing
 // decision for the entire sequence.
+// @param items: borrowed
+// @param cur_col: borrowed
+// @param written: borrowed
+// @param pending_tabs: borrowed
 fn render_fill(
 	out: io::handle,
 	items: []doc,
@@ -410,6 +461,11 @@ fn saturating_add(a: size, b: size) size = {
 // for each one — namely, the flat-width of the items that come AFTER
 // it in the sequence, up to the first hardline / comment / softline
 // (which would break the line anyway).
+//
+// @param items: borrowed
+// @param cur_col: borrowed
+// @param written: borrowed
+// @param pending_tabs: borrowed
 fn render_items(
 	out: io::handle,
 	items: []doc,
@@ -441,6 +497,7 @@ fn render_items(
 // by a compound-body group (which always contains hardlines) would
 // see tail_width = WIDTH_INFINITY, refuse to fit flat, and break the
 // short signature across multiple lines.
+// @param items: borrowed
 fn tail_after(
 	items: []doc,
 	from: size,
@@ -465,6 +522,7 @@ fn tail_after(
 // contributes its full flat width. For a group with internal
 // hardlines (flat = WIDTH_INFINITY), the group renders broken and we
 // recurse to find the prefix-on-current-line.
+// @param d: borrowed
 fn line_lead_width(d: *doc, mode: render_mode) (size, bool) = {
 	match (*d) {
 	case let t: doc_text =>
@@ -512,6 +570,7 @@ fn line_lead_width(d: *doc, mode: render_mode) (size, bool) = {
 	};
 };
 
+// @param items: borrowed
 fn line_lead_items(items: []doc, mode: render_mode) (size, bool) = {
 	let total = 0z;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -522,6 +581,7 @@ fn line_lead_items(items: []doc, mode: render_mode) (size, bool) = {
 	return (total, false);
 };
 
+// @param items: borrowed
 fn fits_all(items: []doc) bool = {
 	for (let i = 0z; i < len(items); i += 1) {
 		if (!fits_flat(&items[i])) return false;
@@ -529,6 +589,10 @@ fn fits_all(items: []doc) bool = {
 	return true;
 };
 
+// @param s: borrowed
+// @param cur_col: borrowed
+// @param written: borrowed
+// @param pending_tabs: borrowed
 fn emit_str(
 	out: io::handle,
 	s: str,
@@ -559,6 +623,9 @@ fn emit_str(
 	};
 };
 
+// @param cur_col: borrowed
+// @param written: borrowed
+// @param pending_tabs: borrowed
 fn emit_break(
 	out: io::handle,
 	indent: i32,
@@ -577,6 +644,9 @@ fn emit_break(
 
 // Convenience: pretty-print to a freshly-allocated string. Caller
 // frees.
+//
+// @param d: borrowed
+// @returns: owned
 export fn pretty_str(d: *doc, max_col: size, indent: i32) (str | io::error) = {
 	let buf = memio::dynamic();
 	defer io::close(&buf)!;

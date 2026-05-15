@@ -12,12 +12,16 @@ use strings;
 // A document buffer.
 export type buffer = struct {
 	// Raw bytes; valid UTF-8 if the client sent valid UTF-8.
+	// @owned
 	data: []u8,
 	// Byte offset of the start of each line. Always begins with 0.
+	// @owned
 	line_index: []size,
 };
 
 // Constructs a buffer from initial text. Takes a copy.
+//
+// @param text: borrowed
 export fn from_str(text: str) buffer = {
 	const bytes_in = strings::toutf8(text);
 	let data: []u8 = alloc([], len(bytes_in))!;
@@ -29,6 +33,8 @@ export fn from_str(text: str) buffer = {
 };
 
 // Constructs a buffer from a borrowed byte slice. Takes a copy.
+//
+// @param text: borrowed
 export fn from_bytes(text: []u8) buffer = {
 	let data: []u8 = alloc([], len(text))!;
 	append(data, text...)!;
@@ -39,6 +45,8 @@ export fn from_bytes(text: []u8) buffer = {
 };
 
 // Releases memory associated with a buffer.
+//
+// @param b: borrowed
 export fn finish(b: *buffer) void = {
 	free(b.data);
 	free(b.line_index);
@@ -46,14 +54,23 @@ export fn finish(b: *buffer) void = {
 
 // Returns the buffer's contents as a borrowed byte slice. Valid until the
 // next mutation.
+//
+// @returns: borrowed from b
+// @param b: borrowed
 export fn bytes(b: *buffer) []u8 = b.data;
 
 // Returns the buffer's contents as a borrowed string. Caller must not use
 // the result after the next mutation.
+//
+// @returns: borrowed from b
+// @param b: borrowed
 export fn as_string(b: *buffer) str = strings::fromutf8(b.data)!;
 
 // Replaces the buffer's contents wholesale. Used for full document sync and
 // for didSave with includeText.
+//
+// @param b: borrowed
+// @param text: borrowed
 export fn replace_all(b: *buffer, text: []u8) void = {
 	free(b.data);
 	free(b.line_index);
@@ -67,6 +84,9 @@ export fn replace_all(b: *buffer, text: []u8) void = {
 // Returns the difference in length: new_text_len - (end - start).
 //
 // If start > end or end > len(buffer), the range is clamped.
+//
+// @param b: borrowed
+// @param new_text: borrowed
 export fn replace_range(
 	b: *buffer,
 	start: size,
@@ -118,4 +138,6 @@ export fn replace_range(
 export type ssize = i64;
 
 // Returns the number of lines in the buffer.
+//
+// @param b: borrowed
 export fn line_count(b: *buffer) size = len(b.line_index);

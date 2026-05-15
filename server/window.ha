@@ -17,6 +17,9 @@ use lsp;
 // --- window/logMessage -----------------------------------------------
 // Sends a window/logMessage notification. Per LSP spec, type 1=Error, 2=Warning,
 // 3=Info, 4=Log, 5=Debug. The client decides how to display it.
+//
+// @param s: borrowed
+// @param msg: borrowed
 export fn log_message(s: *server, kind: lsp::message_type, msg: str) void = {
 	const params = match (build_message_params(kind, msg)) {
 	case let v: json::value =>
@@ -30,21 +33,33 @@ export fn log_message(s: *server, kind: lsp::message_type, msg: str) void = {
 };
 
 // Convenience wrappers.
+//
+// @param s: borrowed
+// @param msg: borrowed
 export fn log_error(s: *server, msg: str) void = log_message(s,
 	lsp::message_type::ERROR, msg);
 
+// @param s: borrowed
+// @param msg: borrowed
 export fn log_warning(s: *server, msg: str) void = log_message(s,
 	lsp::message_type::WARNING, msg);
 
+// @param s: borrowed
+// @param msg: borrowed
 export fn log_info(s: *server, msg: str) void = log_message(s,
 	lsp::message_type::INFO, msg);
 
+// @param s: borrowed
+// @param msg: borrowed
 export fn log_debug(s: *server, msg: str) void = log_message(s,
 	lsp::message_type::DEBUG, msg);
 
 // --- window/showMessage ----------------------------------------------
 // Sends a window/showMessage notification. Use sparingly — clients typically
 // surface this as a UI toast/popup.
+//
+// @param s: borrowed
+// @param msg: borrowed
 export fn show_message(s: *server, kind: lsp::message_type, msg: str) void = {
 	const params = match (build_message_params(kind, msg)) {
 	case let v: json::value =>
@@ -63,6 +78,10 @@ export fn show_message(s: *server, kind: lsp::message_type, msg: str) void = {
 //
 // `verbose` is included only when the client requested verbose tracing. Pass
 // "" for verbose if you have nothing to add.
+//
+// @param s: borrowed
+// @param message: borrowed
+// @param verbose: borrowed
 export fn log_trace(s: *server, message: str, verbose: str) void = {
 	if (s.trace == lsp::trace_value::OFF) return;
 	let p = json::newobject();
@@ -79,6 +98,10 @@ export fn log_trace(s: *server, message: str, verbose: str) void = {
 // the outgoing request so the caller can correlate the eventual response, or
 // void if the message could not be sent. The id is also remembered in the
 // server's pending-request table.
+//
+// @param s: borrowed
+// @param message: borrowed
+// @param actions: borrowed
 export fn show_message_request(
 	s: *server,
 	kind: lsp::message_type,
@@ -118,6 +141,9 @@ export fn show_message_request(
 // --- window/showDocument ---------------------------------------------
 // Sends a window/showDocument request. Returns the request id or void on
 // transport failure.
+//
+// @param s: borrowed
+// @param uri: borrowed
 export fn show_document(
 	s: *server,
 	uri: str,
@@ -150,6 +176,9 @@ export type progress_token = str;
 // Reserves a fresh progress token and asks the client to create a progress
 // reporter for it. Returns the token (caller must free with [[free]]) and the
 // outgoing request id, or void on transport failure.
+//
+// @param s: borrowed
+// @returns: owned
 export fn progress_create(s: *server) ((progress_token, i64) | void) = {
 	const token = fmt::asprintf("hare-lsp/{}", s.next_progress_token)!;
 	s.next_progress_token += 1;
@@ -168,6 +197,11 @@ export fn progress_create(s: *server) ((progress_token, i64) | void) = {
 // Begins a progress report. `title` is required; `message` and `percentage`
 // are optional (pass "" / -1 to omit). `cancellable` advertises whether the
 // client may cancel.
+//
+// @param s: borrowed
+// @param token: borrowed
+// @param title: borrowed
+// @param message: borrowed
 export fn progress_begin(
 	s: *server,
 	token: progress_token,
@@ -191,6 +225,10 @@ export fn progress_begin(
 };
 
 // Updates an in-progress report.
+//
+// @param s: borrowed
+// @param token: borrowed
+// @param message: borrowed
 export fn progress_report(
 	s: *server,
 	token: progress_token,
@@ -210,6 +248,10 @@ export fn progress_report(
 };
 
 // Marks a progress operation as complete.
+//
+// @param s: borrowed
+// @param token: borrowed
+// @param message: borrowed
 export fn progress_end(s: *server, token: progress_token, message: str) void = {
 	let v = json::newobject();
 	defer json::finish(v);
@@ -220,6 +262,9 @@ export fn progress_end(s: *server, token: progress_token, message: str) void = {
 	send_progress(s, token, v);
 };
 
+// @param s: borrowed
+// @param token: borrowed
+// @param value: borrowed
 fn send_progress(s: *server, token: progress_token, value: json::value) void = {
 	let params = json::newobject();
 	defer json::finish(params);
@@ -232,6 +277,7 @@ fn send_progress(s: *server, token: progress_token, value: json::value) void = {
 };
 
 // --- low-level helpers -----------------------------------------------
+// @param s: borrowed
 fn next_outgoing_id(s: *server) i64 = {
 	const id = s.next_request_id;
 	s.next_request_id += 1;
@@ -241,6 +287,10 @@ fn next_outgoing_id(s: *server) i64 = {
 // Sends a server-initiated request. Returns false if the transport write
 // failed; the caller should treat this as fatal for that operation but the
 // server itself remains running until it next reads from stdin.
+//
+// @param s: borrowed
+// @param method: borrowed
+// @param params: borrowed
 fn send_request(s: *server, id: i64, method: str, params: json::value) bool = {
 	match (lsp::encode_request(s.out, id: f64, method, params)) {
 	case size =>
@@ -251,6 +301,9 @@ fn send_request(s: *server, id: i64, method: str, params: json::value) bool = {
 	};
 };
 
+// @param s: borrowed
+// @param method: borrowed
+// @param params: borrowed
 fn send_notification(s: *server, method: str, params: json::value) void = {
 	match (lsp::encode_notification(s.out, method, params)) {
 	case size => void;
@@ -259,6 +312,8 @@ fn send_notification(s: *server, method: str, params: json::value) void = {
 	};
 };
 
+// @param msg: borrowed
+// @returns: owned
 fn build_message_params(
 	kind: lsp::message_type,
 	msg: str,

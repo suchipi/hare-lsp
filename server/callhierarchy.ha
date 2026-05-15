@@ -17,6 +17,8 @@ use strings;
 // Handles textDocument/prepareCallHierarchy. Returns a single
 // CallHierarchyItem for the function decl at the cursor (or null/empty if
 // the cursor isn't on a function).
+//
+// @param s: borrowed
 export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos_local(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -55,6 +57,8 @@ export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
 
 // Handles callHierarchy/incomingCalls. Returns the call sites where the
 // item's name appears as a textual word — same scan logic as references.
+//
+// @param s: borrowed
 export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 	const (item_name, item_uri) = match (parse_call_item(r.params)) {
 	case let v: (str, str) =>
@@ -150,6 +154,8 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 // a single response we dedupe by (uri, name) so multiple workspace
 // entries pointing at the same function definition don't double-emit.
 // Cycle avoidance across calls is the client's responsibility.
+//
+// @param s: borrowed
 export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	const (item_name, item_uri) = match (parse_call_item(r.params)) {
 	case let v: (str, str) =>
@@ -261,6 +267,9 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	send_array_local(s, r.id, arr);
 };
 
+// @param vis: borrowed
+// @param uri: borrowed
+// @param name: borrowed
 fn call_visited_has(vis: [](str, str), uri: str, name: str) bool = {
 	for (let i = 0z; i < len(vis); i += 1) {
 		if (vis[i].0 == uri && vis[i].1 == name) return true;
@@ -268,6 +277,8 @@ fn call_visited_has(vis: [](str, str), uri: str, name: str) bool = {
 	return false;
 };
 
+// @param body: borrowed
+// @param name: borrowed
 fn body_contains_token(body: []u8, name: str) bool = {
 	const t = strings::toutf8(name);
 	let i = 0z;
@@ -293,6 +304,10 @@ fn is_word_char(b: u8) bool = {
 	return b == '_': u8;
 };
 
+// @param s: borrowed
+// @param sym: borrowed
+// @param uri: borrowed
+// @param doc: borrowed
 fn build_call_hierarchy_item(
 	s: *server,
 	sym: *analysis::symbol,
@@ -330,6 +345,9 @@ fn build_call_hierarchy_item(
 // Returns the byte offset of `name` within data[span_start..span_end]
 // matched as a whole word. Falls back to `span_start` when not found,
 // preserving the prior behavior for malformed input.
+//
+// @param data: borrowed
+// @param name: borrowed
 fn find_ident_in_decl(
 	data: []u8,
 	span_start: size,
@@ -356,6 +374,7 @@ fn find_ident_in_decl(
 	return span_start;
 };
 
+// @param p: borrowed
 fn parse_call_item(p: (json::value | void)) ((str, str) | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -405,11 +424,15 @@ fn parse_call_item(p: (json::value | void)) ((str, str) | void) = {
 	return (name, uri);
 };
 
+// @param doc: borrowed
+// @param name: borrowed
 fn scan_calls_in_doc(doc: *document, name: str) []json::value = {
 	const data = analysis::bytes(&doc.buf);
 	return scan_calls_static(data, doc.uri, doc.buf.line_index, name);
 };
 
+// @param path: borrowed
+// @param name: borrowed
 fn scan_calls_in_file(path: str, name: str) []json::value = {
 	const f = match (os::open(path)) {
 	case let f: io::file =>
@@ -438,6 +461,10 @@ fn scan_calls_in_file(path: str, name: str) []json::value = {
 	return scan_calls_static(buf, uri, idx, name);
 };
 
+// @param data: borrowed
+// @param uri: borrowed
+// @param line_index: borrowed
+// @param name: borrowed
 fn scan_calls_static(
 	data: []u8,
 	uri: str,
@@ -485,6 +512,8 @@ fn scan_calls_static(
 // True when the byte at index `i` is preceded by the standalone
 // keyword `fn` (skipping whitespace). Used to filter out function
 // declarations from the call-site scan.
+//
+// @param data: borrowed
 fn preceded_by_fn_keyword(data: []u8, i: size) bool = {
 	if (i < 3) return false;
 	let k = i;
@@ -499,6 +528,8 @@ fn preceded_by_fn_keyword(data: []u8, i: size) bool = {
 
 // Returns percent-decoded filesystem paths for every open document.
 // Caller frees each element and the slice.
+//
+// @param s: borrowed
 fn collect_seen_paths(s: *server) []str = {
 	let out: []str = [];
 	for (let i = 0z; i < len(s.documents); i += 1) {
@@ -507,6 +538,8 @@ fn collect_seen_paths(s: *server) []str = {
 	return out;
 };
 
+// @param haystack: borrowed
+// @param needle: borrowed
 fn str_in_slice(haystack: []str, needle: str) bool = {
 	for (let i = 0z; i < len(haystack); i += 1) {
 		if (haystack[i] == needle) return true;
@@ -514,12 +547,16 @@ fn str_in_slice(haystack: []str, needle: str) bool = {
 	return false;
 };
 
+// @param slice: owned
+// @param v: owned
 fn append_value(slice: []json::value, v: json::value) []json::value = {
 	let out = slice;
 	append(out, v)!;
 	return out;
 };
 
+// @param grouped: borrowed
+// @param uri: borrowed
 fn group_index(grouped: *[](str, []json::value), uri: str) size = {
 	let g = *grouped;
 	for (let i = 0z; i < len(g); i += 1) {
@@ -530,6 +567,7 @@ fn group_index(grouped: *[](str, []json::value), uri: str) size = {
 	return len(g) - 1;
 };
 
+// @param uri: borrowed
 fn basename_of(uri: str) str = {
 	const idx = strings::rindex(uri, '/');
 	match (idx) {
@@ -569,6 +607,7 @@ fn encode_range_local(
 	return r;
 };
 
+// @param p: borrowed
 fn parse_pos_local(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -618,6 +657,9 @@ fn parse_pos_local(p: (json::value | void)) ((str, lsp::position) | void) = {
 	return (uri, pos);
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param arr: owned
 fn send_array_local(s: *server, id: lsp::id, arr: []json::value) void = {
 	const v: json::value = arr;
 	defer json::finish(v);

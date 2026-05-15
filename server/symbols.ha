@@ -32,6 +32,8 @@ def SK_OBJECT: f64 = 19.0;
 // SymbolInformation (we use the legacy flat shape for compatibility; the
 // hierarchical DocumentSymbol shape would require nesting struct fields
 // which a future revision will add).
+//
+// @param s: borrowed
 export fn handle_document_symbol(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_textdoc_request(r.params)) {
 	case let s: str =>
@@ -96,6 +98,8 @@ fn symbol_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 // scanner). LSP clients render these as occurrence highlights, so a
 // user putting the cursor on a function name sees every call site
 // echo back in the editor.
+//
+// @param s: borrowed
 export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position_local(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -145,6 +149,8 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 
 // Handles textDocument/foldingRange. Emits one folding region per top-level
 // declaration spanning multiple lines.
+//
+// @param s: borrowed
 export fn handle_folding_range(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_textdoc_request(r.params)) {
 	case let s: str =>
@@ -202,6 +208,8 @@ export fn handle_folding_range(s: *server, r: lsp::request) void = {
 // outward through enclosing AST nodes producing nested selection ranges.
 // Currently we support: ident → enclosing decl. Step 14b will deepen the
 // hierarchy when we pull in expression visitor support.
+//
+// @param s: borrowed
 export fn handle_selection_range(s: *server, r: lsp::request) void = {
 	const params_obj = match (params_object_local(r.params)) {
 	case let o: json::object =>
@@ -343,6 +351,8 @@ fn is_ws_byte(b: u8) bool = {
 
 // Returns the [start, end) byte range of the line containing `off`,
 // without the trailing newline. If `off` is beyond the buffer, clamps.
+//
+// @param data: borrowed
 fn line_range_around(data: []u8, off: size) (size, size) = {
 	const o = if (off > len(data)) len(data) else off;
 	let s = o;
@@ -356,6 +366,8 @@ fn line_range_around(data: []u8, off: size) (size, size) = {
 // statement; the link carries a `data: {ident: [...]}` carrier that
 // handle_document_link_resolve uses to fill in `target` via
 // hare::module::find.
+//
+// @param s: borrowed
 export fn handle_document_link(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_textdoc_request(r.params)) {
 	case let s: str =>
@@ -412,6 +424,8 @@ export fn handle_document_link(s: *server, r: lsp::request) void = {
 // resolves it via hare::module::find using each workspace folder as a
 // HAREPATH entry, and fills in the link's `target` field with a file://
 // URI pointing at the lexicographically first .ha file in the module.
+//
+// @param s: borrowed
 export fn handle_document_link_resolve(s: *server, r: lsp::request) void = {
 	const incoming = match (r.params) {
 	case let v: json::value =>
@@ -496,6 +510,8 @@ export fn handle_document_link_resolve(s: *server, r: lsp::request) void = {
 // Internal alias to keep the imports in this file stable.
 type ast_ident_strs = []str;
 
+// @param s: borrowed
+// @param ident: borrowed
 fn resolve_module_target(s: *server, ident: []str) (str | void) = {
 	const (dir, sset) = match (find_module(s, ident)) {
 	case let pair: (str, module::srcset) =>
@@ -531,6 +547,12 @@ fn resolve_module_target(s: *server, ident: []str) (str | void) = {
 // (BORROWED — do not free; backed by a static buffer inside module::find
 // that is overwritten on the next call) and the module's srcset (OWNED —
 // caller must call module::finish_srcset). On miss, returns void.
+//
+// The return is a tuple with mixed ownership; no single @returns line can
+// capture both halves accurately, so the prose above stands without a tag.
+//
+// @param s: borrowed
+// @param ident: borrowed
 export fn find_module(
 	s: *server,
 	ident: []str,
@@ -574,6 +596,9 @@ export fn find_module(
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param result: borrowed
 fn send_response_obj(s: *server, id: lsp::id, result: json::value) void = {
 	match (lsp::encode_response_result(s.out, id, result)) {
 	case size => void;
@@ -582,6 +607,7 @@ fn send_response_obj(s: *server, id: lsp::id, result: json::value) void = {
 };
 
 // --- helpers --------------------------------------------------------
+// @param p: borrowed
 fn uri_from_textdoc_request(p: (json::value | void)) (str | void) = {
 	const obj = match (params_object_local(p)) {
 	case let o: json::object =>
@@ -598,6 +624,7 @@ fn uri_from_textdoc_request(p: (json::value | void)) (str | void) = {
 	return object_string_local(&td, "uri");
 };
 
+// @param p: borrowed
 fn parse_text_document_position_local(
 	p: (json::value | void),
 ) ((str, lsp::position) | void) = {
@@ -633,15 +660,20 @@ fn parse_text_document_position_local(
 	return (uri, pos);
 };
 
+// @param p: borrowed
 fn params_object_local(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
 
+// @param o: borrowed
+// @param key: borrowed
 fn object_field_object_local(
 	o: *json::object,
 	key: str,
 ) (json::object | void) = lsp::json_obj(o, key);
 
+// @param o: borrowed
+// @param key: borrowed
 fn object_string_local(
 	o: *json::object,
 	key: str,
@@ -663,11 +695,16 @@ fn encode_range_pos(
 	return r;
 };
 
+// @param s: borrowed
+// @param id: borrowed
 fn send_empty_array(s: *server, id: lsp::id) void = {
 	const empty: []json::value = [];
 	send_array_result(s, id, empty);
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param arr: owned
 fn send_array_result(s: *server, id: lsp::id, arr: []json::value) void = {
 	const v: json::value = arr;
 	defer json::finish(v);

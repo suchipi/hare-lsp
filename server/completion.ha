@@ -28,6 +28,8 @@ use memio;
 use strings;
 
 // Static list of Hare keywords.
+//
+// @borrowed
 const KEYWORDS: []str = [
 	"abort",
 	"align",
@@ -119,8 +121,11 @@ def CIK_MODULE: f64 = 9.0;
 // real Hare identifier in practice — and even if a file happened to
 // contain it, the sentinel would only match when the access lands at
 // the cursor's exact byte offset.
+//
+// @borrowed
 def COMPLETION_SENTINEL: str = "__halsp_completion_marker__";
 
+// @param s: borrowed
 export fn handle_completion(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos_comp(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -187,10 +192,14 @@ type prefix_kind = enum {
 type prefix_info = struct {
 	kind: prefix_kind,
 	// For QUALIFIED, the "mod" before "::"; empty otherwise.
+	//
+	// @owned
 	module: str,
 	// The text already typed for the completion target (between the
 	// trigger — `.` or `::` — and the cursor). Used to filter the
 	// emitted item list.
+	//
+	// @owned
 	partial: str,
 	// Byte offset where the partial begins. For MEMBER this is the byte
 	// immediately after the `.`; the sentinel is spliced in starting
@@ -205,6 +214,8 @@ type prefix_info = struct {
 	ident_end: size,
 };
 
+// @param data: borrowed
+// @returns: owned
 fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 	// Walk back over word bytes to find the start of the current
 	// identifier-or-empty token.
@@ -286,6 +297,8 @@ fn is_word_byte_comp(b: u8) bool = {
 // access on `1`. Identifiers like `buf1` or `hash32` end in a digit
 // but still have non-digit characters earlier in the word, so they
 // pass.
+//
+// @param data: borrowed
 fn receiver_ends_before_dot(data: []u8, dot_off: size) bool = {
 	if (dot_off == 0) return false;
 	const b = data[dot_off - 1];
@@ -310,12 +323,18 @@ fn receiver_ends_before_dot(data: []u8, dot_off: size) bool = {
 // then keywords. The labels following these prefixes are the
 // completion text, so identical sources sort alphabetically within
 // their priority band.
+//
+// @borrowed
 def SORT_LOCAL: str = "1-";
 
+// @borrowed
 def SORT_WORKSPACE: str = "2-";
 
+// @borrowed
 def SORT_KEYWORD: str = "3-";
 
+// @param arr: borrowed
+// @param partial: borrowed
 fn add_keywords(arr: *[]json::value, partial: str) void = {
 	let a = *arr;
 	for (let i = 0z; i < len(KEYWORDS); i += 1) {
@@ -332,6 +351,9 @@ fn add_keywords(arr: *[]json::value, partial: str) void = {
 	*arr = a;
 };
 
+// @param arr: borrowed
+// @param doc: borrowed
+// @param partial: borrowed
 fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 	let a = *arr;
 	const cache = parse_of(doc);
@@ -357,6 +379,10 @@ fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 	*arr = a;
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param arr: borrowed
+// @param partial: borrowed
 fn add_workspace_symbols(
 	s: *server,
 	doc: *document,
@@ -400,6 +426,9 @@ fn add_workspace_symbols(
 // Returns the list of module names already imported by `doc`, using the
 // last segment of each import's ident path as the module name. Caller
 // frees with strings_free_all.
+//
+// @param doc: borrowed
+// @returns: owned
 fn doc_imported_modules(doc: *document) []str = {
 	let out: []str = [];
 	const cache = parse_of(doc);
@@ -412,6 +441,7 @@ fn doc_imported_modules(doc: *document) []str = {
 	return out;
 };
 
+// @param list: owned
 fn strings_free_all(list: []str) void = {
 	for (let i = 0z; i < len(list); i += 1) {
 		free(list[i]);
@@ -424,6 +454,12 @@ fn strings_free_all(list: []str) void = {
 // item that inserts `use <module>;` near the top of the file. The
 // inserted module is the leaf directory name (workspace_entry.module);
 // nested module paths like `encoding::json` are not yet recovered.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param item: borrowed
+// @param module: borrowed
+// @param imported: borrowed
 fn attach_auto_import(
 	s: *server,
 	doc: *document,
@@ -475,6 +511,10 @@ fn attach_auto_import(
 	json::put(item, "additionalTextEdits", edits: json::value)!;
 };
 
+// @param s: borrowed
+// @param arr: borrowed
+// @param module: borrowed
+// @param partial: borrowed
 fn add_module_members(
 	s: *server,
 	arr: *[]json::value,
@@ -490,6 +530,10 @@ fn add_module_members(
 	emit_module_members_from(&s.stdlib_index, arr, module, partial);
 };
 
+// @param idx: borrowed
+// @param arr: borrowed
+// @param module: borrowed
+// @param partial: borrowed
 fn emit_module_members_from(
 	idx: *analysis::workspace_index,
 	arr: *[]json::value,
@@ -530,6 +574,11 @@ fn emit_module_members_from(
 // of the buffer may contain unrelated parse errors that must not block
 // the synthesis. The parser is fast enough at hare-lsp's typical file
 // sizes that paying a full re-parse per completion request is fine.
+//
+// @param data: borrowed
+// @param info: borrowed
+// @param uri: borrowed
+// @returns: owned
 fn parse_with_sentinel(
 	data: []u8,
 	info: *prefix_info,
@@ -550,6 +599,11 @@ fn parse_with_sentinel(
 	return analysis::parse_recover(synth, uri);
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @param info: borrowed
+// @param arr: borrowed
 fn add_struct_members(
 	s: *server,
 	doc: *document,
@@ -598,6 +652,9 @@ fn add_struct_members(
 // unlikely to collide with any real source identifier, so we don't need
 // to bound the search by position - a name match in the AST means we
 // found the splice site.
+//
+// @param su: borrowed
+// @returns: borrowed from su
 fn find_sentinel_access_field(su: *ast::subunit) (ast::access_field | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		match (scan_decl_for_sentinel(&su.decls[i])) {
@@ -609,6 +666,8 @@ fn find_sentinel_access_field(su: *ast::subunit) (ast::access_field | void) = {
 	return void;
 };
 
+// @param d: borrowed
+// @returns: borrowed from d
 fn scan_decl_for_sentinel(d: *ast::decl) (ast::access_field | void) = {
 	match (d.decl) {
 	case let f: ast::decl_func =>
@@ -632,6 +691,8 @@ fn scan_decl_for_sentinel(d: *ast::decl) (ast::access_field | void) = {
 	};
 };
 
+// @param e: borrowed
+// @returns: borrowed from e
 fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 	match (e.expr) {
 	case let a: ast::access_expr =>
@@ -911,6 +972,7 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 	};
 };
 
+// @returns: borrowed
 fn scan_literal_for_sentinel(
 	l: ast::literal_expr,
 ) (ast::access_field | void) = {
@@ -940,6 +1002,8 @@ fn scan_literal_for_sentinel(
 	};
 };
 
+// @param s: borrowed
+// @returns: borrowed from s
 fn scan_struct_literal_for_sentinel(
 	s: *ast::struct_literal,
 ) (ast::access_field | void) = {
@@ -968,6 +1032,12 @@ fn scan_struct_literal_for_sentinel(
 // `seen` is a running set of labels we've already emitted; needed
 // because an alias chain or embedded struct can surface the same field
 // name twice in the natural recursion, and clients dislike duplicates.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param partial: borrowed
+// @param arr: borrowed
+// @param seen: borrowed
 fn emit_struct_member_completions(
 	s: *server,
 	doc: *document,
@@ -1013,6 +1083,12 @@ fn emit_struct_member_completions(
 	};
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param members: borrowed
+// @param partial: borrowed
+// @param arr: borrowed
+// @param seen: borrowed
 fn emit_members_from_list(
 	s: *server,
 	doc: *document,
@@ -1065,6 +1141,8 @@ fn emit_members_from_list(
 	};
 };
 
+// @param seen: borrowed
+// @param name: borrowed
 fn already_emitted(seen: []str, name: str) bool = {
 	for (let i = 0z; i < len(seen); i += 1) {
 		if (seen[i] == name) return true;
@@ -1072,6 +1150,8 @@ fn already_emitted(seen: []str, name: str) bool = {
 	return false;
 };
 
+// @param docs: borrowed
+// @param arr: borrowed
 fn emit_struct_field_item(
 	f: ast::struct_field,
 	docs: str,
@@ -1099,6 +1179,9 @@ fn emit_struct_field_item(
 // Renders a type AST node for use in a completion item's `detail` line.
 // Mirrors the rendering hover uses so member and hover details look
 // consistent.
+//
+// @param t: borrowed
+// @returns: owned
 fn render_field_type(t: *ast::_type) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
@@ -1114,6 +1197,8 @@ fn render_field_type(t: *ast::_type) str = {
 // every other source (locals, workspace symbols, keywords) so that in
 // the unusual case where a non-member fallback also matched the
 // partial, the fields still surface first.
+//
+// @borrowed
 def SORT_MEMBER: str = "0-";
 
 // Attaches an insertText snippet of the form
@@ -1121,6 +1206,10 @@ def SORT_MEMBER: str = "0-";
 // plus insertTextFormat: 2 (Snippet). For zero-arg functions emits
 // "name()$0". param_names may contain empty strings for unnamed params,
 // in which case we substitute `p<N>`.
+//
+// @param item: borrowed
+// @param name: borrowed
+// @param param_names: borrowed
 fn attach_function_snippet(
 	item: *json::object,
 	name: str,
@@ -1158,6 +1247,7 @@ fn attach_function_snippet(
 	json::put(item, "insertTextFormat", 2: f64)!;
 };
 
+// @returns: owned
 fn fmt_size_local_comp(n: size) str = {
 	// Caller copies the returned bytes immediately (into a json string
 	// via toutf8/fromutf8), so a local stack buffer would be unsafe —
@@ -1193,6 +1283,8 @@ fn symbol_kind_to_completion(k: analysis::symbol_kind) f64 = {
 
 // completionItem/resolve: just echo the input for now. Future revisions
 // will fetch the long doc here.
+//
+// @param s: borrowed
 export fn handle_completion_resolve(s: *server, r: lsp::request) void = {
 	const v: json::value = match (r.params) {
 	case let v: json::value =>
@@ -1213,6 +1305,8 @@ export fn handle_completion_resolve(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param p: borrowed
+// @returns: borrowed from p
 fn parse_pos_comp(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -1262,6 +1356,9 @@ fn parse_pos_comp(p: (json::value | void)) ((str, lsp::position) | void) = {
 	return (uri, pos);
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param arr: owned
 fn send_array_comp(s: *server, id: lsp::id, arr: []json::value) void = {
 	let result = json::newobject();
 	json::put(&result, "isIncomplete", false: json::value)!;

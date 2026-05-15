@@ -18,6 +18,8 @@ use strings;
 // loop for the duration. We log start + completion via
 // window/logMessage so the user can see why the editor seems
 // momentarily stalled on first open.
+//
+// @param s: borrowed
 export fn scan_workspace_folders(s: *server) void = {
 	if (len(s.workspace_folders) == 0) return;
 
@@ -35,6 +37,8 @@ export fn scan_workspace_folders(s: *server) void = {
 		"hare-lsp: indexed");
 };
 
+// @param uri: borrowed
+// @returns: owned
 fn uri_to_local_path(uri: str) str = lsp::uri_decode_path(uri);
 
 // Fetches a file_parse_cache entry; on miss, if the underlying file
@@ -43,6 +47,10 @@ fn uri_to_local_path(uri: str) str = lsp::uri_decode_path(uri);
 // a delete that the watcher hasn't reported yet (delete-before-
 // watcher-event is a common race on macOS/FSEvents). Returns null
 // in either failure mode.
+//
+// @param s: borrowed
+// @param path: borrowed
+// @returns: borrowed from s
 export fn cached_parse_or_drop_stale(
 	s: *server,
 	path: str,
@@ -70,6 +78,8 @@ def WORKSPACE_SYMBOL_CAP: size = 200;
 // matches were capped or when stdlib indexing hasn't finished yet.
 // Polls cancellation every 32 result-building iterations so the user
 // can abandon a slow query.
+//
+// @param s: borrowed
 export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 	// Kick off full stdlib indexing on first call so subsequent
 	// queries can match stdlib symbols. The job is chunked so this
@@ -176,6 +186,8 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 // Handles workspaceSymbol/resolve. Currently a no-op: we already include
 // the location in workspace/symbol. Some clients still call resolve, so we
 // pass the input through unchanged.
+//
+// @param s: borrowed
 export fn handle_workspace_symbol_resolve(s: *server, r: lsp::request) void = {
 	const v: json::value = match (r.params) {
 	case let v: json::value =>
@@ -201,6 +213,10 @@ export fn handle_workspace_symbol_resolve(s: *server, r: lsp::request) void = {
 // open docs whose URI corresponds to a path already covered by the
 // workspace index — that way an open file inside a workspace folder
 // doesn't appear twice.
+//
+// @param s: borrowed
+// @param query: borrowed
+// @returns: owned
 fn collect_open_doc_symbol_hits(
 	s: *server,
 	query: str,
@@ -224,6 +240,8 @@ fn collect_open_doc_symbol_hits(
 	return out;
 };
 
+// @param s: borrowed
+// @returns: owned
 fn wsym_ascii_lower(s: str) str = {
 	const bytes = strings::toutf8(s);
 	let buf: []u8 = alloc([], len(bytes))!;
@@ -238,6 +256,8 @@ fn wsym_ascii_lower(s: str) str = {
 	return strings::dup(strings::fromutf8(buf)!)!;
 };
 
+// @param s: borrowed
+// @param uri: borrowed
 fn open_doc_indexed_on_disk(s: *server, uri: str) bool = {
 	const path = lsp::uri_decode_path(uri);
 	defer free(path);
@@ -247,6 +267,10 @@ fn open_doc_indexed_on_disk(s: *server, uri: str) bool = {
 	return false;
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param sym: borrowed
+// @returns: owned
 fn encode_open_doc_symbol(
 	s: *server,
 	doc: *document,
@@ -280,6 +304,8 @@ fn encode_open_doc_symbol(
 	return o;
 };
 
+// @param e: borrowed
+// @returns: owned
 fn encode_workspace_symbol(e: *analysis::workspace_entry) json::value = {
 	let o = json::newobject();
 	json::set(&o, "name", e.short_name: json::value)!;
@@ -324,6 +350,8 @@ fn workspace_entry_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 	};
 };
 
+// @param p: borrowed
+// @returns: borrowed from p
 fn extract_query(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -358,6 +386,9 @@ fn extract_query(p: (json::value | void)) (str | void) = {
 // source set), but the parser would abort on non-Hare bytes. We also
 // ignore anything inside our own `.cache/` since the Hare compiler
 // drops `*.o.tmp.s` artifacts there.
+//
+// @param s: borrowed
+// @param uri: borrowed
 export fn workspace_handle_file_event(
 	s: *server,
 	uri: str,
@@ -389,6 +420,8 @@ export fn workspace_handle_file_event(
 
 // Whether a path on disk should be parsed as Hare and added to the
 // workspace index. Exported only for tests.
+//
+// @param path_str: borrowed
 export fn is_indexable_path(path_str: str) bool = {
 	if (!strings::hassuffix(path_str, ".ha")) return false;
 	// Reject anything inside a `.cache/` directory at any depth: the
@@ -398,6 +431,8 @@ export fn is_indexable_path(path_str: str) bool = {
 	return true;
 };
 
+// @param path_str: borrowed
+// @returns: owned
 fn open_file_for_read(path_str: str) ([]u8 | void) = {
 	const f = match (os_open_helper(path_str)) {
 	case let f: io_file_helper =>
@@ -423,6 +458,7 @@ fn open_file_for_read(path_str: str) ([]u8 | void) = {
 // io::read here to keep the signature local.
 type io_file_helper = io::file;
 
+// @param path_str: borrowed
 fn os_open_helper(path_str: str) (io_file_helper | void) = {
 	match (os::open(path_str)) {
 	case let f: io::file =>
@@ -436,6 +472,7 @@ fn io_close_helper(f: io_file_helper) void = {
 	lsp::safe_close(f);
 };
 
+// @param buf: borrowed
 fn io_read_helper(f: io_file_helper, buf: []u8) (size | void) = {
 	match (io::read(f, buf)) {
 	case let n: size =>

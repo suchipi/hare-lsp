@@ -31,6 +31,7 @@ export type parse_result = struct {
 	subunit: ast::subunit,
 	// All errors encountered. Each is keyed by location for the LSP layer
 	// to convert into diagnostics.
+	// @owned
 	errors: []parse_diagnostic,
 	// True when the buffer was non-empty but no top-level form was
 	// successfully parsed.
@@ -40,6 +41,7 @@ export type parse_result = struct {
 // A single parse error, suitable for translation to an LSP Diagnostic.
 export type parse_diagnostic = struct {
 	location: lex::location,
+	// @owned
 	message: str,
 };
 
@@ -47,6 +49,9 @@ export type parse_diagnostic = struct {
 // pass it to [[finish_parse_result]] when done.
 //
 // `path` is an opaque label used in error messages.
+//
+// @param text: borrowed
+// @param path: borrowed
 export fn parse_recover(text: []u8, path: str) parse_result = {
 	let res = parse_result {
 		subunit = ast::subunit {
@@ -130,6 +135,8 @@ export fn parse_recover(text: []u8, path: str) parse_result = {
 
 // Releases owned memory in a parse_result, including each ast::decl via
 // ast::decl_finish.
+//
+// @param r: borrowed
 export fn finish_parse_result(r: *parse_result) void = {
 	for (let i = 0z; i < len(r.errors); i += 1) {
 		free(r.errors[i].message);
@@ -145,6 +152,8 @@ export fn finish_parse_result(r: *parse_result) void = {
 	free(r.subunit.decls);
 };
 
+// @param r: borrowed
+// @param e: borrowed
 fn record_error(r: *parse_result, e: parse::error) void = {
 	const lex_err: lex::error = e: lex::error;
 	match (lex_err) {
@@ -179,6 +188,8 @@ fn record_error(r: *parse_result, e: parse::error) void = {
 // by lexing without unlexing until we've found a boundary, at which point we
 // finally place that boundary token back in the slot for the next parse step
 // to pick up.
+//
+// @param lexer: borrowed
 fn resync_to_decl(lexer: *lex::lexer) void = {
 	let last: (lex::token | void) = void;
 	for (true) {

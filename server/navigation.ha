@@ -17,6 +17,8 @@ use strings;
 
 // Handles textDocument/hover. Returns a MarkupContent with the symbol's
 // signature (rendered via hare::unparse) and its doc comment, when known.
+//
+// @param s: borrowed
 export fn handle_hover(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -191,6 +193,12 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 // best textual range we can compute around `off`. We don't have the
 // module-path span pre-computed, so widen to the surrounding `ident::ident`
 // run; if that fails, fall back to the single ident at `off`.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @param id: borrowed
+// @param md: borrowed
 fn send_module_hover_response(
 	s: *server,
 	doc: *document,
@@ -238,15 +246,20 @@ fn send_module_hover_response(
 
 // Handles textDocument/definition (and declaration; same per-file behavior
 // for now).
+//
+// @param s: borrowed
 export fn handle_definition(s: *server, r: lsp::request) void = {
 	send_location_for_ident(s, r);
 };
 
+// @param s: borrowed
 export fn handle_declaration(s: *server, r: lsp::request) void = {
 	send_location_for_ident(s, r);
 };
 
 // implementation = same as definition for Hare since there's no inheritance.
+//
+// @param s: borrowed
 export fn handle_implementation(s: *server, r: lsp::request) void = {
 	send_location_for_ident(s, r);
 };
@@ -255,6 +268,8 @@ export fn handle_implementation(s: *server, r: lsp::request) void = {
 // Without full type inference we approximate: if the cursor is on a name
 // whose decl is a type, jump there; otherwise null. Falls back to the
 // workspace index for types defined in other files.
+//
+// @param s: borrowed
 export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -310,6 +325,7 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param s: borrowed
 fn send_location_for_ident(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -364,6 +380,10 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 // Emits a Location response for a workspace_entry without needing the file
 // open. We fetch the file via the shared parse cache so repeated jumps to
 // the same file don't keep re-reading it from disk.
+//
+// @param s: borrowed
+// @param id: borrowed
+// @param e: borrowed
 fn send_location_for_entry(
 	s: *server,
 	id: lsp::id,
@@ -412,6 +432,11 @@ fn send_location_for_entry(
 // strings are freshly allocated; `fact.detail` is owned by the caller.
 //
 // Returns void if no workspace entry matches or the file can't be read.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @param ident_str: borrowed
 fn workspace_hover(
 	s: *server,
 	doc: *document,
@@ -445,6 +470,10 @@ fn workspace_hover(
 	return (sig, docs, fact);
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param uri: borrowed
+// @param doc: borrowed
 fn send_location(
 	s: *server,
 	id: lsp::id,
@@ -479,6 +508,8 @@ fn send_location(
 	};
 };
 
+// @param su: borrowed
+// @param name: borrowed
 fn find_decl_by_name(su: *ast::subunit, name: str) (size | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const id = decl_ident(&su.decls[i]);
@@ -487,6 +518,7 @@ fn find_decl_by_name(su: *ast::subunit, name: str) (size | void) = {
 	return void;
 };
 
+// @param d: borrowed
 fn decl_ident(d: *ast::decl) ast::ident = {
 	match (d.decl) {
 	case let f: ast::decl_func =>
@@ -508,6 +540,8 @@ fn decl_ident(d: *ast::decl) ast::ident = {
 // the symbol is, not its full definition — e.g.
 //   `export fn main() void`   (not `... = { let scan = ...; ... }`)
 //   `let stdout_file: io::file`  (not `... = rt::STDOUT_FILENO`)
+//
+// @param d: borrowed
 fn render_decl_signature(d: *ast::decl) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
@@ -596,6 +630,10 @@ fn render_decl_signature(d: *ast::decl) str = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param sig: borrowed
+// @param docs: borrowed
 fn build_hover_markdown(s: *server, doc: *document, sig: str, docs: str) str = {
 	return build_hover_markdown_with_facts(s, doc, sig, docs, "");
 };
@@ -604,6 +642,12 @@ fn build_hover_markdown(s: *server, doc: *document, sig: str, docs: str) str = {
 // (e.g. an Ownership annotation) after the prose body. The doc comment
 // is usually more relevant than the ownership label, so it goes first.
 // When `extra_facts` is empty, behaves identically.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param sig: borrowed
+// @param docs: borrowed
+// @param extra_facts: borrowed
 fn build_hover_markdown_with_facts(
 	s: *server,
 	doc: *document,
@@ -619,6 +663,12 @@ fn build_hover_markdown_with_facts(
 // Same as build_hover_markdown but assumes `body` is already clean
 // markdown (no doc-comment leading-space stripping). Used for README
 // hovers where the source is raw markdown.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param sig: borrowed
+// @param body: borrowed
+// @returns: owned
 export fn build_hover_markdown_raw(
 	s: *server,
 	doc: *document,
@@ -628,6 +678,11 @@ export fn build_hover_markdown_raw(
 	return build_hover_markdown_raw_with_facts(s, doc, sig, body, "");
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param sig: borrowed
+// @param body: borrowed
+// @param extra_facts: borrowed
 fn build_hover_markdown_raw_with_facts(
 	s: *server,
 	doc: *document,
@@ -658,6 +713,8 @@ fn build_hover_markdown_raw_with_facts(
 // so it typically begins with one space (e.g. ` One diagnostic.\n`). We
 // strip that single leading space per line and trim trailing whitespace so
 // the markdown body reads as plain prose. Caller frees.
+//
+// @param docs: borrowed
 fn clean_doc_comment(docs: str) str = {
 	if (len(docs) == 0) return strings::dup("")!;
 	const trimmed = strings::trimsuffix(docs, "\n");
@@ -671,6 +728,7 @@ fn clean_doc_comment(docs: str) str = {
 	return strings::join("\n", cleaned...)!;
 };
 
+// @param p: borrowed
 fn parse_text_document_position(
 	p: (json::value | void),
 ) ((str, lsp::position) | void) = {
@@ -730,6 +788,8 @@ fn parse_text_document_position(
 // end of the identifier. Returns void otherwise. The leading '@' is
 // folded back in by handle_hover for any cursor position; this helper
 // only exists so cursor-on-'@' doesn't immediately fail at ident_at.
+//
+// @param data: borrowed
 fn attr_at(data: []u8, off: size) ((size, size) | void) = {
 	if (off >= len(data)) return void;
 	if (data[off] != '@': u8) return void;
@@ -751,6 +811,11 @@ fn attr_at(data: []u8, off: size) ((size, size) | void) = {
 // The workspace-only resolution is delegated to
 // `analysis::workspace_lookup_for_subunit`; stdlib resolution layers on
 // top here because it needs `*server` to drive lazy indexing.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @param ident_str: borrowed
 fn workspace_lookup_aware(
 	s: *server,
 	doc: *document,
@@ -829,6 +894,8 @@ fn workspace_lookup_aware(
 	return analysis::find_first_by_short_name(&s.stdlib_index, ident_str);
 };
 
+// @param s: borrowed
+// @param id: borrowed
 fn send_null(s: *server, id: lsp::id) void = {
 	const r: json::value = json::_null;
 	match (lsp::encode_response_result(s.out, id, r)) {
@@ -837,6 +904,9 @@ fn send_null(s: *server, id: lsp::id) void = {
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param v: owned
 fn send_with_finish(s: *server, id: lsp::id, v: json::value) void = {
 	defer json::finish(v);
 	match (lsp::encode_response_result(s.out, id, v)) {
@@ -849,6 +919,12 @@ fn send_with_finish(s: *server, id: lsp::id, v: json::value) void = {
 // local `let` / `const` / function-parameter binding. Walks the body of the
 // containing function decl. Returns void if no matching binding is in
 // scope at `off`. Caller frees the result.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param data: borrowed
+// @param name: borrowed
 fn find_local_binding(
 	srv: *server,
 	doc: *document,
@@ -897,6 +973,12 @@ fn find_local_binding(
 // Recurses through the common expression forms looking for a `let`/`const`
 // binding of `name` whose textual range encloses `off`. Returns the
 // rendered signature or void.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @param e: borrowed
+// @param name: borrowed
 fn walk_for_local(
 	srv: *server,
 	doc: *document,
@@ -1045,6 +1127,10 @@ fn walk_for_local(
 	};
 };
 
+// @param srv: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @param b: borrowed
 fn render_local_binding(
 	srv: *server,
 	doc: *document,
@@ -1132,6 +1218,9 @@ fn render_local_binding(
 //   - bare identifiers that resolve to a local `let`/`const` binding in
 //     the same file, by following the binding's declared or inferred type.
 // Other forms return void; the caller falls back to echoing the source.
+// @param srv: borrowed
+// @param doc: borrowed
+// @param init: borrowed
 fn infer_type_from_init(
 	srv: *server,
 	doc: *document,
@@ -1145,6 +1234,9 @@ fn infer_type_from_init(
 // and protects against pathological cycles in malformed code.
 def MAX_LOCAL_INFER_DEPTH: u32 = 8;
 
+// @param srv: borrowed
+// @param doc: borrowed
+// @param init: borrowed
 fn infer_type_from_init_at(
 	srv: *server,
 	doc: *document,
@@ -1198,6 +1290,9 @@ fn infer_type_from_init_at(
 // operators always produce `bool`; other operators take on the operand type,
 // so we recurse into the left operand first and fall back to the right when
 // the left can't be inferred.
+//
+// @param srv: borrowed
+// @param doc: borrowed
 fn infer_binarithm_type(
 	srv: *server,
 	doc: *document,
@@ -1228,6 +1323,10 @@ fn infer_binarithm_type(
 // Resolves a bare identifier to a same-file local `let`/`const` binding and
 // returns its declared or inferred type. Qualified accesses (`foo::bar`,
 // `obj.field`, indexing) are out of scope here.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param a: borrowed
 fn infer_access_expr_type(
 	srv: *server,
 	doc: *document,
@@ -1269,6 +1368,9 @@ fn infer_access_expr_type(
 // scope contains `off`, returning the binding node. Mirrors the structural
 // walk in walk_for_local but exposes the raw binding so the caller can read
 // its declared or initializer type instead of rendering a hover string.
+//
+// @param su: borrowed
+// @param name: borrowed
 fn find_local_binding_node(
 	su: *ast::subunit,
 	name: str,
@@ -1295,6 +1397,8 @@ fn find_local_binding_node(
 	return void;
 };
 
+// @param e: borrowed
+// @param name: borrowed
 fn walk_for_local_binding_node(
 	e: *ast::expr,
 	name: str,
@@ -1354,6 +1458,10 @@ fn walk_for_local_binding_node(
 // contributed value type, deduplicated. Cases whose body always diverges
 // (return / abort) contribute nothing. Returns void if no case yields a
 // usable type, in which case the caller falls back to echoing the source.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param m: borrowed
 fn infer_match_expr_type(
 	srv: *server,
 	doc: *document,
@@ -1383,6 +1491,10 @@ fn infer_match_expr_type(
 // Returns the value type a single match case contributes back to the
 // surrounding match expression, or void if the case always diverges
 // (e.g. `return foo;`). Caller frees.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param mc: borrowed
 fn infer_case_value_type(
 	srv: *server,
 	doc: *document,
@@ -1408,6 +1520,10 @@ fn infer_case_value_type(
 
 // Type of a `yield <value>`'s value, or void for bare `yield` (which
 // contributes void in Hare's type rules).
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param mc: borrowed
 fn type_of_yield_value(
 	srv: *server,
 	doc: *document,
@@ -1427,6 +1543,11 @@ fn type_of_yield_value(
 // Recognises references to the case's own binding (`yield i` where the
 // case is `case let i: T`) and otherwise reuses infer_type_from_init for
 // literals / calls / casts.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param mc: borrowed
+// @param e: borrowed
 fn type_of_case_value_expr(
 	srv: *server,
 	doc: *document,
@@ -1449,6 +1570,8 @@ fn type_of_case_value_expr(
 
 // Renders the case's binding type (`case let i: T` -> "T"). For a default
 // case or a case without an explicit type, returns void.
+//
+// @param mc: borrowed
 fn render_case_binding_type(mc: *ast::match_case) (str | void) = {
 	const t = match (mc._type) {
 	case let t: *ast::_type =>
@@ -1466,6 +1589,8 @@ fn render_case_binding_type(mc: *ast::match_case) (str | void) = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
+// @param haystack: borrowed
+// @param needle: borrowed
 fn contains_str(haystack: []str, needle: str) bool = {
 	for (let i = 0z; i < len(haystack); i += 1) {
 		if (haystack[i] == needle) return true;
@@ -1476,6 +1601,10 @@ fn contains_str(haystack: []str, needle: str) bool = {
 // Infers the type of an init expression after stripping any error-flagged
 // variants from its resulting type. Used for the inner expression of `?` and
 // `!`, which both yield the non-error component of the inner type.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param inner: borrowed
 fn infer_unwrapped_init(
 	srv: *server,
 	doc: *document,
@@ -1497,6 +1626,7 @@ fn infer_unwrapped_init(
 	return render_type_without_errors(srv, doc, result_t);
 };
 
+// @param l: borrowed
 fn type_label_for_literal(l: ast::literal_expr) (str | void) = {
 	match (l) {
 	case let p: ast::plain_literal =>
@@ -1525,6 +1655,10 @@ fn type_label_for_literal(l: ast::literal_expr) (str | void) = {
 // Resolves the callee of a direct call expression and renders its return
 // type, e.g. `bufio::newscanner(...)` -> `bufio::scanner`. Returns void if
 // the callee isn't a direct access_identifier or can't be resolved.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param c: borrowed
 fn infer_call_return_type(
 	srv: *server,
 	doc: *document,
@@ -1569,6 +1703,10 @@ fn infer_call_return_type(
 // ["bufio", "newscanner"] or ["foo"]. Mirrors workspace_lookup_aware but
 // works from the AST identifier rather than a byte offset + qualifier
 // scan.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param callee_ident: borrowed
 fn lookup_callee(
 	srv: *server,
 	doc: *document,
@@ -1604,6 +1742,7 @@ fn lookup_callee(
 	return analysis::find_first_by_short_name(&srv.workspace_index, name);
 };
 
+// @param d: borrowed
 fn render_func_result(d: *ast::decl) (str | void) = {
 	const f = match (d.decl) {
 	case let f: ast::decl_func =>
@@ -1629,6 +1768,10 @@ fn render_func_result(d: *ast::decl) (str | void) = {
 
 // Like [[infer_call_return_type]] but returns the result type's AST node so
 // callers can post-process it (e.g. strip error variants for `?` / `!`).
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param c: borrowed
 fn infer_call_return_type_node(
 	srv: *server,
 	doc: *document,
@@ -1683,6 +1826,10 @@ fn infer_call_return_type_node(
 // Renders `t` with all error-flagged variants stripped — the result of `?`
 // or `!` applied to an expression of type `t`. Returns void if every
 // component of `t` was an error (nothing meaningful to show).
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param t: borrowed
 fn render_type_without_errors(
 	srv: *server,
 	doc: *document,
@@ -1732,6 +1879,7 @@ fn render_type_without_errors(
 	};
 };
 
+// @param t: borrowed
 fn render_type_plain(t: *ast::_type) (str | void) = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
@@ -1746,6 +1894,10 @@ fn render_type_plain(t: *ast::_type) (str | void) = {
 // True when `t` is an error type, either directly (`!T`) or through alias
 // resolution (`type myerr = !T`, possibly chained). `depth` guards against
 // pathological alias cycles.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param t: borrowed
 fn type_is_error(
 	srv: *server,
 	doc: *document,
@@ -1778,6 +1930,10 @@ fn type_is_error(
 // Resolves an ident to its `decl` by searching the local subunit, the
 // workspace index (qualified or via imports), and the indexed stdlib.
 // Mirrors [[lookup_callee]] but returns the decl directly.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param id: borrowed
 fn lookup_decl_by_ident(
 	srv: *server,
 	doc: *document,
@@ -1828,6 +1984,9 @@ fn lookup_decl_by_ident(
 	};
 };
 
+// @param srv: borrowed
+// @param e: borrowed
+// @param name: borrowed
 fn decl_from_workspace_entry(
 	srv: *server,
 	e: *analysis::workspace_entry,
@@ -1848,6 +2007,8 @@ fn decl_from_workspace_entry(
 };
 
 // True when at least one expression in `exprs` textually encloses `off`.
+//
+// @param exprs: borrowed
 fn case_contains(exprs: []*ast::expr, off: size) bool = {
 	for (let i = 0z; i < len(exprs); i += 1) {
 		const e = exprs[i];
@@ -1859,6 +2020,12 @@ fn case_contains(exprs: []*ast::expr, off: size) bool = {
 };
 
 // Walks each expression in a match/switch case body.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @param exprs: borrowed
+// @param name: borrowed
 fn walk_case_exprs(
 	srv: *server,
 	doc: *document,
@@ -1885,6 +2052,7 @@ fn walk_case_exprs(
 	return hit;
 };
 
+// @param mc: borrowed
 fn render_match_case_binding(mc: *ast::match_case) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
@@ -1908,6 +2076,7 @@ fn render_match_case_binding(mc: *ast::match_case) str = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
+// @param p: borrowed
 fn render_param_binding(p: *ast::func_param) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);

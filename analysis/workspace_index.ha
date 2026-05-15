@@ -18,26 +18,33 @@ use strings;
 // One indexed declaration in the workspace.
 export type workspace_entry = struct {
 	// File URI (file://...).
+	// @owned
 	uri: str,
 	// File path on disk.
+	// @owned
 	path: str,
 	// Symbol short name and kind.
+	// @owned
 	short_name: str,
+	// @owned
 	full_name: str,
 	kind: symbol_kind,
 	// AST span byte offsets.
 	start_off: u32,
 	end_off: u32,
 	// Doc comment, if any.
+	// @owned
 	docs: str,
 	exported: bool,
 	// The module this entry lives in, derived from the basename of
 	// the file's containing directory. For /repo/foo/bar.ha this is
 	// "foo". Matches the Hare convention that directory == module name.
+	// @owned
 	module: str,
 	// For FUNCTION-kind entries: parameter names from the prototype.
 	// Empty for non-functions and for prototypes with no named params.
 	// Used to build snippet placeholders in completion.
+	// @owned
 	param_names: []str,
 };
 
@@ -50,8 +57,10 @@ export def DEFAULT_MAX_INDEX_ENTRIES: size = 1_000_000;
 
 // The workspace index.
 export type workspace_index = struct {
+	// @owned
 	entries: []workspace_entry,
 	// File paths whose directories were scanned. Used to avoid re-indexing.
+	// @owned
 	indexed_files: []str,
 	// Runtime cap. Settable via [[set_max_entries]]; defaults to
 	// [[DEFAULT_MAX_INDEX_ENTRIES]]. Whatever value the user configures
@@ -68,12 +77,16 @@ export fn new_workspace_index() workspace_index = workspace_index {
 
 // Sets the runtime cap on entries. The value is stored verbatim; there
 // is no additional hard ceiling. No-op if `n` is zero.
+//
+// @param idx: borrowed
 export fn set_max_entries(idx: *workspace_index, n: size) void = {
 	if (n == 0) return;
 	idx.max_entries = n;
 };
 
 // Releases owned memory.
+//
+// @param idx: borrowed
 export fn finish_workspace_index(idx: *workspace_index) void = {
 	for (let i = 0z; i < len(idx.entries); i += 1) {
 		free_workspace_entry(&idx.entries[i]);
@@ -85,6 +98,7 @@ export fn finish_workspace_index(idx: *workspace_index) void = {
 	free(idx.indexed_files);
 };
 
+// @param e: borrowed
 fn free_workspace_entry(e: *workspace_entry) void = {
 	free(e.uri);
 	free(e.path);
@@ -100,6 +114,9 @@ fn free_workspace_entry(e: *workspace_entry) void = {
 
 // Drops all entries originating from `path`. Used when a file is renamed,
 // deleted, or modified before re-indexing.
+//
+// @param idx: borrowed
+// @param path_str: borrowed
 export fn drop_file(idx: *workspace_index, path_str: str) void = {
 	let i = 0z;
 	for (i < len(idx.entries)) {
@@ -124,6 +141,10 @@ export fn drop_file(idx: *workspace_index, path_str: str) void = {
 // Refuses to add new entries (silently) once the index has grown past
 // `max_entries`. drop_file always runs first so re-indexing an
 // already-tracked file still works.
+//
+// @param idx: borrowed
+// @param file_path: borrowed
+// @param text: borrowed
 export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 	drop_file(idx, file_path);
 	if (len(idx.entries) >= idx.max_entries) {
@@ -167,6 +188,9 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 // parent module, not to a separate module named after the tag.
 //
 // The returned string is always freshly allocated; caller frees.
+//
+// @returns: owned
+// @param file_path: borrowed
 export fn module_from_path(file_path: str) str = {
 	const last_slash = match (strings::rindex(file_path, '/')) {
 	case let i: size =>
@@ -200,6 +224,9 @@ export fn module_from_path(file_path: str) str = {
 // Returns the number of files indexed. Best-effort: I/O errors on individual
 // files are skipped silently so a permission-denied subdir doesn't take
 // down the whole walk.
+//
+// @param idx: borrowed
+// @param root: borrowed
 export fn index_directory(idx: *workspace_index, root: str) size = {
 	const paths = collect_ha_files(root);
 	defer free_path_slice(paths);
@@ -216,6 +243,9 @@ export fn index_directory(idx: *workspace_index, root: str) size = {
 // chunks. Best-effort: directories that can't be opened are skipped.
 //
 // Caller frees the returned slice and each string via [[free_path_slice]].
+//
+// @returns: owned
+// @param root: borrowed
 export fn collect_ha_files(root: str) []str = {
 	let out: []str = [];
 	walk_collect(root, &out);
@@ -223,6 +253,8 @@ export fn collect_ha_files(root: str) []str = {
 };
 
 // Frees every string in `paths` and the slice itself.
+//
+// @param paths: owned
 export fn free_path_slice(paths: []str) void = {
 	for (let i = 0z; i < len(paths); i += 1) {
 		free(paths[i]);
@@ -230,6 +262,8 @@ export fn free_path_slice(paths: []str) void = {
 	free(paths);
 };
 
+// @param dir: borrowed
+// @param out: borrowed
 fn walk_collect(dir: str, out: *[]str) void = {
 	const it = match (os::iter(dir)) {
 	case let it: *fs::iterator =>
@@ -269,6 +303,9 @@ fn walk_collect(dir: str, out: *[]str) void = {
 // Reads `path` from disk and feeds it to [[index_file]]. Returns true on
 // success, false on I/O error. Exposed so that chunked index jobs can
 // process one file per tick.
+//
+// @param idx: borrowed
+// @param path: borrowed
 export fn read_and_index_file(idx: *workspace_index, path: str) bool = {
 	const f = match (os::open(path)) {
 	case let f: io::file =>
@@ -298,6 +335,9 @@ export fn read_and_index_file(idx: *workspace_index, path: str) bool = {
 
 // Looks up entries by short name. Returns a borrowed slice; callers must
 // not mutate the index while holding it.
+//
+// @param idx: borrowed
+// @param name: borrowed
 export fn lookup_by_short_name(
 	idx: *workspace_index,
 	name: str,
@@ -314,6 +354,10 @@ export fn lookup_by_short_name(
 // Returns a borrowed pointer to the first entry whose short_name matches,
 // or void if none exists. Used by navigation features (hover, definition,
 // etc.) that take "any" hit when falling back from per-file resolution.
+//
+// @returns: borrowed from idx
+// @param idx: borrowed
+// @param name: borrowed
 export fn find_first_by_short_name(
 	idx: *workspace_index,
 	name: str,
@@ -328,6 +372,11 @@ export fn find_first_by_short_name(
 
 // Returns the first entry matching (module, short_name). Used for
 // qualified references like `mod::name`.
+//
+// @returns: borrowed from idx
+// @param idx: borrowed
+// @param module: borrowed
+// @param name: borrowed
 export fn find_in_module(
 	idx: *workspace_index,
 	module: str,
@@ -349,6 +398,11 @@ export fn find_in_module(
 // `imported_modules` is a slice of module short names (e.g. ["io",
 // "strings"]). If empty, this function returns void — callers fall back
 // to [[find_first_by_short_name]] only as a last resort.
+//
+// @returns: borrowed from idx
+// @param idx: borrowed
+// @param imported_modules: borrowed
+// @param name: borrowed
 export fn find_in_imports(
 	idx: *workspace_index,
 	imported_modules: []str,
@@ -369,6 +423,10 @@ export fn find_in_imports(
 
 // Returns indices into idx.entries whose short names contain the query
 // substring (case-insensitive, ASCII fold).
+//
+// @returns: owned
+// @param idx: borrowed
+// @param query: borrowed
 export fn fuzzy_search(idx: *workspace_index, query: str) []size = {
 	let out: []size = [];
 	const q = ascii_lower(query);
@@ -383,6 +441,7 @@ export fn fuzzy_search(idx: *workspace_index, query: str) []size = {
 	return out;
 };
 
+// @param s: borrowed
 fn ascii_lower(s: str) str = {
 	let bytes = strings::toutf8(s);
 	let buf: []u8 = alloc([], len(bytes))!;

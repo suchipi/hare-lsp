@@ -17,13 +17,19 @@ use strings;
 // settings under the "hare" namespace.
 export type config = struct {
 	// Path to the `hare` binary. Defaults to the value found in PATH.
+	//
+	// @owned
 	hare_path: str,
 	// Colon-separated list of directories searched for Hare modules
 	// (mirrors the $HAREPATH env var). Empty string means "use $HAREPATH
 	// from the environment, falling back to the platform default".
+	//
+	// @owned
 	harepath: str,
 	// Build tags passed to `hare build` and module resolution. e.g.
 	// ["+linux", "+x86_64"].
+	//
+	// @owned
 	tags: []str,
 	// Diagnostics debounce interval in milliseconds. After the last
 	// document change, the server waits this long before invoking
@@ -88,6 +94,8 @@ export fn default_config() config = config {
 };
 
 // Releases memory owned by the config.
+//
+// @param c: borrowed
 export fn finish_config(c: *config) void = {
 	free(c.hare_path);
 	free(c.harepath);
@@ -100,6 +108,8 @@ export fn finish_config(c: *config) void = {
 // Sends a workspace/configuration request to pull the "hare" settings
 // section. The eventual response is passed to [[apply_configuration_response]].
 // Returns the request id, or void on transport failure.
+//
+// @param s: borrowed
 export fn request_configuration(s: *server) (i64 | void) = {
 	const id = next_outgoing_id(s);
 	let params = json::newobject();
@@ -131,6 +141,9 @@ export fn request_configuration(s: *server) (i64 | void) = {
 // Applies a workspace/configuration response. The result is an array of
 // settings objects matching the items requested. We requested one item under
 // section "hare", so we expect a single-element array.
+//
+// @param s: borrowed
+// @param result: borrowed
 export fn apply_configuration_response(s: *server, result: json::value) void = {
 	const arr = match (result) {
 	case let a: []json::value =>
@@ -153,6 +166,8 @@ export fn apply_configuration_response(s: *server, result: json::value) void = {
 // and stdlib indexes. Called after [[apply_settings]] so the new value
 // takes effect prospectively. Lowering below current usage applies to
 // future inserts only; we don't proactively evict.
+//
+// @param s: borrowed
 fn apply_limits_to_indexes(s: *server) void = {
 	analysis::set_max_entries(&s.workspace_index,
 		s.config.limits.max_workspace_index_entries);
@@ -169,6 +184,8 @@ fn apply_limits_to_indexes(s: *server) void = {
 //
 // If the field is null (e.g. some clients send `{"settings":null}` then expect
 // the server to re-pull), we issue a fresh workspace/configuration request.
+//
+// @param s: borrowed
 export fn handle_did_change_configuration(
 	s: *server,
 	n: lsp::notification,
@@ -229,6 +246,8 @@ export fn handle_did_change_configuration(
 
 // Re-publishes diagnostics and sends inlayHint/refresh when the
 // corresponding settings actually changed.
+//
+// @param s: borrowed
 fn refresh_after_config_change(
 	s: *server,
 	old_debounce: u32,
@@ -259,6 +278,9 @@ fn refresh_after_config_change(
 // Applies a settings value (the "hare" section) into the server's config.
 // Only fields present in the json are updated; absent fields keep their
 // existing values.
+//
+// @param s: borrowed
+// @param v: borrowed
 export fn apply_settings(s: *server, v: json::value) void = {
 	const o = match (v) {
 	case let o: json::object =>
@@ -493,6 +515,10 @@ export fn apply_settings(s: *server, v: json::value) void = {
 // a misbehaving client shouldn't be able to do via a raw
 // didChangeConfiguration payload. Partial settings don't clobber the
 // existing value.
+//
+// @param lobj: borrowed
+// @param key: borrowed
+// @param out: borrowed
 fn apply_limit_u64(lobj: *json::object, key: str, out: *size) void = {
 	match (json::get(lobj, key)) {
 	case let p: *json::value =>

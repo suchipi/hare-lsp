@@ -25,10 +25,12 @@ use strings;
 // One module that should be built.
 export type module_dep = struct {
 	// Absolute path to the module's source directory.
+	// @owned
 	dir: str,
 	// The `use` identifier that first referenced this module, joined
 	// with "::". Empty for the root (the starting module passed to
 	// [[build_order]]).
+	// @owned
 	use_ident: str,
 };
 
@@ -56,6 +58,12 @@ export type resolver = fn(ctx: *opaque, ident: []str) (str | void);
 // happens; callers wire it to Hare's `module::find` or to a stub.
 //
 // Caller frees the returned slice via [[finish_build_order]].
+//
+// @returns: owned
+// @param module_dir: borrowed
+// @param workspace_folders: borrowed
+// @param resolve: borrowed
+// @param resolver_ctx: borrowed
 export fn build_order(
 	module_dir: str,
 	workspace_folders: []str,
@@ -71,6 +79,8 @@ export fn build_order(
 };
 
 // Frees a slice returned by [[build_order]].
+//
+// @param o: owned
 export fn finish_build_order(o: []module_dep) void = {
 	for (let i = 0z; i < len(o); i += 1) {
 		free(o[i].dir);
@@ -79,6 +89,13 @@ export fn finish_build_order(o: []module_dep) void = {
 	free(o);
 };
 
+// @param dir: borrowed
+// @param use_ident: borrowed
+// @param workspace_folders: borrowed
+// @param resolve: borrowed
+// @param resolver_ctx: borrowed
+// @param visited: borrowed
+// @param out: borrowed
 fn walk_module(
 	dir: str,
 	use_ident: str,
@@ -124,6 +141,8 @@ fn walk_module(
 // `+test`-bearing tag combination — see [[has_test_tag]]) are skipped:
 // their dependencies are test-time only and shouldn't drive
 // production-style build diagnostics.
+//
+// @param dir: borrowed
 fn collect_imports(dir: str) [][]str = {
 	let out: [][]str = [];
 	const it = match (os::iter(dir)) {
@@ -160,6 +179,7 @@ fn collect_imports(dir: str) [][]str = {
 	return out;
 };
 
+// @param id: borrowed
 fn dup_ident(id: []str) []str = {
 	let copy: []str = [];
 	for (let i = 0z; i < len(id); i += 1) {
@@ -168,6 +188,7 @@ fn dup_ident(id: []str) []str = {
 	return copy;
 };
 
+// @param ids: owned
 fn free_idents(ids: [][]str) void = {
 	for (let i = 0z; i < len(ids); i += 1) {
 		strings::freeall(ids[i]);
@@ -175,6 +196,7 @@ fn free_idents(ids: [][]str) void = {
 	free(ids);
 };
 
+// @param path: borrowed
 fn read_file_bytes(path: str) []u8 = {
 	const f = match (os::open(path)) {
 	case let f: io::file =>
@@ -204,6 +226,8 @@ fn read_file_bytes(path: str) []u8 = {
 // contains `test`. Hare accepts tags in any order, so all of
 // `foo+test.ha`, `foo+test+libc.ha`, and `foo+libc+test.ha` count.
 // Names without a `+` (e.g. `foo.ha`) have no tags.
+//
+// @param name: borrowed
 fn has_test_tag(name: str) bool = {
 	if (!strings::hassuffix(name, ".ha")) return false;
 	const base = strings::sub(name, 0, len(name) - 3);
@@ -221,6 +245,8 @@ fn has_test_tag(name: str) bool = {
 	return false;
 };
 
+// @param path: borrowed
+// @param roots: borrowed
 fn is_under_any(path: str, roots: []str) bool = {
 	for (let i = 0z; i < len(roots); i += 1) {
 		const root = roots[i];

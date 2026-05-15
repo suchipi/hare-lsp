@@ -46,6 +46,10 @@ export type build_ctx = struct {
 // file), interleaving the comments from `c` at the right positions.
 // `data_len` is the size of the source bytes; used as the boundary
 // for trailing comments after the last decl.
+//
+// @param su: borrowed
+// @param c: borrowed
+// @param data: borrowed
 export fn build_subunit_doc(
 	su: *ast::subunit,
 	c: *comment_cursor,
@@ -148,6 +152,10 @@ export fn build_subunit_doc(
 // comments inside fn bodies are preserved exactly as in
 // build_subunit_doc, but file-header and trailing-EOF comments are
 // not emitted — they're outside the range.
+//
+// @param su: borrowed
+// @param c: borrowed
+// @param data: borrowed
 export fn build_decls_range_doc(
 	su: *ast::subunit,
 	first: size,
@@ -169,6 +177,8 @@ export fn build_decls_range_doc(
 };
 
 // ----- Decls --------------------------------------------------------
+// @param d: borrowed
+// @param bc: borrowed
 export fn build_decl_doc(d: *ast::decl, bc: *build_ctx) doc = {
 	let items: []doc = [];
 
@@ -196,6 +206,8 @@ export fn build_decl_doc(d: *ast::decl, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param d: borrowed
+// @param bc: borrowed
 fn build_decl_func(d: *ast::decl, f: ast::decl_func, bc: *build_ctx) doc = {
 	let items: []doc = [];
 
@@ -238,6 +250,7 @@ fn build_decl_func(d: *ast::decl, f: ast::decl_func, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param bc: borrowed
 fn build_decl_global(g: ast::decl_global, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	if (len(g.symbol) != 0) {
@@ -267,6 +280,7 @@ fn build_decl_global(g: ast::decl_global, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param bc: borrowed
 fn build_decl_const(c: ast::decl_const, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	append(items, text("def "))!;
@@ -285,6 +299,7 @@ fn build_decl_const(c: ast::decl_const, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param bc: borrowed
 fn build_decl_type(t: ast::decl_type, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	append(items, text("type "))!;
@@ -305,6 +320,8 @@ fn build_decl_type(t: ast::decl_type, bc: *build_ctx) doc = {
 // inside to wrap, so the value is wrapped in a `group` that breaks at
 // `=` if the line would overflow - that's the only handle the
 // formatter has to keep the line under 80 cols.
+// @param e: borrowed
+// @param bc: borrowed
 fn build_init_value_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	if (rhs_can_wrap_internally(e)) {
 		let items: []doc = [];
@@ -323,6 +340,7 @@ fn build_init_value_doc(e: *ast::expr, bc: *build_ctx) doc = {
 // Returns true iff the RHS expression `e` has internal break points
 // (separators / softlines inside its rendering). For these, we'd
 // rather wrap inside the expression than break at `=`.
+// @param e: borrowed
 fn rhs_can_wrap_internally(e: *ast::expr) bool = {
 	match (e.expr) {
 	case ast::call_expr =>
@@ -357,6 +375,7 @@ fn rhs_can_wrap_internally(e: *ast::expr) bool = {
 // `build_init_value_doc` no longer breaking at `=`, the practical
 // distinction these constructs once carried (block-introducing vs
 // other) only matters for unrelated layout decisions.
+// @param e: borrowed
 fn rhs_introduces_own_block(e: *ast::expr) bool = {
 	match (e.expr) {
 	case ast::match_expr =>
@@ -391,6 +410,7 @@ fn rhs_introduces_own_block(e: *ast::expr) bool = {
 };
 
 // ----- Imports ------------------------------------------------------
+// @param im: borrowed
 export fn build_import_doc(im: *ast::import) doc = {
 	let items: []doc = [];
 	append(items, text("use "))!;
@@ -413,6 +433,7 @@ export fn build_import_doc(im: *ast::import) doc = {
 	return concat(items);
 };
 
+// @param members: borrowed
 fn build_member_list(members: []str) doc = {
 	let inner: []doc = [];
 	append(inner, line(""))!;
@@ -434,6 +455,9 @@ fn build_member_list(members: []str) doc = {
 };
 
 // ----- Compound body & statements ----------------------------------
+// @param body: borrowed
+// @param cmp: borrowed
+// @param bc: borrowed
 fn build_compound_body(
 	body: *ast::expr,
 	cmp: *ast::compound_expr,
@@ -485,6 +509,9 @@ fn build_compound_body(
 // Returns the end offset of the last comment popped, or void if no
 // comments were popped. Callers use this to decide whether to emit a
 // blank line between the leading comments and the next construct.
+//
+// @param items: borrowed
+// @param c: borrowed
 fn push_comments_before(
 	items: *[]doc,
 	c: *comment_cursor,
@@ -531,6 +558,10 @@ fn push_comments_before(
 // source line. Only comments on that exact line are popped, so a
 // chain of `case ... =>; // note` lines doesn't fold every note onto
 // the first line emitted.
+//
+// @param items: borrowed
+// @param c: borrowed
+// @param data: borrowed
 fn flush_trailing_comments_to_eol(
 	items: *[]doc,
 	c: *comment_cursor,
@@ -557,6 +588,8 @@ fn flush_trailing_comments_to_eol(
 // line a decl's `;` lives on, since `decl.loc.end.off` from the
 // parser points at the next decl's start (mkloc peeks past
 // intervening comments). Returns `lo` if the span is all whitespace.
+//
+// @param data: borrowed
 fn source_content_end(data: []u8, lo: size, hi: size) size = {
 	let cap = if (hi > len(data)) len(data) else hi;
 	let i = cap;
@@ -571,6 +604,8 @@ fn source_content_end(data: []u8, lo: size, hi: size) size = {
 
 // Returns the 0-based line number of byte offset `pos` in `data`,
 // counting `\n` bytes before it. `pos` is clamped to `len(data)`.
+//
+// @param data: borrowed
 fn line_of(data: []u8, pos: size) size = {
 	const p = if (pos > len(data)) len(data) else pos;
 	let count: size = 0;
@@ -581,6 +616,8 @@ fn line_of(data: []u8, pos: size) size = {
 };
 
 // ----- Types --------------------------------------------------------
+// @param t: borrowed
+// @param bc: borrowed
 export fn build_type_doc(t: *ast::_type, bc: *build_ctx) doc = {
 	match (t.repr) {
 	case let a: ast::alias_type =>
@@ -624,6 +661,8 @@ export fn build_type_doc(t: *ast::_type, bc: *build_ctx) doc = {
 	};
 };
 
+// @param t: borrowed
+// @param bc: borrowed
 fn build_func_proto_doc(t: *ast::func_type, bc: *build_ctx) doc = {
 	let inner: []doc = [];
 	append(inner, line(""))!;
@@ -675,6 +714,8 @@ fn build_func_proto_doc(t: *ast::func_type, bc: *build_ctx) doc = {
 	return group(g_items);
 };
 
+// @param e: borrowed
+// @param bc: borrowed
 fn build_enum_type(e: *ast::enum_type, bc: *build_ctx) doc = {
 	// Always render multi-line (one variant per line, trailing
 	// comma). Per project convention enums are not collapsed onto
@@ -708,6 +749,8 @@ fn build_enum_type(e: *ast::enum_type, bc: *build_ctx) doc = {
 	return concat(outer);
 };
 
+// @param l: borrowed
+// @param bc: borrowed
 fn build_list_type(l: *ast::list_type, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	append(items, text("["))!;
@@ -728,6 +771,8 @@ fn build_list_type(l: *ast::list_type, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param t: borrowed
+// @param bc: borrowed
 fn build_struct_union_type(t: *ast::_type, bc: *build_ctx) doc = {
 	let outer: []doc = [];
 	let members: []ast::struct_member = match (t.repr) {
@@ -797,6 +842,7 @@ fn build_struct_union_type(t: *ast::_type, bc: *build_ctx) doc = {
 // Best-effort byte offset for the start of a struct/union member.
 // Returns 0 for struct_alias members (the alias is a bare ident with
 // no loc reachable here).
+// @param m: borrowed
 fn struct_member_off(m: *ast::struct_member) size = {
 	match (m.member) {
 	case let f: ast::struct_field =>
@@ -808,6 +854,8 @@ fn struct_member_off(m: *ast::struct_member) size = {
 	};
 };
 
+// @param tt: borrowed
+// @param bc: borrowed
 fn build_tagged_type(tt: ast::tagged_type, bc: *build_ctx) doc = {
 	// Style guide: when broken, `|` stays on the FIRST line of each
 	// pair (i.e. break after `|`, not before). `(A |\n\tB |\n\tC)`.
@@ -832,6 +880,8 @@ fn build_tagged_type(tt: ast::tagged_type, bc: *build_ctx) doc = {
 	return group(g_items);
 };
 
+// @param tt: borrowed
+// @param bc: borrowed
 fn build_tuple_type(tt: ast::tuple_type, bc: *build_ctx) doc = {
 	let inner: []doc = [];
 	append(inner, line(""))!;
@@ -855,6 +905,8 @@ fn build_tuple_type(tt: ast::tuple_type, bc: *build_ctx) doc = {
 };
 
 // ----- Expressions --------------------------------------------------
+// @param e: borrowed
+// @param bc: borrowed
 export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	match (e.expr) {
 	case let a: ast::access_expr =>
@@ -978,6 +1030,8 @@ export fn build_expr_doc(e: *ast::expr, bc: *build_ctx) doc = {
 	};
 };
 
+// @param a: borrowed
+// @param bc: borrowed
 fn build_access_expr(a: ast::access_expr, bc: *build_ctx) doc = {
 	match (a) {
 	case let id: ast::access_identifier =>
@@ -1013,6 +1067,8 @@ fn build_access_expr(a: ast::access_expr, bc: *build_ctx) doc = {
 	};
 };
 
+// @param a: borrowed
+// @param bc: borrowed
 fn build_alloc_expr(a: *ast::alloc_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	append(items, text("alloc("))!;
@@ -1030,6 +1086,8 @@ fn build_alloc_expr(a: *ast::alloc_expr, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param e: borrowed
+// @param bc: borrowed
 fn build_append_insert(e: *ast::expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	const inner: *ast::append_expr = match (e.expr) {
@@ -1060,6 +1118,8 @@ fn build_append_insert(e: *ast::expr, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param a: borrowed
+// @param bc: borrowed
 fn build_assert_expr(a: *ast::assert_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	if (a.is_static) append(items, text("static "))!;
@@ -1111,6 +1171,8 @@ fn build_assert_expr(a: *ast::assert_expr, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param a: borrowed
+// @param bc: borrowed
 fn build_assign_expr(a: *ast::assign_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	match (a.object) {
@@ -1236,6 +1298,8 @@ fn binprec(op: binarithm_op) uint = {
 	};
 };
 
+// @param b: borrowed
+// @param bc: borrowed
 fn build_binarithm_expr(
 	b: *ast::binarithm_expr,
 	bc: *build_ctx,
@@ -1273,6 +1337,8 @@ fn build_binarithm_expr(
 // `build_binarithm_expr`; everything above stays on one line.
 fn binprec_lor() uint = 2;
 
+// @param e: borrowed
+// @param bc: borrowed
 fn build_binexpr_operand(
 	e: *ast::expr,
 	bc: *build_ctx,
@@ -1292,6 +1358,9 @@ fn build_binexpr_operand(
 	};
 };
 
+// @param b: borrowed
+// @param bc: borrowed
+// @param op: borrowed
 fn build_binding_expr(b: *ast::binding_expr, bc: *build_ctx, op: str) doc = {
 	let items: []doc = [];
 	if (b.is_static) append(items, text("static "))!;
@@ -1345,6 +1414,9 @@ fn build_binding_expr(b: *ast::binding_expr, bc: *build_ctx, op: str) doc = {
 	return concat(items);
 };
 
+// @param keyword: borrowed
+// @param by: borrowed
+// @param bc: borrowed
 fn build_break_yield(
 	keyword: str,
 	by: *ast::break_yield,
@@ -1368,6 +1440,8 @@ fn build_break_yield(
 	return concat(items);
 };
 
+// @param c: borrowed
+// @param bc: borrowed
 fn build_call_expr(c: *ast::call_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	const np = !is_postfix(c.lvalue);
@@ -1423,6 +1497,8 @@ fn build_call_expr(c: *ast::call_expr, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param c: borrowed
+// @param bc: borrowed
 fn build_cast_expr(c: *ast::cast_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	const np = !is_cast(c.value);
@@ -1444,6 +1520,8 @@ fn build_cast_expr(c: *ast::cast_expr, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param f: borrowed
+// @param bc: borrowed
 fn build_for_expr(f: *ast::for_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	append(items, text("for "))!;
@@ -1495,6 +1573,8 @@ fn build_for_expr(f: *ast::for_expr, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param i: borrowed
+// @param bc: borrowed
 fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
 	// `if (cond) tbranch else fbranch` - fits flat as one line, or
 	// breaks to:
@@ -1538,6 +1618,10 @@ fn build_if_expr(i: *ast::if_expr, bc: *build_ctx) doc = {
 // (`if (a)\n\tX`). The chain itself goes multiline when ANY branch
 // has to wrap. `prev_compound` is unused now but kept for future
 // spacing decisions.
+//
+// @param out: borrowed
+// @param i: borrowed
+// @param bc: borrowed
 fn append_if_chain_branches(
 	out: *[]doc,
 	i: *ast::if_expr,
@@ -1614,6 +1698,8 @@ fn append_if_chain_branches(
 	};
 };
 
+// @param m: borrowed
+// @param bc: borrowed
 fn build_match_expr(
 	m: *ast::match_expr,
 	loc: ast::location,
@@ -1677,6 +1763,8 @@ fn build_match_expr(
 // case AST has no loc of its own, so we approximate using the first
 // available child loc - the binding type, then the first body expr.
 // Returns 0 (no flush) when nothing usable is reachable.
+//
+// @param cs: borrowed
 fn case_boundary_match(cs: *ast::match_case) size = {
 	match (cs._type) {
 	case let t: *ast::_type =>
@@ -1687,6 +1775,8 @@ fn case_boundary_match(cs: *ast::match_case) size = {
 	return 0z;
 };
 
+// @param s: borrowed
+// @param bc: borrowed
 fn build_switch_expr(
 	s: *ast::switch_expr,
 	loc: ast::location,
@@ -1741,12 +1831,15 @@ fn build_switch_expr(
 	return concat(outer);
 };
 
+// @param cs: borrowed
 fn case_boundary_switch(cs: *ast::switch_case) size = {
 	if (len(cs.options) > 0) return cs.options[0].loc.start.off: size;
 	if (len(cs.exprs) > 0) return cs.exprs[0].loc.start.off: size;
 	return 0z;
 };
 
+// @param exprs: borrowed
+// @param bc: borrowed
 fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
 	// Special case: a single `void;` or `abort(...)` stays inline
 	// after `=>`, matching the style guide / unparse behavior.
@@ -1787,6 +1880,8 @@ fn build_case_exprs(exprs: []*ast::expr, bc: *build_ctx) doc = {
 	return nest(1, concat(inner));
 };
 
+// @param u: borrowed
+// @param bc: borrowed
 fn build_unarithm_expr(u: *ast::unarithm_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	const op_str = switch (u.op) {
@@ -1814,6 +1909,8 @@ fn build_unarithm_expr(u: *ast::unarithm_expr, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param s: borrowed
+// @param bc: borrowed
 fn build_slice_expr(s: *ast::slice_expr, bc: *build_ctx) doc = {
 	let items: []doc = [];
 	const np = !is_postfix(s.object);
@@ -1836,6 +1933,8 @@ fn build_slice_expr(s: *ast::slice_expr, bc: *build_ctx) doc = {
 	return concat(items);
 };
 
+// @param v: borrowed
+// @param bc: borrowed
 fn build_variadic_expr(v: ast::variadic_expr, bc: *build_ctx) doc = {
 	match (v) {
 	case ast::vastart_expr =>
@@ -1857,6 +1956,8 @@ fn build_variadic_expr(v: ast::variadic_expr, bc: *build_ctx) doc = {
 	};
 };
 
+// @param l: borrowed
+// @param bc: borrowed
 fn build_literal_expr(
 	l: ast::literal_expr,
 	loc: ast::location,
@@ -1919,6 +2020,8 @@ fn build_literal_expr(
 // consumes the keyword but throws it away (see hare/parse/type.ha
 // `_type`, which calls `try(lexer, ltok::CONST)?;` and never stores
 // the result).
+//
+// @param bc: borrowed
 fn type_has_const_prefix(bc: *build_ctx, loc: ast::location) bool = {
 	const start = loc.start.off: size;
 	if (start < 6) return false;
@@ -1959,6 +2062,7 @@ fn type_has_const_prefix(bc: *build_ctx, loc: ast::location) bool = {
 // [start, end] may span MULTIPLE delimited segments. We walk the
 // entire span and capture every segment verbatim along with the
 // whitespace between them.
+// @param bc: borrowed
 fn verbatim_string_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 	const data = bc.data;
 	const start = loc.start.off: size;
@@ -2047,6 +2151,8 @@ fn is_numeric_or_rune_storage(s: ast::builtin_type) bool = {
 // prefix. Returns false if no opening delimiter is found within
 // `loc`'s range or if the next non-whitespace byte after it is
 // reached without seeing a `\n`.
+// @param bc: borrowed
+// @param open_chars: borrowed
 fn source_opens_multiline(
 	bc: *build_ctx,
 	loc: ast::location,
@@ -2094,6 +2200,7 @@ fn source_opens_multiline(
 // captured token in the latter case, trim any trailing space/tab/
 // newline before returning - numbers and runes never legitimately
 // end in whitespace.
+// @param bc: borrowed
 fn verbatim_token_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 	const data = bc.data;
 	const start = loc.start.off: size;
@@ -2113,6 +2220,7 @@ fn verbatim_token_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 // Returns `len(data)` if the literal is unterminated (which would
 // mean the source is malformed; should not happen on parse-clean
 // input).
+// @param data: borrowed
 fn end_first_string_segment(data: []u8, start: size) size = {
 	const delim = data[start];
 	let i = start + 1;
@@ -2124,6 +2232,8 @@ fn end_first_string_segment(data: []u8, start: size) size = {
 	return i;
 };
 
+// @param a: borrowed
+// @param bc: borrowed
 fn build_array_literal(
 	a: *ast::array_literal,
 	loc: ast::location,
@@ -2154,6 +2264,8 @@ fn build_array_literal(
 	return group(g_items);
 };
 
+// @param t: borrowed
+// @param bc: borrowed
 fn build_tuple_literal(
 	t: ast::tuple_literal,
 	loc: ast::location,
@@ -2188,11 +2300,14 @@ fn build_tuple_literal(
 // Otherwise emit the usual softline. `flat_text` is what the softline
 // renders as in flat mode (`""` for `[]`/`()` containers, `" "` for
 // `{}` containers per the Hare style guide).
+// @param flat_text: borrowed
 fn leading_softline(force_break: bool, flat_text: str) doc = {
 	if (force_break) return hardline();
 	return line(flat_text);
 };
 
+// @param s: borrowed
+// @param bc: borrowed
 fn build_struct_literal(
 	s: *ast::struct_literal,
 	loc: ast::location,
@@ -2266,6 +2381,8 @@ fn build_struct_literal(
 // ----- Helpers ------------------------------------------------------
 // Reuses upstream is_postfix / is_unary / is_cast semantics so we
 // emit the same parenthesization unparse does.
+//
+// @param e: borrowed
 fn is_plain(e: *ast::expr) bool = {
 	match (e.expr) {
 	case ast::literal_expr =>
@@ -2277,6 +2394,7 @@ fn is_plain(e: *ast::expr) bool = {
 	};
 };
 
+// @param e: borrowed
 fn is_builtin(e: *ast::expr) bool = {
 	if (is_plain(e)) return true;
 	match (e.expr) {
@@ -2303,6 +2421,7 @@ fn is_builtin(e: *ast::expr) bool = {
 	};
 };
 
+// @param e: borrowed
 fn is_postfix(e: *ast::expr) bool = {
 	if (is_builtin(e)) return true;
 	match (e.expr) {
@@ -2321,6 +2440,7 @@ fn is_postfix(e: *ast::expr) bool = {
 	};
 };
 
+// @param e: borrowed
 fn is_unary(e: *ast::expr) bool = {
 	if (is_postfix(e)) return true;
 	match (e.expr) {
@@ -2337,6 +2457,7 @@ fn is_unary(e: *ast::expr) bool = {
 	};
 };
 
+// @param e: borrowed
 fn is_cast(e: *ast::expr) bool = {
 	return is_unary(e) || e.expr is ast::cast_expr;
 };
@@ -2344,6 +2465,7 @@ fn is_cast(e: *ast::expr) bool = {
 // Renders a literal (plain / struct) via unparse for the bits whose
 // formatting we don't want to re-derive (number suffixes, escape
 // sequences, …). The result is always a single line.
+// @param l: borrowed
 fn render_literal(l: ast::literal_expr) str = {
 	let buf = memio::dynamic();
 	defer match (io::close(&buf)) {
@@ -2360,6 +2482,7 @@ fn render_literal(l: ast::literal_expr) str = {
 
 // Renders an ident as `a::b::c`. Memory: caller must NOT free; the
 // returned string is owned by the doc tree and freed with the doc.
+// @param id: borrowed
 fn render_ident(id: ast::ident) str = {
 	if (len(id) == 0) return strings::dup("")!;
 	if (len(id) == 1) return strings::dup(id[0])!;
@@ -2373,6 +2496,7 @@ fn render_ident(id: ast::ident) str = {
 };
 
 // JSON-style escape for a string used inside @symbol("...").
+// @param s: borrowed
 fn escape_str(s: str) str = {
 	const result = strings::multireplace(s, (`\`, `\\`), (`"`, `\"`))!;
 	return result;

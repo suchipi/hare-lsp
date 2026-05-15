@@ -24,6 +24,8 @@ use strings;
 // the final character of a name still hovers over it). Otherwise the
 // offset must point AT an ident byte; spaces, punctuation, etc. return
 // void even if adjacent bytes are idents.
+//
+// @param text: borrowed
 export fn ident_at(text: []u8, off: size) ((size, size) | void) = {
 	if (off >= len(text)) {
 		if (off != len(text)) return void;
@@ -62,6 +64,9 @@ export fn is_ident_byte(b: u8) bool = {
 // whitespace between qualifier and "::" yields no qualifier.
 //
 // The returned string is always freshly allocated; caller frees.
+//
+// @returns: owned
+// @param data: borrowed
 export fn qualifier_prefix_at(data: []u8, ident_start: size) str = {
 	if (ident_start < 2) return strings::dup("")!;
 	if (data[ident_start - 1] != ':': u8 || data[ident_start - 2] != ':': u8) {

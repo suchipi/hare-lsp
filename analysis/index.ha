@@ -25,9 +25,11 @@ export type symbol_kind = enum {
 export type symbol = struct {
 	// The symbol's name as written. For a `foo::bar::baz` decl, this is
 	// the joined string "foo::bar::baz".
+	// @owned
 	name: str,
 	// The bare last segment ("baz" in the above example). Most LSP
 	// queries match on this.
+	// @owned
 	short_name: str,
 	kind: symbol_kind,
 	// Span of the entire decl (for hover preview).
@@ -35,12 +37,14 @@ export type symbol = struct {
 	// Span of just the identifier (for prepareRename / definition target).
 	name_span: ast::location,
 	// Doc comment captured by the lexer if any. Empty string if absent.
+	// @owned
 	docs: str,
 	// Whether the decl was declared `export`.
 	exported: bool,
 	// For FUNCTION-kind symbols: parameter names from the prototype, in
 	// order. Empty for unnamed parameters and for non-function symbols.
 	// Used by completion to render snippet placeholders like ${1:path}.
+	// @owned
 	param_names: []str,
 	// Ownership classification of the value the decl produces (return
 	// value for functions, the value itself for globals/consts). Populated
@@ -49,19 +53,25 @@ export type symbol = struct {
 	// (heuristics) is computed at hover time and never stored here.
 	return_ownership: ownership,
 	return_ownership_source: ownership_source,
+	// @owned
 	return_ownership_detail: str,
 	// Parallel to `param_names`: per-parameter ownership from Layer-1
 	// `@param <name>: ...` tags. Empty slice for non-functions.
+	// @owned
 	param_ownerships: []ownership,
+	// @owned
 	param_ownership_details: []str,
 };
 
 // A per-file symbol index.
 export type file_index = struct {
+	// @owned
 	symbols: []symbol,
 };
 
 // Builds a file index from a subunit.
+//
+// @param su: borrowed
 export fn build_index(su: *ast::subunit) file_index = {
 	let idx = file_index { symbols = [] };
 	for (let i = 0z; i < len(su.decls); i += 1) {
@@ -71,6 +81,8 @@ export fn build_index(su: *ast::subunit) file_index = {
 };
 
 // Releases resources owned by a file_index.
+//
+// @param idx: borrowed
 export fn finish_index(idx: *file_index) void = {
 	for (let i = 0z; i < len(idx.symbols); i += 1) {
 		free(idx.symbols[i].name);
@@ -90,6 +102,8 @@ export fn finish_index(idx: *file_index) void = {
 	free(idx.symbols);
 };
 
+// @param idx: borrowed
+// @param d: borrowed
 fn index_decl(idx: *file_index, d: *ast::decl) void = {
 	const docs = if (len(d.docs) > 0) strings::dup(d.docs)! else strings::dup("")!;
 	match (d.decl) {
@@ -129,6 +143,12 @@ fn extract_param_names(f: ast::decl_func) []str = {
 	return out;
 };
 
+// @param idx: borrowed
+// @param id: borrowed
+// @param docs: owned
+// @param param_names: owned
+// @param param_ownerships: owned
+// @param param_ownership_details: owned
 fn add_symbol(
 	idx: *file_index,
 	id: ast::ident,
@@ -166,6 +186,7 @@ fn add_symbol(
 	})!;
 };
 
+// @param id: borrowed
 fn ident_join(id: ast::ident) str = {
 	if (len(id) == 0) return strings::dup("")!;
 	if (len(id) == 1) return strings::dup(id[0])!;
@@ -180,6 +201,9 @@ fn ident_join(id: ast::ident) str = {
 // Returns the symbol whose span contains the given byte offset, or void if
 // none. Linear scan; per-file decl counts are small enough that a binary
 // tree wouldn't pay off.
+//
+// @returns: borrowed from idx
+// @param idx: borrowed
 export fn symbol_at(idx: *file_index, off: size) (*symbol | void) = {
 	for (let i = 0z; i < len(idx.symbols); i += 1) {
 		const s = &idx.symbols[i];
@@ -191,6 +215,10 @@ export fn symbol_at(idx: *file_index, off: size) (*symbol | void) = {
 };
 
 // Returns the symbol with the given short name, or void if none.
+//
+// @returns: borrowed from idx
+// @param idx: borrowed
+// @param name: borrowed
 export fn find_by_short_name(idx: *file_index, name: str) (*symbol | void) = {
 	for (let i = 0z; i < len(idx.symbols); i += 1) {
 		if (idx.symbols[i].short_name == name) return &idx.symbols[i];

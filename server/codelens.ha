@@ -17,6 +17,7 @@ use lsp;
 use memio;
 use strings;
 
+// @param s: borrowed
 export fn handle_code_lens(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_cl(r.params)) {
 	case let s: str =>
@@ -119,6 +120,7 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 	send_array_cl(s, r.id, arr);
 };
 
+// @param s: borrowed
 export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 	// For "references" lenses, count occurrences and fill in command.
 	const obj = match (params_obj_cl(r.params)) {
@@ -244,6 +246,8 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param data: borrowed
+// @param name: borrowed
 fn count_token_occurrences(data: []u8, name: str) size = {
 	const t = strings::toutf8(name);
 	let count = 0z;
@@ -281,6 +285,8 @@ type test_marker = struct {
 	name: str,
 };
 
+// @param data: borrowed
+// @returns: owned
 fn find_tests(data: []u8) []test_marker = {
 	let out: []test_marker = [];
 	// hare::lex reports `loc.off` as a rune index, but downstream
@@ -342,6 +348,7 @@ fn find_tests(data: []u8) []test_marker = {
 	return out;
 };
 
+// @param s: borrowed
 fn echo_back(s: *server, r: lsp::request) void = {
 	const v: json::value = match (r.params) {
 	case let v: json::value =>
@@ -362,6 +369,7 @@ fn echo_back(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @returns: owned
 fn fmt_size_cl(n: size) str = {
 	if (n == 0) return strings::dup("0")!;
 	let buf: [21]u8 = [0...];
@@ -374,6 +382,7 @@ fn fmt_size_cl(n: size) str = {
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
+// @returns: owned
 fn encode_range_cl(
 	start: analysis::position,
 	end: analysis::position,
@@ -390,6 +399,8 @@ fn encode_range_cl(
 	return r;
 };
 
+// @param p: borrowed
+// @returns: borrowed from p
 fn uri_from_cl(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -427,10 +438,14 @@ fn uri_from_cl(p: (json::value | void)) (str | void) = {
 	};
 };
 
+// @param p: borrowed
 fn params_obj_cl(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
 
+// @param s: borrowed
+// @param id: borrowed
+// @param arr: owned
 fn send_array_cl(s: *server, id: lsp::id, arr: []json::value) void = {
 	const v: json::value = arr;
 	defer json::finish(v);
@@ -443,6 +458,9 @@ fn send_array_cl(s: *server, id: lsp::id, arr: []json::value) void = {
 // Returns the byte offset of `name` within data[span_start..span_end],
 // matched as a whole word. Falls back to `span_start` if not found (an
 // invariant violation that shouldn't happen for well-formed decls).
+//
+// @param data: borrowed
+// @param name: borrowed
 fn find_ident_within(
 	data: []u8,
 	span_start: size,

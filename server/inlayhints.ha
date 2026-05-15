@@ -16,6 +16,7 @@ use hare::ast;
 use lsp;
 use strings;
 
+// @param s: borrowed
 export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
 	if (!s.config.inlay_hints_parameter_names &&
 			!s.config.inlay_hints_inferred_types) {
@@ -54,6 +55,11 @@ export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
 // declared type was omitted. Uses [[infer_let_type_deep]] for richer
 // expansion (call return types, alias chains) bounded by
 // `hare.inlayHints.inferredTypesMaxDepth`.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param arr: borrowed
 fn emit_inferred_type_hints(
 	s: *server,
 	doc: *document,
@@ -111,6 +117,8 @@ fn emit_inferred_type_hints(
 
 // Skips "let "/"const "/"def " plus the binding name, returning the byte
 // offset just past the name.
+//
+// @param data: borrowed
 fn find_post_name_offset(data: []u8, start: size) size = {
 	let i = start;
 	// Skip a leading keyword (let/const/def/static).
@@ -121,6 +129,11 @@ fn find_post_name_offset(data: []u8, start: size) size = {
 	return i;
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param idx: borrowed
+// @param arr: borrowed
 fn emit_param_hints(
 	s: *server,
 	doc: *document,
@@ -218,6 +231,8 @@ fn is_word_byte_ih(b: u8) bool = {
 // whitespace) by the keyword `fn` standing on its own. Used to skip
 // function declaration names so we don't render parameter hints on the
 // parameter list of the declaration itself.
+//
+// @param data: borrowed
 fn preceded_by_fn(data: []u8, i: size) bool = {
 	if (i < 3) return false; // need at least "fn " before
 	let k = i;
@@ -229,6 +244,8 @@ fn preceded_by_fn(data: []u8, i: size) bool = {
 	return !is_word_byte_ih(data[k - 3]);
 };
 
+// @param su: borrowed
+// @param name: borrowed
 fn find_decl_idx(su: *ast::subunit, name: str) (size | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const id = decl_ident_ih(&su.decls[i]);
@@ -237,6 +254,8 @@ fn find_decl_idx(su: *ast::subunit, name: str) (size | void) = {
 	return void;
 };
 
+// @param d: borrowed
+// @returns: borrowed from d
 fn decl_ident_ih(d: *ast::decl) ast::ident = {
 	match (d.decl) {
 	case let f: ast::decl_func =>
@@ -252,6 +271,8 @@ fn decl_ident_ih(d: *ast::decl) ast::ident = {
 	};
 };
 
+// @param d: borrowed
+// @returns: borrowed from d
 fn decl_param_names(d: *ast::decl) []str = {
 	let out: []str = [];
 	match (d.decl) {
@@ -270,6 +291,9 @@ fn decl_param_names(d: *ast::decl) []str = {
 
 // Returns the byte offsets of each argument's start within `data`, given
 // `paren_at` is the index of the '(' after the callee.
+//
+// @param data: borrowed
+// @returns: owned
 fn walk_arg_starts(data: []u8, paren_at: size) []size = {
 	let out: []size = [];
 	let i = paren_at + 1;
@@ -306,6 +330,7 @@ fn is_ws(b: u8) bool = {
 	return b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8;
 };
 
+// @param s: borrowed
 export fn handle_inlay_hint_resolve(s: *server, r: lsp::request) void = {
 	const v: json::value = match (r.params) {
 	case let v: json::value =>
@@ -326,6 +351,8 @@ export fn handle_inlay_hint_resolve(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param p: borrowed
+// @returns: borrowed from p
 fn uri_from_ih(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -363,6 +390,9 @@ fn uri_from_ih(p: (json::value | void)) (str | void) = {
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param arr: owned
 fn send_array_ih(s: *server, id: lsp::id, arr: []json::value) void = {
 	const v: json::value = arr;
 	defer json::finish(v);

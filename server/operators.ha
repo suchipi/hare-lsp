@@ -39,6 +39,10 @@ use strings;
 
 // Tries to send a hover response for an operator under the cursor.
 // Returns true if a response was sent.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
 export fn try_send_operator_hover(
 	s: *server,
 	r: lsp::request,
@@ -94,6 +98,8 @@ export fn try_send_operator_hover(
 // Locates the operator token covering byte offset `off` in `data`.
 // Returns (start, end, op-text). Longer operators win over shorter ones
 // (so `||=` resolves before `||`, and `&&` before `&`).
+//
+// @param data: borrowed
 fn operator_at(data: []u8, off: size) ((size, size, str) | void) = {
 	let scan = off;
 	if (scan >= len(data) || !is_op_byte(data[scan])) {
@@ -241,6 +247,8 @@ type op_role = enum {
 // Returns (sig, docs) for the operator `name` in the given `role`.
 // Tries an exact (name, role) match first; falls back to (name, ANY).
 // Returns void if no entry matches. Strings are freshly allocated.
+//
+// @param name: borrowed
 fn lookup_operator(name: str, role: op_role) ((str, str) | void) = {
 	for (let i = 0z; i < len(operators); i += 1) {
 		if (operators[i].name != name) continue;
@@ -256,6 +264,7 @@ fn lookup_operator(name: str, role: op_role) ((str, str) | void) = {
 	return void;
 };
 
+// @param name: borrowed
 fn operator_known(name: str) bool = {
 	for (let i = 0z; i < len(operators); i += 1) {
 		if (operators[i].name == name) return true;
@@ -267,6 +276,9 @@ fn operator_known(name: str) bool = {
 // `op_start` based on the bytes immediately preceding it. For
 // unambiguous operators returns ANY (the lookup falls through to the
 // single registered entry).
+//
+// @param data: borrowed
+// @param name: borrowed
 fn classify_op_role(data: []u8, op_start: size, name: str) op_role = {
 	// `!`: postfix when it follows a value, prefix otherwise.
 	if (name == "!") {
@@ -325,6 +337,8 @@ type bracket_info = struct {
 // Forward scan from byte 0 to `target`, tracking a stack of open
 // brackets while skipping strings/comments via token_skip_noncode.
 // Returns the topmost unmatched bracket, or void if none.
+//
+// @param data: borrowed
 fn enclosing_bracket(data: []u8, target: size) (bracket_info | void) = {
 	let stack: []bracket_info = [];
 	defer free(stack);
@@ -356,6 +370,9 @@ fn enclosing_bracket(data: []u8, target: size) (bracket_info | void) = {
 // True if the byte/word immediately preceding `pos` (skipping
 // whitespace) is the identifier `keyword`, with a non-ident byte
 // before it.
+//
+// @param data: borrowed
+// @param keyword: borrowed
 fn token_preceded_by_keyword(data: []u8, pos: size, keyword: str) bool = {
 	let i = pos;
 	for (i > 0; i -= 1) {
@@ -372,6 +389,8 @@ fn token_preceded_by_keyword(data: []u8, pos: size, keyword: str) bool = {
 
 // `..` inside `[` is a slice; inside `(...)` after `for` is the
 // each-value iterator binding. Default: slice.
+//
+// @param data: borrowed
 fn classify_double_dot_role(data: []u8, op_start: size) op_role = {
 	match (enclosing_bracket(data, op_start)) {
 	case let b: bracket_info =>
@@ -386,6 +405,8 @@ fn classify_double_dot_role(data: []u8, op_start: size) op_role = {
 
 // `=>` inside `(...)` after `for` is the iterator binding; otherwise
 // it's a `match`/`switch` case arrow.
+//
+// @param data: borrowed
 fn classify_arrow_role(data: []u8, op_start: size) op_role = {
 	match (enclosing_bracket(data, op_start)) {
 	case let b: bracket_info =>
@@ -400,6 +421,8 @@ fn classify_arrow_role(data: []u8, op_start: size) op_role = {
 // `...` context. `[...]` is array-fill, `{...}` is struct-autofill,
 // `(...)` is either a variadic param (when the `...` immediately
 // follows a `name: type` annotation) or a call-site spread.
+//
+// @param data: borrowed
 fn classify_ellipsis_role(data: []u8, op_start: size) op_role = {
 	match (enclosing_bracket(data, op_start)) {
 	case let b: bracket_info =>
@@ -418,6 +441,8 @@ fn classify_ellipsis_role(data: []u8, op_start: size) op_role = {
 // Heuristic: walk back across the preceding identifier; if a `:` (with
 // possible whitespace) precedes it, this is a type-annotated variadic
 // parameter, otherwise a spread.
+//
+// @param data: borrowed
 fn classify_paren_ellipsis(data: []u8, op_start: size) op_role = {
 	let i = op_start;
 	for (i > 0; i -= 1) {
@@ -439,6 +464,8 @@ fn classify_paren_ellipsis(data: []u8, op_start: size) op_role = {
 
 // `.` followed by a digit is tuple positional access; followed by an
 // identifier byte (or anything else) it's a struct/union field access.
+//
+// @param data: borrowed
 fn classify_dot_role(data: []u8, op_start: size) op_role = {
 	if (op_start + 1 >= len(data)) return op_role::FIELD_ACCESS;
 	const next = data[op_start + 1];
@@ -449,6 +476,8 @@ fn classify_dot_role(data: []u8, op_start: size) op_role = {
 // `{` classifier: walks back past whitespace and inspects the
 // preceding byte/word to determine which block-shaped construct this
 // `{` opens.
+//
+// @param data: borrowed
 fn classify_lbrace_role(data: []u8, brace_pos: size) op_role = {
 	let i = brace_pos;
 	for (i > 0) {
@@ -507,6 +536,8 @@ fn classify_lbrace_role(data: []u8, brace_pos: size) op_role = {
 // anything else (`if`, `for`, `while`, plain grouped expression) opens
 // a compound expression. Function bodies have `=` before the `{`, not
 // `)`.
+//
+// @param data: borrowed
 fn classify_lbrace_after_rparen(data: []u8, rparen_pos: size) op_role = {
 	let depth = 1;
 	let i = rparen_pos;
@@ -545,6 +576,8 @@ fn classify_lbrace_after_rparen(data: []u8, rparen_pos: size) op_role = {
 
 // `}` classifier: walks back to find the matching `{`, then runs the
 // `{` classifier so the close brace's tooltip mirrors the open's.
+//
+// @param data: borrowed
 fn classify_rbrace_role(data: []u8, rbrace_pos: size) op_role = {
 	let depth = 1;
 	let i = rbrace_pos;
@@ -567,6 +600,8 @@ fn classify_rbrace_role(data: []u8, rbrace_pos: size) op_role = {
 // reads as `value[...]`); slice type when the bracket sits in a type
 // position with an empty body (`[]T`); array type for length-bearing
 // forms (`[N]T`, `[*]T`, `[_]T`); array literal otherwise.
+//
+// @param data: borrowed
 fn classify_lbracket_role(data: []u8, bracket_pos: size) op_role = {
 	if (is_value_end_before(data, bracket_pos)) {
 		return op_role::INDEX_SLICE;
@@ -584,6 +619,8 @@ fn classify_lbracket_role(data: []u8, bracket_pos: size) op_role = {
 // content between, possibly with internal whitespace). Used to
 // distinguish the slice type `[]T` from length-bearing array types
 // like `[N]T`.
+//
+// @param data: borrowed
 fn is_empty_bracket_pair(data: []u8, bracket_pos: size) bool = {
 	let i = bracket_pos + 1;
 	for (i < len(data); i += 1) {
@@ -597,6 +634,8 @@ fn is_empty_bracket_pair(data: []u8, bracket_pos: size) bool = {
 
 // `]` classifier: walks back to find the matching `[`, then runs the
 // `[` classifier so the close bracket mirrors the open's role.
+//
+// @param data: borrowed
 fn classify_rbracket_role(data: []u8, rbracket_pos: size) op_role = {
 	let depth = 1;
 	let i = rbracket_pos;
@@ -620,6 +659,8 @@ fn classify_rbracket_role(data: []u8, rbracket_pos: size) op_role = {
 // keyword headers win over CALL when the previous identifier is a
 // control-flow keyword; PARAM_LIST wins over CALL when the previous
 // identifier is itself preceded by `fn`.
+//
+// @param data: borrowed
 fn classify_lparen_role(data: []u8, paren_pos: size) op_role = {
 	let i = paren_pos;
 	for (i > 0; i -= 1) {
@@ -674,6 +715,8 @@ fn classify_lparen_role(data: []u8, paren_pos: size) op_role = {
 
 // `)` classifier: walks back to the matching `(` and runs the `(`
 // classifier so the close paren's tooltip mirrors the open's role.
+//
+// @param data: borrowed
 fn classify_rparen_role(data: []u8, rparen_pos: size) op_role = {
 	let depth = 1;
 	let i = rparen_pos;
@@ -694,6 +737,8 @@ fn classify_rparen_role(data: []u8, rparen_pos: size) op_role = {
 
 // `;` classifier: separator inside a `for (...)` header gets the
 // FOR_HEADER role; otherwise general statement/decl terminator.
+//
+// @param data: borrowed
 fn classify_semicolon_role(data: []u8, semi_pos: size) op_role = {
 	match (enclosing_bracket(data, semi_pos)) {
 	case let b: bracket_info =>
@@ -710,6 +755,8 @@ fn classify_semicolon_role(data: []u8, semi_pos: size) op_role = {
 // `[` opened as ARRAY_LITERAL is an array-element separator, and so
 // on). With no enclosing bracket, falls back to ANY (used for
 // top-level multi-decls like `type a = T1, b = T2;`).
+//
+// @param data: borrowed
 fn classify_comma_role(data: []u8, comma_pos: size) op_role = {
 	match (enclosing_bracket(data, comma_pos)) {
 	case let b: bracket_info =>
@@ -738,6 +785,8 @@ fn classify_comma_role(data: []u8, comma_pos: size) op_role = {
 //            `yield`, `defer`, `else`).
 //   TYPE   - default; covers `let x: T`, `fn f(p: T)`, struct fields,
 //            and `case let v: T`.
+//
+// @param data: borrowed
 fn classify_colon_role(data: []u8, op_start: size) op_role = {
 	if (is_label_colon(data, op_start)) return op_role::LABEL;
 	if (is_complex_expr_end_before(data, op_start)) return op_role::BINARY;
@@ -747,6 +796,8 @@ fn classify_colon_role(data: []u8, op_start: size) op_role = {
 // True if the colon at `op_start` is a label prefix: it's followed by
 // an identifier byte and preceded (after whitespace) by a
 // label-introducing keyword or `{`.
+//
+// @param data: borrowed
 fn is_label_colon(data: []u8, op_start: size) bool = {
 	if (op_start + 1 >= len(data)) return false;
 	if (!is_ident_byte(data[op_start + 1])) return false;
@@ -777,6 +828,8 @@ fn is_label_colon(data: []u8, op_start: size) bool = {
 // and tabs) can only end a complex value expression: `)`, `]`, `}`,
 // `?`, `!`, or a digit. A bare identifier doesn't qualify because it
 // could equally be a binding name.
+//
+// @param data: borrowed
 fn is_complex_expr_end_before(data: []u8, op_start: size) bool = {
 	let i = op_start;
 	for (i > 0) {
@@ -800,6 +853,8 @@ fn is_complex_expr_end_before(data: []u8, op_start: size) bool = {
 // ambiguity for `name: T`: returns BINARY when the surrounding context
 // is expression-shaped (`= name: T`, `return name: T`, …), TYPE
 // otherwise (`let name: T`, struct field, etc.).
+//
+// @param data: borrowed
 fn classify_colon_by_ident_context(data: []u8, op_start: size) op_role = {
 	let i = op_start;
 	for (i > 0; i -= 1) {
@@ -855,6 +910,8 @@ fn classify_colon_by_ident_context(data: []u8, op_start: size) op_role = {
 // expression: a letter, digit, '_', ')', ']', '?', '!'. Keywords that
 // introduce an expression or a type (and so cannot end a value) are
 // rejected even though they end in identifier bytes.
+//
+// @param data: borrowed
 fn is_value_end_before(data: []u8, op_start: size) bool = {
 	let i = op_start;
 	for (i > 0) {
@@ -880,6 +937,8 @@ fn is_value_end_before(data: []u8, op_start: size) bool = {
 // True for Hare keywords that, when they appear immediately before an
 // operator, mean the next operator is unary/prefix or in a type
 // position — i.e. the previous token does NOT end a value expression.
+//
+// @param word: borrowed
 fn is_keyword_not_value(word: str) bool = {
 	switch (word) {
 	case "return", "yield", "defer", "else", "case", "as", "is", "nullable" =>
@@ -908,6 +967,8 @@ fn is_value_end_byte(b: u8) bool = {
 // `*`, `]`, `as`, `is`, or `=` introducing a `type X =` alias, treat as
 // type. Otherwise look at the enclosing `(...)` and apply the same test
 // to whatever precedes the open paren.
+//
+// @param data: borrowed
 fn is_type_position(data: []u8, op_start: size) bool = {
 	if (prev_token_is_type_marker(data, op_start)) return true;
 	const lp = match (enclosing_paren_pos(data, op_start)) {
@@ -921,6 +982,8 @@ fn is_type_position(data: []u8, op_start: size) bool = {
 
 // Looks at the non-whitespace byte (or word) preceding `pos` and
 // reports whether it is a type-context introducer.
+//
+// @param data: borrowed
 fn prev_token_is_type_marker(data: []u8, pos: size) bool = {
 	let i = pos;
 	for (i > 0) {
@@ -963,6 +1026,8 @@ fn is_ident_byte(b: u8) bool = {
 // `type IDENT =` declaration. Walks back over whitespace, then an
 // identifier, then whitespace, and checks that the next four bytes
 // spell `type` with a non-ident byte before them.
+//
+// @param data: borrowed
 fn is_type_alias_eq(data: []u8, eq_pos: size) bool = {
 	let i = eq_pos;
 	for (i > 0; i -= 1) {
@@ -986,6 +1051,8 @@ fn is_type_alias_eq(data: []u8, eq_pos: size) bool = {
 // skipping over strings/comments/runes. Returns the position of the
 // most recently opened, still-unclosed `(`, or void if none. Used to
 // decide whether an operator is inside type-context parens.
+//
+// @param data: borrowed
 fn enclosing_paren_pos(data: []u8, target: size) (size | void) = {
 	let stack: []size = [];
 	defer free(stack);
