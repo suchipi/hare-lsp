@@ -149,8 +149,8 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 
 	switch (prefix_info.kind) {
 	case prefix_kind::QUALIFIED =>
-		// Module-qualified: list exported workspace symbols whose
-		// module matches `prefix_info.module`.
+		// Module-qualified: list exported workspace + stdlib symbols
+		// whose module matches `prefix_info.module`.
 		add_module_members(s, &arr, prefix_info.module, prefix_info.partial);
 	case prefix_kind::MEMBER =>
 		// `<expr>.<partial>`: re-parse with a sentinel, resolve the
@@ -304,7 +304,6 @@ fn receiver_ends_before_dot(data: []u8, dot_off: size) bool = {
 	};
 	return false;
 };
-
 
 // sortText prefixes: clients rank lexicographically. We bias toward
 // what the user typed in this file first, then workspace symbols,
@@ -482,9 +481,24 @@ fn add_module_members(
 	module: str,
 	partial: str,
 ) void = {
+	// Stdlib modules (strings, io, etc.) live outside the user's workspace
+	// folders, so they're not in workspace_index. Lazy-index the module on
+	// demand so e.g. `strings::` lists stdlib symbols; a no-op once the
+	// module has already been indexed or when it isn't on any search path.
+	ensure_stdlib_module_indexed(s, module);
+	emit_module_members_from(&s.workspace_index, arr, module, partial);
+	emit_module_members_from(&s.stdlib_index, arr, module, partial);
+};
+
+fn emit_module_members_from(
+	idx: *analysis::workspace_index,
+	arr: *[]json::value,
+	module: str,
+	partial: str,
+) void = {
 	let a = *arr;
-	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
-		const e = &s.workspace_index.entries[i];
+	for (let i = 0z; i < len(idx.entries); i += 1) {
+		const e = &idx.entries[i];
 		if (e.module != module) continue;
 		if (!e.exported) continue;
 		if (len(partial) > 0 && !strings::hasprefix(e.short_name, partial)) continue;
@@ -523,8 +537,7 @@ fn parse_with_sentinel(
 	add_semi: bool,
 ) analysis::parse_result = {
 	const sentinel_bytes = strings::toutf8(COMPLETION_SENTINEL);
-	let synth: []u8 = alloc([],
-		len(data) + len(sentinel_bytes) + 1)!;
+	let synth: []u8 = alloc([], len(data) + len(sentinel_bytes) + 1)!;
 	defer free(synth);
 	append(synth, data[..info.partial_start]...)!;
 	append(synth, sentinel_bytes...)!;
@@ -627,32 +640,37 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 			return void;
 		case let idx: ast::access_index =>
 			match (scan_expr_for_sentinel(idx.object)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 			return scan_expr_for_sentinel(idx.index);
 		case let fd: ast::access_field =>
 			match (scan_expr_for_sentinel(fd.object)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 			if (fd.field == COMPLETION_SENTINEL) return fd;
 			return void;
 		case let tu: ast::access_tuple =>
 			match (scan_expr_for_sentinel(tu.object)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 			return scan_expr_for_sentinel(tu.value);
 		};
 	case let c: ast::call_expr =>
 		match (scan_expr_for_sentinel(c.lvalue)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		for (let i = 0z; i < len(c.args); i += 1) {
 			match (scan_expr_for_sentinel(c.args[i])) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		};
@@ -660,14 +678,16 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 	case let cmp: ast::compound_expr =>
 		for (let i = 0z; i < len(cmp.exprs); i += 1) {
 			match (scan_expr_for_sentinel(cmp.exprs[i])) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		};
 		return void;
 	case let b: ast::binarithm_expr =>
 		match (scan_expr_for_sentinel(b.lvalue)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		return scan_expr_for_sentinel(b.rvalue);
@@ -678,7 +698,8 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 	case let bd: ast::binding_expr =>
 		for (let i = 0z; i < len(bd.bindings); i += 1) {
 			match (scan_expr_for_sentinel(bd.bindings[i].init)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		};
@@ -687,7 +708,8 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		match (asn.object) {
 		case let p: *ast::expr =>
 			match (scan_expr_for_sentinel(p)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		case null => void;
@@ -695,11 +717,13 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		return scan_expr_for_sentinel(asn.value);
 	case let i: ast::if_expr =>
 		match (scan_expr_for_sentinel(i.cond)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		match (scan_expr_for_sentinel(i.tbranch)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		match (i.fbranch) {
@@ -732,7 +756,8 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		match (fr.bindings) {
 		case let p: *ast::expr =>
 			match (scan_expr_for_sentinel(p)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		case null => void;
@@ -740,7 +765,8 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		match (fr.cond) {
 		case let p: *ast::expr =>
 			match (scan_expr_for_sentinel(p)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		case null => void;
@@ -748,7 +774,8 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		match (fr.afterthought) {
 		case let p: *ast::expr =>
 			match (scan_expr_for_sentinel(p)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		case null => void;
@@ -756,14 +783,16 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		return scan_expr_for_sentinel(fr.body);
 	case let m: ast::match_expr =>
 		match (scan_expr_for_sentinel(m.value)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		for (let i = 0z; i < len(m.cases); i += 1) {
 			const mc = &m.cases[i];
 			for (let j = 0z; j < len(mc.exprs); j += 1) {
 				match (scan_expr_for_sentinel(mc.exprs[j])) {
-				case let af: ast::access_field => return af;
+				case let af: ast::access_field =>
+					return af;
 				case void => void;
 				};
 			};
@@ -771,14 +800,16 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		return void;
 	case let sw: ast::switch_expr =>
 		match (scan_expr_for_sentinel(sw.value)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		for (let i = 0z; i < len(sw.cases); i += 1) {
 			const sc = &sw.cases[i];
 			for (let j = 0z; j < len(sc.exprs); j += 1) {
 				match (scan_expr_for_sentinel(sc.exprs[j])) {
-				case let af: ast::access_field => return af;
+				case let af: ast::access_field =>
+					return af;
 				case void => void;
 				};
 			};
@@ -788,7 +819,8 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		match (ae.cond) {
 		case let p: *ast::expr =>
 			match (scan_expr_for_sentinel(p)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		case null => void;
@@ -803,7 +835,8 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		return scan_expr_for_sentinel(l);
 	case let a: ast::alloc_expr =>
 		match (scan_expr_for_sentinel(a.init)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		match (a.capacity) {
@@ -814,11 +847,13 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		return void;
 	case let a: ast::append_expr =>
 		match (scan_expr_for_sentinel(a.object)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		match (scan_expr_for_sentinel(a.value)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		match (a.length) {
@@ -829,11 +864,13 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		return void;
 	case let ie: ast::insert_expr =>
 		match (scan_expr_for_sentinel(ie.object)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		match (scan_expr_for_sentinel(ie.value)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		match (ie.length) {
@@ -848,13 +885,15 @@ fn scan_expr_for_sentinel(e: *ast::expr) (ast::access_field | void) = {
 		return scan_expr_for_sentinel(f);
 	case let sl: ast::slice_expr =>
 		match (scan_expr_for_sentinel(sl.object)) {
-		case let af: ast::access_field => return af;
+		case let af: ast::access_field =>
+			return af;
 		case void => void;
 		};
 		match (sl.start) {
 		case let p: *ast::expr =>
 			match (scan_expr_for_sentinel(p)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		case null => void;
@@ -881,7 +920,8 @@ fn scan_literal_for_sentinel(
 	case let a: ast::array_literal =>
 		for (let i = 0z; i < len(a.values); i += 1) {
 			match (scan_expr_for_sentinel(a.values[i])) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		};
@@ -891,7 +931,8 @@ fn scan_literal_for_sentinel(
 	case let t: ast::tuple_literal =>
 		for (let i = 0z; i < len(t); i += 1) {
 			match (scan_expr_for_sentinel(t[i])) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		};
@@ -906,12 +947,14 @@ fn scan_struct_literal_for_sentinel(
 		match (s.fields[i]) {
 		case let v: ast::struct_value =>
 			match (scan_expr_for_sentinel(v.init)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		case let nested: *ast::struct_literal =>
 			match (scan_struct_literal_for_sentinel(nested)) {
-			case let af: ast::access_field => return af;
+			case let af: ast::access_field =>
+				return af;
 			case void => void;
 			};
 		};
@@ -937,11 +980,10 @@ fn emit_struct_member_completions(
 	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return;
 	match (holder.t.repr) {
 	case let st: ast::struct_type =>
-		emit_members_from_list(s, doc, holder, st.members, partial, arr,
-			seen, depth);
+		emit_members_from_list(s, doc, holder, st.members, partial, arr, seen, depth);
 	case let ut: ast::union_type =>
-		emit_members_from_list(s, doc, holder, ut: []ast::struct_member,
-			partial, arr, seen, depth);
+		emit_members_from_list(s, doc, holder, ut: []ast::struct_member, partial, arr,
+			seen, depth);
 	case let p: ast::pointer_type =>
 		emit_struct_member_completions(s, doc,
 			located_type {
@@ -965,8 +1007,8 @@ fn emit_struct_member_completions(
 		};
 		const (text, uri) = locate_decl_anywhere(s, d, holder);
 		emit_struct_member_completions(s, doc,
-			located_type { t = u, text = text, uri = uri },
-			partial, arr, seen, depth + 1);
+			located_type { t = u, text = text, uri = uri }, partial, arr, seen,
+			depth + 1);
 	case => void;
 	};
 };
@@ -988,8 +1030,7 @@ fn emit_members_from_list(
 			// `_` fields are anonymous padding and aren't accessible
 			// by name; skip them.
 			if (f.name == "_") continue;
-			if (len(partial) > 0 &&
-					!strings::hasprefix(f.name, partial)) continue;
+			if (len(partial) > 0 && !strings::hasprefix(f.name, partial)) continue;
 			if (already_emitted(*seen, f.name)) continue;
 			emit_struct_field_item(f, m.docs, arr);
 			let s_list = *seen;
@@ -1003,8 +1044,7 @@ fn emit_members_from_list(
 					uri = holder.uri,
 				}, partial, arr, seen, depth + 1);
 		case let alias: ast::struct_alias =>
-			const lookup_doc: nullable *document =
-				find_doc_for_uri(s, holder.uri);
+			const lookup_doc: nullable *document = find_doc_for_uri(s, holder.uri);
 			const d = match (resolve_alias_decl(s, lookup_doc, alias)) {
 			case let d: *ast::decl =>
 				yield d;
@@ -1019,8 +1059,8 @@ fn emit_members_from_list(
 			};
 			const (text, uri) = locate_decl_anywhere(s, d, holder);
 			emit_struct_member_completions(s, doc,
-				located_type { t = u, text = text, uri = uri },
-				partial, arr, seen, depth + 1);
+				located_type { t = u, text = text, uri = uri }, partial, arr, seen,
+				depth + 1);
 		};
 	};
 };
