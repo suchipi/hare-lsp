@@ -125,8 +125,8 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 
 	switch (prefix_info.kind) {
 	case prefix_kind::QUALIFIED =>
-		// Member completion: list workspace symbols whose full_name
-		// starts with `prefix_info.module::`.
+		// Member completion: list exported workspace symbols whose
+		// module matches `prefix_info.module`.
 		add_module_members(s, &arr, prefix_info.module, prefix_info.partial);
 	case prefix_kind::PLAIN =>
 		add_keywords(&arr, prefix_info.partial);
