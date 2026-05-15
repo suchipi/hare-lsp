@@ -326,6 +326,126 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	abort("barbar entry missing");
 };
 
+@test fn completion_qualified_filters_by_module() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	// Seed two modules. Only entries whose module matches the prefix
+	// before "::" should appear.
+	const a = strings::toutf8("export fn mymod_fn() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/mymod/a.ha", a);
+	const b = strings::toutf8("export fn other_fn() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/other/b.ha", b);
+
+	comp_open(&s, "file:///q.ha", "use mymod;\\nfn main() void = mymod::\\n");
+
+	// Cursor sits right after the trailing "::" on line 1.
+	// "fn main() void = mymod::" has length 24.
+	const params =
+		`{"textDocument":{"uri":"file:///q.ha"},"position":{"line":1,"character":24}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 60.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 60.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found_mymod = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label == "mymod_fn") found_mymod = true;
+		assert(label != "other_fn");
+		assert(label != "let");
+		assert(label != "main");
+	};
+	assert(found_mymod);
+};
+
+@test fn completion_qualified_filters_with_partial() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	const a = strings::toutf8(
+		"export fn dup() void = void;\nexport fn split() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/strings/a.ha", a);
+
+	// "fn main() void = strings::du" — len = 28, cursor right after "du".
+	comp_open(&s, "file:///qp.ha", "fn main() void = strings::du\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///qp.ha"},"position":{"line":0,"character":28}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 61.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 61.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found_dup = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label == "dup") found_dup = true;
+		assert(label != "split");
+	};
+	assert(found_dup);
+};
+
+@test fn completion_qualified_excludes_unexported() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	const a = strings::toutf8(
+		"export fn shown() void = void;\nfn hidden() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/m/a.ha", a);
+
+	// "fn main() void = m::" — len = 20, cursor right after "::".
+	comp_open(&s, "file:///qe.ha", "fn main() void = m::\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///qe.ha"},"position":{"line":0,"character":20}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 62.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 62.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found_shown = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label == "shown") found_shown = true;
+		assert(label != "hidden");
+	};
+	assert(found_shown);
+};
+
 @test fn completion_keyword_has_keyword_sortText() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
