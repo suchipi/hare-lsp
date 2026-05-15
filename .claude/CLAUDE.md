@@ -69,7 +69,7 @@ Parser, buffer, indices, type queries. None of this depends on `lsp` or `server`
 - [analysis/resolver.ha](analysis/resolver.ha), [analysis/types.ha](analysis/types.ha), [analysis/type_walk.ha](analysis/type_walk.ha): name resolution and best-effort type-of-expression for hover, inlay hints, and type hierarchy.
 - [analysis/scope_graph.ha](analysis/scope_graph.ha): lexical scope graph for a parsed file. Lets references/rename bound their search to a binding's scope when the cursor resolves to a local.
 - [analysis/token_scan.ha](analysis/token_scan.ha): byte scanner that skips comments, strings, char literals, and raw strings. Used by references/rename's text scan, signature-help comma counting, and the formatter's brace-depth tracker.
-- [analysis/loc_fixup.ha](analysis/loc_fixup.ha): the Hare AST reports `loc.off` as a rune index; the LSP needs byte offsets. This module fixes those up.
+- [analysis/loc_fixup.ha](analysis/loc_fixup.ha): the Hare AST reports `loc.off` as a rune index; the LSP needs byte offsets. This module fixes those up. See "Byte / rune offsets" below — fixup translates the unit but not the *semantic* of `loc.end`, which still points at the start of the last rune of the last token.
 
 ### `server/` — feature handlers
 
@@ -103,6 +103,17 @@ These are enforced; read them before doing nontrivial work:
 - [general-behavioral-guidelines.md](.claude/rules/general-behavioral-guidelines.md) — think before coding, simplicity first, surgical changes, goal-driven execution.
 - [no-self-modification.md](.claude/rules/no-self-modification.md) — never edit `CLAUDE.md`, `.claude/rules/`, or `.claude/settings*.json` without explicit permission. Unexpected changes there are likely the user's pending work; ask first.
 - [use-approved-tools-only.md](.claude/rules/use-approved-tools-only.md) — use the dedicated `Read`/`Edit`/`Write`/`Glob`/`Grep` tools, not shell equivalents. Unapproved Bash blocks on a permission prompt.
+
+## Byte / rune offsets
+
+Mixing up bytes and runes is the single most recurring source of bugs in this codebase. Every position-related field has a unit and a semantic, and getting either wrong silently breaks behavior only on certain inputs (so unit tests with ASCII single-character names won't catch it).
+
+1. **`hare::ast` `loc.off` is a rune index, not a byte offset.** The Hare lexer counts code points, not bytes. [analysis/loc_fixup.ha](analysis/loc_fixup.ha) walks the AST after parsing and translates every `loc.off` to a byte offset. **Do not consume `loc.off` from a freshly-parsed AST without running the fixup.** All `analysis::parse_recover` callers do this; reach for it before doing offset math.
+2. **`loc.end.off` points at the start of the LAST CONSUMED RUNE, not the end of the last consumed token.** This comes from [`hare::lex::prevloc`](file:///usr/local/src/hare/stdlib/hare/lex/lex.ha) — see the comment "The location of the previous rune." So for an access expression `b.data`, `loc.end.off` is the byte position of `a` (start of the last rune of `data`), not the end of `data` and not the start of `data`. For single-character names like `b.x` the start-of-last-rune equals the start-of-name, which is why most tests in the repo accidentally pass and the bug stays hidden. When matching against a known name `s`, compare to `loc.end.off == name_start + last_rune_offset(s)` rather than `== name_start` or `== name_end`.
+3. **`str` is UTF-8 bytes plus a length.** `len(s)` returns bytes. Iterating runes requires `strings::iter` + `strings::next`. See `analysis/positions.ha` for the conversion utilities. Don't roll your own offset math at the `str`/byte boundary.
+4. **LSP positions are negotiated UTF-8 / UTF-16 / UTF-32 code units.** VSCode defaults to UTF-16. Every conversion between LSP positions and byte offsets has to round-trip through `position_to_byte` / `byte_to_position` in [analysis/positions.ha](analysis/positions.ha).
+
+When you write a test that touches offsets, **include at least one identifier longer than one ASCII character** — preferably one with a multi-byte rune. ASCII single-character tests are the failure mode that lets these bugs ship.
 
 ## External dependencies
 
