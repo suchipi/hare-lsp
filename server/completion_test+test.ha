@@ -446,6 +446,366 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(found_shown);
 };
 
+
+// --- Struct/union member completion -----------------------------------
+
+fn run_completion(
+	s: *server,
+	out: *memio::stream,
+	uri: str,
+	line: u32,
+	ch: u32,
+	req_id: f64,
+) []json::value = {
+	const params = strings::concat(
+		`{"textDocument":{"uri":"`,
+		uri,
+		`"},"position":{"line":`,
+		fmt_u32(line),
+		`,"character":`,
+		fmt_u32(ch),
+		`}}`)!;
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = req_id,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(s, r);
+
+	const v = comp_skip_to_response(out, req_id);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items =
+		*(json::get(&result, "items") as *json::value) as []json::value;
+	// Return a duplicated copy so callers can inspect after json::finish.
+	let dup_items: []json::value = [];
+	for (let i = 0z; i < len(items); i += 1) {
+		match (json::dup(items[i])) {
+		case let v: json::value =>
+			append(dup_items, v)!;
+		case nomem => abort();
+		};
+	};
+	return dup_items;
+};
+
+fn finish_items(items: []json::value) void = {
+	for (let i = 0z; i < len(items); i += 1) {
+		json::finish(items[i]);
+	};
+	free(items);
+};
+
+fn fmt_u32(n: u32) str = {
+	if (n == 0) return strings::dup("0")!;
+	let buf: [11]u8 = [0...];
+	let i = len(buf);
+	let v = n;
+	for (v > 0; v /= 10) {
+		i -= 1;
+		buf[i] = '0': u8 + (v % 10): u8;
+	};
+	return strings::dup(strings::fromutf8(buf[i..])!)!;
+};
+
+fn item_labels(items: []json::value) []str = {
+	let out: []str = [];
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		append(out, strings::dup(label)!)!;
+	};
+	return out;
+};
+
+fn labels_contains(labels: []str, name: str) bool = {
+	for (let i = 0z; i < len(labels); i += 1) {
+		if (labels[i] == name) return true;
+	};
+	return false;
+};
+
+fn free_labels(labels: []str) void = {
+	for (let i = 0z; i < len(labels); i += 1) {
+		free(labels[i]);
+	};
+	free(labels);
+};
+
+@test fn completion_struct_field_via_function_param() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `b` is a function parameter of an inline struct type; typing `b.`
+	// should suggest its fields.
+	comp_open(&s, "file:///m1.ha",
+		`fn main(b: struct { data: int, line_index: int }) void = {\n\tb.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m1.ha", 1, 3, 1000.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "data"), "expected `data` in struct member completions");
+	assert(labels_contains(labels, "line_index"),
+		"expected `line_index` in struct member completions");
+
+	// Each item must be Kind=Field and have a `name: type` detail.
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const kind = *(json::get(&it, "kind") as *json::value) as f64;
+		assert(kind == 5.0, "member completion items must have kind=Field(5)");
+		const detail = *(json::get(&it, "detail") as *json::value) as str;
+		assert(len(detail) > 0, "member completion items must populate detail");
+		const sort = *(json::get(&it, "sortText") as *json::value) as str;
+		assert(strings::hasprefix(sort, "0-"),
+			"member completions must sort above all other sources");
+	};
+};
+
+@test fn completion_struct_field_via_alias_type() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// Receiver type is a top-level `type buffer = struct {...};`.
+	comp_open(&s, "file:///m2.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\nfn main(b: buffer) void = {\n\tb.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m2.ha", 2, 3, 1001.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "data"));
+	assert(labels_contains(labels, "line_index"));
+	// Member completion is exclusive: keywords/locals must NOT appear.
+	assert(!labels_contains(labels, "let"));
+	assert(!labels_contains(labels, "main"));
+};
+
+@test fn completion_struct_field_via_pointer_alias() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `*buffer` should still let you complete fields via auto-deref.
+	comp_open(&s, "file:///m3.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\nfn main(b: *buffer) void = {\n\tb.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m3.ha", 2, 3, 1002.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "data"));
+	assert(labels_contains(labels, "line_index"));
+};
+
+@test fn completion_struct_field_filters_by_partial() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// Typing `b.li` should only show fields starting with `li`.
+	comp_open(&s, "file:///m4.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\nfn main(b: buffer) void = {\n\tb.li\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m4.ha", 2, 5, 1003.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "line_index"));
+	assert(!labels_contains(labels, "data"), "partial `li` must exclude `data`");
+};
+
+@test fn completion_struct_field_after_call_return() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `make_buf()` returns a buffer; `make_buf().data` is a valid access
+	// chain so completion should suggest fields after the `)`.
+	comp_open(&s, "file:///m5.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\nfn make_buf() buffer = buffer { ... };\nfn main() void = {\n\tmake_buf().\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m5.ha", 3, 12, 1004.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "data"));
+	assert(labels_contains(labels, "line_index"));
+};
+
+@test fn completion_struct_field_after_nested_field() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `outer.inner.` should resolve `outer.inner`'s type and emit its
+	// fields.
+	comp_open(&s, "file:///m6.ha",
+		`type inner = struct { x: int, y: int };\ntype outer = struct { inner: inner, name: str };\nfn main(o: outer) void = {\n\to.inner.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m6.ha", 3, 9, 1005.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "x"));
+	assert(labels_contains(labels, "y"));
+	assert(!labels_contains(labels, "inner"), "must not show outer's fields");
+	assert(!labels_contains(labels, "name"));
+};
+
+@test fn completion_skips_member_mode_for_float_literal() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `1.|` is a float literal continuation, not a member access. We
+	// should fall back to PLAIN completion (keywords/etc).
+	comp_open(&s, "file:///m7.ha", `fn main() void = {\n\t1.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m7.ha", 1, 3, 1006.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	// Should contain keywords (PLAIN-mode fallback).
+	assert(labels_contains(labels, "let") || labels_contains(labels, "return"),
+		"`1.` should not flip into member mode; PLAIN keywords expected");
+};
+
+@test fn completion_skips_member_mode_for_range_dotdot() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `arr[0..]` — the second dot is part of `..`, never a member access.
+	comp_open(&s, "file:///m8.ha",
+		`fn main(arr: []int) void = {\n\tlet _ = arr[0..\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m8.ha", 1, 15, 1007.0);
+	defer finish_items(items);
+	// We don't assert specifics, only that the request didn't crash and
+	// returned without producing member-style items keyed off the dot.
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		match (json::get(&it, "kind")) {
+		case let p: *json::value =>
+			const kind = *p as f64;
+			assert(kind != 5.0,
+				"`..` must not produce Field-kind completion items");
+		case void => void;
+		};
+	};
+};
+
+@test fn completion_struct_field_via_embedded_struct() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// An embedded `struct { ... }` inlines its fields into the outer
+	// struct; completion should surface them transparently.
+	comp_open(&s, "file:///m9.ha",
+		`type outer = struct { struct { x: int, y: int }, label: str };\nfn main(o: outer) void = {\n\to.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m9.ha", 2, 3, 1008.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "x"));
+	assert(labels_contains(labels, "y"));
+	assert(labels_contains(labels, "label"));
+};
+
+@test fn completion_struct_field_via_embedded_alias() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `point` is referenced by name (not `struct { ... }`); it's an
+	// embedded type alias and its fields should be reachable.
+	comp_open(&s, "file:///m10.ha",
+		`type point = struct { x: int, y: int };\ntype labeled = struct { point, label: str };\nfn main(p: labeled) void = {\n\tp.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m10.ha", 3, 3, 1009.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "x"));
+	assert(labels_contains(labels, "y"));
+	assert(labels_contains(labels, "label"));
+};
+
+@test fn completion_skips_anonymous_underscore_field() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `_` is anonymous padding and isn't accessible by name; never emit it.
+	comp_open(&s, "file:///m11.ha",
+		`type padded = struct { _: int, real: int };\nfn main(p: padded) void = {\n\tp.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m11.ha", 2, 3, 1010.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "real"));
+	assert(!labels_contains(labels, "_"),
+		"anonymous `_` field must not be emitted as a completion item");
+};
+
+@test fn completion_struct_field_via_let_binding() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// Locally bound via `let b: buffer = ...;`.
+	comp_open(&s, "file:///m12.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\nfn main() void = {\n\tlet b: buffer = buffer { ... };\n\tb.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///m12.ha", 3, 3, 1011.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "data"));
+	assert(labels_contains(labels, "line_index"));
+};
+
+@test fn completion_struct_field_cursor_inside_existing_word() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// Cursor sits between `li` and `ne_index` while editing in the middle
+	// of an identifier. The splice must replace the entire word
+	// (`line_index`) with the sentinel so the parse succeeds.
+	comp_open(&s, "file:///m13.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\nfn main(b: buffer) void = {\n\tb.line_index\n};\n`);
+
+	// Position character=5 places cursor after `b.li` (\t=1, b=1, .=1, l=1, i=1 → 5).
+	const items = run_completion(&s, out, "file:///m13.ha", 2, 5, 1012.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "line_index"),
+		"member completion must work when cursor is inside an existing word");
+};
+
+@test fn completion_struct_field_on_identifier_ending_in_digit() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// Identifiers may legitimately end in digits (`buf1`, `hash32`).
+	// The dot in `buf1.` is a member access, not a float-literal point.
+	comp_open(&s, "file:///mdig.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\nfn main(buf1: buffer) void = {\n\tbuf1.\n};\n`);
+
+	// Line 2 = `\tbuf1.`; position character=6 sits right after the dot.
+	const items = run_completion(&s, out, "file:///mdig.ha", 2, 6, 1013.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "data"),
+		"identifier ending in digit must still trigger member completion");
+	assert(labels_contains(labels, "line_index"));
+};
+
+@test fn completion_struct_field_inside_match_value() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// The receiver is inside a `match (h.|)` head expression; the AST
+	// walker must descend into match_expr.value. Include a case clause
+	// so the synth parses cleanly (Hare's match requires >= 1 case).
+	comp_open(&s, "file:///mmatch.ha",
+		`type tagged = (int | str);\ntype holder = struct { val: tagged };\nfn main(h: holder) void = {\n\tmatch (h.) {\n\tcase => void;\n\t};\n};\n`);
+
+	// Line 3 = `\tmatch (h.) {`; position char=10 sits right after the dot.
+	const items = run_completion(&s, out, "file:///mmatch.ha", 3, 10, 1014.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(labels_contains(labels, "val"),
+		"member completion must work inside match value expressions");
+};
+
 @test fn completion_keyword_has_keyword_sortText() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
