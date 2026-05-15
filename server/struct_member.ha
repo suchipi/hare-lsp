@@ -53,6 +53,22 @@ type struct_member_match = struct {
 	name_end: size,
 };
 
+// Returns the byte offset within `s` of the first byte of the last UTF-8
+// rune in `s`. Returns 0 for empty strings. Used to translate the
+// `hare::lex::prevloc`-derived `loc.end.off` (which points at the last
+// consumed rune, not the last consumed token) back to a field-name start.
+//
+// @param s: borrowed
+fn last_rune_offset(s: str) size = {
+	const b = strings::toutf8(s);
+	if (len(b) == 0) return 0;
+	let i = len(b) - 1;
+	// UTF-8 continuation bytes are 10xxxxxx; walk back over them to
+	// find the leading byte of the last code point.
+	for (i > 0 && b[i] & 0xC0: u8 == 0x80: u8; i -= 1) void;
+	return i;
+};
+
 // Cursor-on-member-access detection. Returns true if `ident_start` is
 // preceded directly by a single `.` (not `..`, not `::`, no intervening
 // whitespace). The canonical Hare style has no space around the dot.
@@ -72,6 +88,7 @@ fn is_member_access_at(data: []u8, ident_start: size) bool = {
 // @param s: borrowed
 // @param doc: borrowed
 // @param data: borrowed
+// @returns: borrowed
 fn resolve_struct_member_at(
 	s: *server,
 	doc: *document,
@@ -87,10 +104,11 @@ fn resolve_struct_member_at(
 	if (!is_member_access_at(data, ident_range.0)) return void;
 	const name = strings::fromutf8(data[ident_range.0..ident_range.1])!;
 	const cache = parse_of(doc);
-	// hare::lex / hare::parse report `loc.end.off` as the START offset
-	// of the last consumed token (see [[hare::lex::prevloc]]). For an
-	// access_field `recv.field`, that's the start of `field`. We pass
-	// the field name's start offset and match against `loc.end.off`.
+	// hare::lex reports `loc.end.off` as the start offset of the last
+	// consumed RUNE (see [[hare::lex::prevloc]]). For an access_field
+	// `recv.field`, that's the start of the last rune of `field`. We
+	// pass the field name's start offset and let
+	// find_access_field_in_subunit do the rune-aware match.
 	const af = match (find_access_field_in_subunit(&cache.pr.subunit,
 		ident_range.0, name)) {
 	case let af: ast::access_field =>
@@ -111,6 +129,7 @@ fn resolve_struct_member_at(
 // --- AST walker: finds an access_field whose name ends at `field_start`. ---
 // @param su: borrowed
 // @param name: borrowed
+// @returns: borrowed from su
 fn find_access_field_in_subunit(
 	su: *ast::subunit,
 	field_start: size,
@@ -131,6 +150,7 @@ fn find_access_field_in_subunit(
 
 // @param d: borrowed
 // @param name: borrowed
+// @returns: borrowed from d
 fn scan_decl_for_field(
 	d: *ast::decl,
 	field_start: size,
@@ -165,8 +185,13 @@ fn scan_decl_for_field(
 // [[hare::lex::prevloc]]), so for an access_field `recv.field` the
 // reported `loc.end.off` is the start of `field`.
 //
+// Exhaustively recurses through every expression variant that can hold a
+// sub-expression so member accesses nested inside builtin forms like
+// `free(...)`, `len(...)`, `append(...)`, struct literals, etc. resolve.
+//
 // @param e: borrowed
 // @param name: borrowed
+// @returns: borrowed from e
 fn scan_expr_for_field(
 	e: *ast::expr,
 	field_start: size,
@@ -192,7 +217,14 @@ fn scan_expr_for_field(
 				return af;
 			case void => void;
 			};
-			if (e.loc.end.off: size == field_start && fd.field == name) {
+			// `hare::lex::prevloc` reports the start offset of the
+			// last consumed RUNE (not the last consumed token). For
+			// an access_field `recv.field`, that's the byte offset of
+			// the first byte of the LAST rune of `field`. Compare
+			// against `field_start + last_rune_offset(name)` so
+			// multi-rune field names match.
+			if (fd.field == name &&
+					e.loc.end.off: size == field_start + last_rune_offset(name)) {
 				return fd;
 			};
 			return void;
@@ -247,41 +279,29 @@ fn scan_expr_for_field(
 			return af;
 		case void => void;
 		};
-		match (i.fbranch) {
-		case let e2: *ast::expr =>
-			return scan_expr_for_field(e2, field_start, name);
-		case null =>
-			return void;
-		};
+		return scan_opt_expr_for_field(i.fbranch, field_start, name);
 	case let fr: ast::for_expr =>
-		match (fr.bindings) {
-		case let p: *ast::expr =>
-			match (scan_expr_for_field(p, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
-			case void => void;
-			};
-		case null => void;
+		match (scan_opt_expr_for_field(fr.bindings, field_start, name)) {
+		case let af: ast::access_field =>
+			return af;
+		case void => void;
 		};
-		match (fr.cond) {
-		case let p: *ast::expr =>
-			match (scan_expr_for_field(p, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
-			case void => void;
-			};
-		case null => void;
+		match (scan_opt_expr_for_field(fr.cond, field_start, name)) {
+		case let af: ast::access_field =>
+			return af;
+		case void => void;
 		};
-		match (fr.afterthought) {
-		case let p: *ast::expr =>
-			match (scan_expr_for_field(p, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
-			case void => void;
-			};
-		case null => void;
+		match (scan_opt_expr_for_field(fr.afterthought, field_start, name)) {
+		case let af: ast::access_field =>
+			return af;
+		case void => void;
 		};
-		return scan_expr_for_field(fr.body, field_start, name);
+		match (scan_expr_for_field(fr.body, field_start, name)) {
+		case let af: ast::access_field =>
+			return af;
+		case void => void;
+		};
+		return scan_opt_expr_for_field(fr.else_branch, field_start, name);
 	case let m: ast::match_expr =>
 		match (scan_expr_for_field(m.value, field_start, name)) {
 		case let af: ast::access_field =>
@@ -307,6 +327,13 @@ fn scan_expr_for_field(
 		};
 		for (let i = 0z; i < len(sw.cases); i += 1) {
 			const sc = &sw.cases[i];
+			for (let j = 0z; j < len(sc.options); j += 1) {
+				match (scan_expr_for_field(sc.options[j], field_start, name)) {
+				case let af: ast::access_field =>
+					return af;
+				case void => void;
+				};
+			};
 			for (let j = 0z; j < len(sc.exprs); j += 1) {
 				match (scan_expr_for_field(sc.exprs[j], field_start, name)) {
 				case let af: ast::access_field =>
@@ -326,14 +353,10 @@ fn scan_expr_for_field(
 	case let u: ast::unarithm_expr =>
 		return scan_expr_for_field(u.operand, field_start, name);
 	case let ag: ast::assign_expr =>
-		match (ag.object) {
-		case let p: *ast::expr =>
-			match (scan_expr_for_field(p, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
-			case void => void;
-			};
-		case null => void;
+		match (scan_opt_expr_for_field(ag.object, field_start, name)) {
+		case let af: ast::access_field =>
+			return af;
+		case void => void;
 		};
 		return scan_expr_for_field(ag.value, field_start, name);
 	case let ca: ast::cast_expr =>
@@ -344,23 +367,166 @@ fn scan_expr_for_field(
 		return scan_expr_for_field(p: *ast::expr, field_start, name);
 	case let p: ast::error_assert_expr =>
 		return scan_expr_for_field(p: *ast::expr, field_start, name);
-	case let r: ast::return_expr =>
-		match (r) {
-		case let p: *ast::expr =>
-			return scan_expr_for_field(p, field_start, name);
-		case null =>
-			return void;
+	case let f: ast::free_expr =>
+		return scan_expr_for_field(f: *ast::expr, field_start, name);
+	case let l: ast::len_expr =>
+		return scan_expr_for_field(l: *ast::expr, field_start, name);
+	case let o: ast::offset_expr =>
+		return scan_expr_for_field(o: *ast::expr, field_start, name);
+	case let a: ast::alloc_expr =>
+		match (scan_expr_for_field(a.init, field_start, name)) {
+		case let af: ast::access_field =>
+			return af;
+		case void => void;
 		};
+		return scan_opt_expr_for_field(a.capacity, field_start, name);
+	case let a: ast::append_expr =>
+		return scan_append_insert_for_field(a, field_start, name);
+	case let a: ast::insert_expr =>
+		return scan_append_insert_for_field(a, field_start, name);
+	case let a: ast::assert_expr =>
+		match (scan_opt_expr_for_field(a.cond, field_start, name)) {
+		case let af: ast::access_field =>
+			return af;
+		case void => void;
+		};
+		return scan_opt_expr_for_field(a.message, field_start, name);
+	case let d: ast::delete_expr =>
+		return scan_expr_for_field(d.object, field_start, name);
+	case let bk: ast::break_expr =>
+		return scan_opt_expr_for_field(bk.value, field_start, name);
 	case let y: ast::yield_expr =>
-		match (y.value) {
-		case let p: *ast::expr =>
-			return scan_expr_for_field(p, field_start, name);
-		case null =>
+		return scan_opt_expr_for_field(y.value, field_start, name);
+	case let r: ast::return_expr =>
+		return scan_opt_expr_for_field(r, field_start, name);
+	case let sl: ast::slice_expr =>
+		match (scan_expr_for_field(sl.object, field_start, name)) {
+		case let af: ast::access_field =>
+			return af;
+		case void => void;
+		};
+		match (scan_opt_expr_for_field(sl.start, field_start, name)) {
+		case let af: ast::access_field =>
+			return af;
+		case void => void;
+		};
+		return scan_opt_expr_for_field(sl.end, field_start, name);
+	case let lit: ast::literal_expr =>
+		return scan_literal_for_field(lit, field_start, name);
+	case let v: ast::variadic_expr =>
+		match (v) {
+		case ast::vastart_expr =>
 			return void;
+		case let va: ast::vaarg_expr =>
+			return scan_expr_for_field(va.ap, field_start, name);
+		case let ve: ast::vaend_expr =>
+			return scan_expr_for_field(ve: *ast::expr, field_start, name);
 		};
 	case =>
 		return void;
 	};
+};
+
+// Helper: scan a nullable *expr, returning void if null.
+//
+// @param e: borrowed
+// @param name: borrowed
+// @returns: borrowed from e
+fn scan_opt_expr_for_field(
+	e: nullable *ast::expr,
+	field_start: size,
+	name: str,
+) (ast::access_field | void) = {
+	match (e) {
+	case let p: *ast::expr =>
+		return scan_expr_for_field(p, field_start, name);
+	case null =>
+		return void;
+	};
+};
+
+// Helper: append/insert expressions share the same struct shape
+// (insert_expr is a type alias of append_expr).
+//
+// @param name: borrowed
+// @returns: borrowed
+fn scan_append_insert_for_field(
+	a: ast::append_expr,
+	field_start: size,
+	name: str,
+) (ast::access_field | void) = {
+	match (scan_expr_for_field(a.object, field_start, name)) {
+	case let af: ast::access_field =>
+		return af;
+	case void => void;
+	};
+	match (scan_expr_for_field(a.value, field_start, name)) {
+	case let af: ast::access_field =>
+		return af;
+	case void => void;
+	};
+	return scan_opt_expr_for_field(a.length, field_start, name);
+};
+
+// Helper: walk into a literal expression's sub-expressions.
+//
+// @param name: borrowed
+// @returns: borrowed
+fn scan_literal_for_field(
+	lit: ast::literal_expr,
+	field_start: size,
+	name: str,
+) (ast::access_field | void) = {
+	match (lit) {
+	case ast::plain_literal =>
+		return void;
+	case let a: ast::array_literal =>
+		for (let i = 0z; i < len(a.values); i += 1) {
+			match (scan_expr_for_field(a.values[i], field_start, name)) {
+			case let af: ast::access_field =>
+				return af;
+			case void => void;
+			};
+		};
+		return void;
+	case let s: ast::struct_literal =>
+		return scan_struct_literal_for_field(s, field_start, name);
+	case let t: ast::tuple_literal =>
+		for (let i = 0z; i < len(t); i += 1) {
+			match (scan_expr_for_field(t[i], field_start, name)) {
+			case let af: ast::access_field =>
+				return af;
+			case void => void;
+			};
+		};
+		return void;
+	};
+};
+
+// @param name: borrowed
+// @returns: borrowed
+fn scan_struct_literal_for_field(
+	sl: ast::struct_literal,
+	field_start: size,
+	name: str,
+) (ast::access_field | void) = {
+	for (let i = 0z; i < len(sl.fields); i += 1) {
+		match (sl.fields[i]) {
+		case let v: ast::struct_value =>
+			match (scan_expr_for_field(v.init, field_start, name)) {
+			case let af: ast::access_field =>
+				return af;
+			case void => void;
+			};
+		case let sub: *ast::struct_literal =>
+			match (scan_struct_literal_for_field(*sub, field_start, name)) {
+			case let af: ast::access_field =>
+				return af;
+			case void => void;
+			};
+		};
+	};
+	return void;
 };
 
 // --- Receiver type resolution. ---
@@ -368,8 +534,11 @@ fn scan_expr_for_field(
 // `text`/`uri` fields point to the file containing the AST so callers
 // can compute LSP positions in the right file.
 type located_type = struct {
+	// @borrowed
 	t: *ast::_type,
+	// @borrowed
 	text: []u8,
+	// @borrowed
 	uri: str,
 };
 
@@ -381,6 +550,7 @@ type located_type = struct {
 // @param doc: borrowed
 // @param su: borrowed
 // @param e: borrowed
+// @returns: borrowed
 fn type_of_expr(
 	s: *server,
 	doc: *document,
@@ -402,8 +572,31 @@ fn type_of_expr(
 				return void;
 			};
 			return member_type_in_type(s, recv, fd.field, depth + 1);
-		case =>
-			return void;
+		case let idx: ast::access_index =>
+			// `xs[i]` — element type of the indexed type.
+			const recv = match (type_of_expr(s, doc, su, idx.object, depth + 1)) {
+			case let lt: located_type =>
+				yield lt;
+			case void =>
+				return void;
+			};
+			return element_type_in_type(s, recv, depth + 1);
+		case let tu: ast::access_tuple =>
+			// `tup.N` — Nth element of a tuple_type. The index is a
+			// plain integer literal in well-formed code.
+			const idx = match (tuple_index_value(tu.value)) {
+			case let i: size =>
+				yield i;
+			case void =>
+				return void;
+			};
+			const recv = match (type_of_expr(s, doc, su, tu.object, depth + 1)) {
+			case let lt: located_type =>
+				yield lt;
+			case void =>
+				return void;
+			};
+			return tuple_field_type(s, recv, idx, depth + 1);
 		};
 	case let c: ast::call_expr =>
 		return call_return_located_type(s, doc, su, &c, depth);
@@ -417,6 +610,189 @@ fn type_of_expr(
 		return strip_errors_located(s, doc, su, p: *ast::expr, depth);
 	case let p: ast::error_assert_expr =>
 		return strip_errors_located(s, doc, su, p: *ast::expr, depth);
+	case let u: ast::unarithm_expr =>
+		// `*p` (DEREF) — referent of a pointer. Other unary operators
+		// effectively never appear as the receiver of a member access:
+		// `&x.field` parses as `&(x.field)` due to precedence, and BNOT
+		// / LNOT / MINUS produce numeric or bool values. We skip them.
+		switch (u.op) {
+		case ast::unarithm_op::DEREF =>
+			const recv = match (type_of_expr(s, doc, su, u.operand, depth + 1)) {
+			case let lt: located_type =>
+				yield lt;
+			case void =>
+				return void;
+			};
+			return deref_pointer_type(s, recv, depth + 1);
+		case =>
+			return void;
+		};
+	case =>
+		return void;
+	};
+};
+
+// Returns the element type for an indexed access (`xs[i]`). Chases alias
+// wrappers to find an underlying list_type (slice / array / unbounded) and
+// returns its `members` type.
+//
+// @param s: borrowed
+// @returns: borrowed
+fn element_type_in_type(
+	s: *server,
+	holder: located_type,
+	depth: int,
+) (located_type | void) = {
+	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return void;
+	match (holder.t.repr) {
+	case let l: ast::list_type =>
+		return located_type {
+			t = l.members,
+			text = holder.text,
+			uri = holder.uri,
+		};
+	case let p: ast::pointer_type =>
+		// Pointer-to-array indexing: `(*[N]T)[i]` is rare but legal.
+		return element_type_in_type(s,
+			located_type {
+				t = p.referent,
+				text = holder.text,
+				uri = holder.uri,
+			}, depth + 1);
+	case let a: ast::alias_type =>
+		const lookup_doc = find_doc_for_uri(s, holder.uri);
+		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		case let d: *ast::decl =>
+			yield d;
+		case void =>
+			return void;
+		};
+		const u = match (analysis::type_decl_underlying(d)) {
+		case let u: *ast::_type =>
+			yield u;
+		case void =>
+			return void;
+		};
+		const (text, uri) = locate_decl_anywhere(s, d, holder);
+		return element_type_in_type(s,
+			located_type {
+				t = u,
+				text = text,
+				uri = uri,
+			}, depth + 1);
+	case =>
+		return void;
+	};
+};
+
+// Returns the type of element `idx` in a tuple_type, chasing aliases.
+//
+// @param s: borrowed
+// @returns: borrowed
+fn tuple_field_type(
+	s: *server,
+	holder: located_type,
+	idx: size,
+	depth: int,
+) (located_type | void) = {
+	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return void;
+	match (holder.t.repr) {
+	case let t: ast::tuple_type =>
+		if (idx >= len(t)) return void;
+		return located_type {
+			t = t[idx],
+			text = holder.text,
+			uri = holder.uri,
+		};
+	case let a: ast::alias_type =>
+		const lookup_doc = find_doc_for_uri(s, holder.uri);
+		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		case let d: *ast::decl =>
+			yield d;
+		case void =>
+			return void;
+		};
+		const u = match (analysis::type_decl_underlying(d)) {
+		case let u: *ast::_type =>
+			yield u;
+		case void =>
+			return void;
+		};
+		const (text, uri) = locate_decl_anywhere(s, d, holder);
+		return tuple_field_type(s,
+			located_type {
+				t = u,
+				text = text,
+				uri = uri,
+			}, idx, depth + 1);
+	case =>
+		return void;
+	};
+};
+
+// Returns the referent type for a pointer dereference (`*p`).
+//
+// @param s: borrowed
+// @returns: borrowed
+fn deref_pointer_type(
+	s: *server,
+	holder: located_type,
+	depth: int,
+) (located_type | void) = {
+	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return void;
+	match (holder.t.repr) {
+	case let p: ast::pointer_type =>
+		return located_type {
+			t = p.referent,
+			text = holder.text,
+			uri = holder.uri,
+		};
+	case let a: ast::alias_type =>
+		const lookup_doc = find_doc_for_uri(s, holder.uri);
+		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		case let d: *ast::decl =>
+			yield d;
+		case void =>
+			return void;
+		};
+		const u = match (analysis::type_decl_underlying(d)) {
+		case let u: *ast::_type =>
+			yield u;
+		case void =>
+			return void;
+		};
+		const (text, uri) = locate_decl_anywhere(s, d, holder);
+		return deref_pointer_type(s,
+			located_type {
+				t = u,
+				text = text,
+				uri = uri,
+			}, depth + 1);
+	case =>
+		return void;
+	};
+};
+
+// Extracts a u64 index from a tuple-access value expr. `foo.0` parses with
+// `value` as a plain_literal whose `value` is a u64.
+//
+// @param e: borrowed
+fn tuple_index_value(e: *ast::expr) (size | void) = {
+	const lit = match (e.expr) {
+	case let lit: ast::literal_expr =>
+		yield lit;
+	case =>
+		return void;
+	};
+	const pl = match (lit) {
+	case let pl: ast::plain_literal =>
+		yield pl;
+	case =>
+		return void;
+	};
+	match (pl.value) {
+	case let n: u64 =>
+		return n: size;
 	case =>
 		return void;
 	};
@@ -430,6 +806,7 @@ fn type_of_expr(
 // @param doc: borrowed
 // @param su: borrowed
 // @param id: borrowed
+// @returns: borrowed
 fn type_of_identifier(
 	s: *server,
 	doc: *document,
@@ -458,6 +835,7 @@ fn type_of_identifier(
 // @param s: borrowed
 // @param doc: borrowed
 // @param d: borrowed
+// @returns: borrowed
 fn type_of_decl(
 	s: *server,
 	doc: *document,
@@ -496,6 +874,7 @@ fn type_of_decl(
 // @param s: borrowed
 // @param doc: borrowed
 // @param d: borrowed
+// @returns: borrowed
 fn locate_decl(s: *server, doc: *document, d: *ast::decl) ([]u8, str) = {
 	const cache = parse_of(doc);
 	for (let i = 0z; i < len(cache.pr.subunit.decls); i += 1) {
@@ -522,6 +901,7 @@ fn locate_decl(s: *server, doc: *document, d: *ast::decl) ([]u8, str) = {
 // @param doc: borrowed
 // @param su: borrowed
 // @param name: borrowed
+// @returns: borrowed
 fn find_local_binding_type(
 	s: *server,
 	doc: *document,
@@ -568,6 +948,7 @@ fn find_local_binding_type(
 // @param su: borrowed
 // @param e: borrowed
 // @param name: borrowed
+// @returns: borrowed
 fn walk_for_binding_type(
 	s: *server,
 	doc: *document,
@@ -673,6 +1054,7 @@ fn mc_contains(exprs: []*ast::expr, off: size) bool = {
 // @param doc: borrowed
 // @param su: borrowed
 // @param bd: borrowed
+// @returns: borrowed
 fn binding_type(
 	s: *server,
 	doc: *document,
@@ -701,6 +1083,7 @@ fn binding_type(
 // @param doc: borrowed
 // @param su: borrowed
 // @param c: borrowed
+// @returns: borrowed
 fn call_return_located_type(
 	s: *server,
 	doc: *document,
@@ -747,6 +1130,7 @@ fn call_return_located_type(
 // @param doc: borrowed
 // @param su: borrowed
 // @param inner: borrowed
+// @returns: borrowed
 fn strip_errors_located(
 	s: *server,
 	doc: *document,
@@ -824,6 +1208,7 @@ fn alias_is_error(
 //
 // @param s: borrowed
 // @param name: borrowed
+// @returns: borrowed
 fn member_type_in_type(
 	s: *server,
 	holder: located_type,
@@ -849,6 +1234,7 @@ fn member_type_in_type(
 //
 // @param s: borrowed
 // @param name: borrowed
+// @returns: borrowed
 fn lookup_member_in_type(
 	s: *server,
 	holder: located_type,
@@ -909,6 +1295,7 @@ fn lookup_member_in_type(
 // @param s: borrowed
 // @param doc: borrowed
 // @param id: borrowed
+// @returns: borrowed
 fn resolve_alias_decl(
 	s: *server,
 	doc: nullable *document,
@@ -953,6 +1340,7 @@ fn resolve_alias_decl(
 //
 // @param s: borrowed
 // @param uri: borrowed
+// @returns: borrowed from s
 fn find_doc_for_uri(s: *server, uri: str) nullable *document = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		if (s.documents[i].uri == uri) return &s.documents[i];
@@ -965,6 +1353,7 @@ fn find_doc_for_uri(s: *server, uri: str) nullable *document = {
 //
 // @param s: borrowed
 // @param d: borrowed
+// @returns: borrowed
 fn locate_decl_anywhere(
 	s: *server,
 	d: *ast::decl,
@@ -996,6 +1385,7 @@ fn locate_decl_anywhere(
 //
 // @param s: borrowed
 // @param path: borrowed
+// @returns: borrowed
 fn fpe_uri(s: *server, path: str) str = {
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		if (s.workspace_index.entries[i].path == path) {
@@ -1012,6 +1402,7 @@ fn fpe_uri(s: *server, path: str) str = {
 
 // @param members: borrowed
 // @param name: borrowed
+// @returns: borrowed
 fn lookup_in_members(
 	holder: located_type,
 	members: []ast::struct_member,

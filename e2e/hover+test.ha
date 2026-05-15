@@ -381,6 +381,78 @@ export fn main() void = {
 
 // Hover on a local `let` binding inside a function body. Before this was
 // supported, the handler only looked at top-level decls and returned null.
+// e2e check for struct-member hover. Two things that previously failed:
+//  1. Multi-rune field names like `data` — the matching used `loc.end.off`
+//     directly (which is the start of the LAST RUNE, not the start of the
+//     name), so ASCII single-character fields happened to work and longer
+//     names didn't.
+//  2. Member access nested inside the `free()` builtin — parsed as an
+//     ast::free_expr, not ast::call_expr, which the AST walker silently
+//     skipped over.
+@test fn e2e_hover_on_struct_member_inside_free_builtin() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample =
+		`type buffer = struct {
+	data: []u8,
+};
+
+export fn finish(b: *buffer) void = {
+	free(b.data);
+};
+`;
+	const did_open = build_did_open("file:///sm_free_e2e.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `data` inside `free(b.data)`. Line 5 (0-indexed):
+	// "\tfree(b.data);" — col 8 = 'd', col 9 = 'a', col 11 = 'a' (last rune).
+	// Test col 11 specifically to lock in the last-rune behavior.
+	const hover_req =
+		`{"jsonrpc":"2.0","id":800,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///sm_free_e2e.ha"},"position":{"line":5,"character":11}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 800.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield *p;
+	case void =>
+		fmt::fatalf("e2e: struct-member hover missing result: {}", text);
+	};
+	const result_obj = match (result) {
+	case let o: json::object =>
+		yield o;
+	case =>
+		fmt::fatalf("e2e: struct-member hover returned null inside free(). body={}",
+			text);
+	};
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "(field) data"),
+		"hover inside free() should render `(field) data`"
+	);
+	assert(
+		strings::contains(md, "[]u8"),
+		"hover inside free() should render the field's type"
+	);
+};
+
 @test fn e2e_hover_on_local_let_binding() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
