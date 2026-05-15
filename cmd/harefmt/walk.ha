@@ -46,6 +46,9 @@ export fn default_opts() ignore_opts = ignore_opts {
 //
 // The returned layers own their `dir` strings AND their patterns;
 // call [[finish_layers]] when done.
+//
+// @returns: owned
+// @param start_dir: borrowed
 export fn collect_ancestors(
 	start_dir: str,
 	opts: ignore_opts,
@@ -76,6 +79,8 @@ export fn collect_ancestors(
 
 // Frees a slice of layers produced by [[collect_ancestors]] or
 // [[load_layer]].
+//
+// @param ls: owned
 export fn finish_layers(ls: []gitignore::layer) void = {
 	for (let i = 0z; i < len(ls); i += 1) {
 		free(ls[i].dir);
@@ -89,6 +94,8 @@ export fn finish_layers(ls: []gitignore::layer) void = {
 // subject to opts. Last-match-wins gives `.harefmtignore` the final
 // word at any single level. Returns void when neither file exists or
 // both are disabled.
+//
+// @param dir: borrowed
 export fn load_layer(dir: str, opts: ignore_opts) (gitignore::layer | void) = {
 	let patterns: []gitignore::pattern = [];
 	if (opts.use_gitignore) {
@@ -127,6 +134,10 @@ export fn load_layer(dir: str, opts: ignore_opts) (gitignore::layer | void) = {
 // included it (typically by calling [[collect_ancestors]] with `dir`
 // as the start). `descend` then handles all SUBDIRECTORY layers as
 // it walks.
+//
+// @param dir: borrowed
+// @param stack: borrowed
+// @param userdata: borrowed
 export fn descend(
 	dir: str,
 	stack: []gitignore::layer,
@@ -180,6 +191,9 @@ export fn descend(
 	};
 };
 
+// @param abs: borrowed
+// @param stack: borrowed
+// @param userdata: borrowed
 fn descend_into(
 	abs: str,
 	stack: []gitignore::layer,
@@ -218,6 +232,8 @@ type classification = enum {
 // Determines what `abs` actually points at, accounting for symlinks.
 // For a symlink, the chain is resolved and the final target's mode
 // determines DIR-vs-FILE. Broken symlinks classify as OTHER.
+//
+// @param abs: borrowed
 fn classify(abs: str, dirent_ftype: fs::mode) classification = {
 	const is_link = fs::islink(dirent_ftype);
 	if (!is_link) {
@@ -245,6 +261,8 @@ fn classify(abs: str, dirent_ftype: fs::mode) classification = {
 
 // Reads `path` and parses it as gitignore syntax. Returns void when
 // the file doesn't exist (or can't be read); both are non-fatal.
+//
+// @param path: borrowed
 fn read_ignore_file(path: str) ([]gitignore::pattern | void) = {
 	const f = match (os::open(path)) {
 	case let f: io::file =>
@@ -263,16 +281,19 @@ fn read_ignore_file(path: str) ([]gitignore::pattern | void) = {
 	return gitignore::parse_patterns(data);
 };
 
+// @param dir: borrowed
 fn has_git_dir(dir: str) bool = {
 	const p = strings::concat(dir, "/.git")!;
 	defer free(p);
 	return os::exists(p);
 };
 
+// @param dir: borrowed
 fn is_fs_root(dir: str) bool = {
 	return dir == "/" || dir == "" || dir == ".";
 };
 
+// @param ls: borrowed
 fn reverse_layers(ls: []gitignore::layer) void = {
 	const n = len(ls);
 	for (let i = 0z; i < n / 2; i += 1) {

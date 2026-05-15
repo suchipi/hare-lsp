@@ -17,6 +17,7 @@ use lsp;
 use memio;
 use strings;
 
+// @param s: borrowed
 export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos_sh(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -98,6 +99,8 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
 fn send_workspace_signature(s: *server, id: lsp::id, ctx: call_context) void = {
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const e = &s.workspace_index.entries[i];
@@ -126,6 +129,7 @@ fn send_workspace_signature(s: *server, id: lsp::id, ctx: call_context) void = {
 };
 
 type call_context = struct {
+	// @owned
 	callee_name: str,
 	// owned; caller must free
 	active_param: size,
@@ -141,6 +145,9 @@ type call_context = struct {
 // cursor as a naïve version would) is necessary to make string/comment
 // skipping correct — the lexer state at position `i` depends on what
 // came before.
+//
+// @param data: borrowed
+// @returns: owned
 fn find_call_context(data: []u8, off: size) (call_context | void) = {
 	const limit = if (off > len(data)) len(data) else off;
 	// A stack of (open_paren_offset, active_param_count) — one entry per
@@ -198,6 +205,8 @@ fn is_ident_byte_sh(b: u8) bool = {
 	return b == '_': u8;
 };
 
+// @param su: borrowed
+// @param name: borrowed
 fn find_decl_by_short_name(su: *ast::subunit, name: str) (size | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const id = decl_ident_sh(&su.decls[i]);
@@ -206,6 +215,8 @@ fn find_decl_by_short_name(su: *ast::subunit, name: str) (size | void) = {
 	return void;
 };
 
+// @param d: borrowed
+// @returns: borrowed from d
 fn decl_ident_sh(d: *ast::decl) ast::ident = {
 	match (d.decl) {
 	case let f: ast::decl_func =>
@@ -225,6 +236,9 @@ fn decl_ident_sh(d: *ast::decl) ast::ident = {
 // guaranteed to be a substring of the parent signature label (the LSP
 // spec requires that for the editor to find the active-parameter range
 // to highlight). Caller frees the slice with [[free_param_labels]].
+//
+// @param d: borrowed
+// @returns: owned
 fn collect_param_labels(d: *ast::decl) []str = {
 	let out: []str = [];
 	const f = match (d.decl) {
@@ -245,6 +259,8 @@ fn collect_param_labels(d: *ast::decl) []str = {
 	return out;
 };
 
+// @param p: borrowed
+// @returns: owned
 fn render_param_label(p: *ast::func_param) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
@@ -261,6 +277,7 @@ fn render_param_label(p: *ast::func_param) str = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
+// @param labels: owned
 fn free_param_labels(labels: []str) void = {
 	for (let i = 0z; i < len(labels); i += 1) {
 		free(labels[i]);
@@ -268,6 +285,8 @@ fn free_param_labels(labels: []str) void = {
 	free(labels);
 };
 
+// @param p: borrowed
+// @returns: borrowed from p
 fn parse_pos_sh(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -317,6 +336,8 @@ fn parse_pos_sh(p: (json::value | void)) ((str, lsp::position) | void) = {
 	return (uri, pos);
 };
 
+// @param s: borrowed
+// @param id: borrowed
 fn send_null_sh(s: *server, id: lsp::id) void = {
 	const v: json::value = json::_null;
 	match (lsp::encode_response_result(s.out, id, v)) {

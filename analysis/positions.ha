@@ -26,6 +26,9 @@ export type position = struct {
 // Builds a line index: a slice where line_index[i] is the byte offset of the
 // start of line i. The result has len(text)/avg_line_len + 1 entries; line 0
 // always starts at offset 0.
+//
+// @returns: owned
+// @param text: borrowed
 export fn build_line_index(text: []u8) []size = {
 	let idx: []size = [];
 	append(idx, 0z)!;
@@ -43,6 +46,9 @@ export fn build_line_index(text: []u8) []size = {
 // same buffer the line_index was computed against. CRLF line endings are
 // handled: the `\r` immediately preceding a `\n` is excluded from the
 // column count so positions on CRLF files match positions on LF files.
+//
+// @param text: borrowed
+// @param line_index: borrowed
 export fn byte_to_position(
 	text: []u8,
 	line_index: []size,
@@ -62,6 +68,9 @@ export fn byte_to_position(
 
 // Converts an LSP Position to a byte offset within text. Out-of-range
 // positions are clamped to the end of the line / end of file.
+//
+// @param text: borrowed
+// @param line_index: borrowed
 export fn position_to_byte(
 	text: []u8,
 	line_index: []size,
@@ -79,6 +88,9 @@ export fn position_to_byte(
 // Returns the byte offset where the content of `line` ends, excluding
 // any trailing `\r` and `\n`. For the final line in a CRLF buffer that
 // doesn't end with a newline, returns len(text).
+//
+// @param text: borrowed
+// @param line_index: borrowed
 fn line_content_end(text: []u8, line_index: []size, line: size) size = {
 	let end = if (line + 1 < len(line_index)) {
 		yield line_index[line + 1] - 1; // exclude the '\n'
@@ -94,6 +106,8 @@ fn line_content_end(text: []u8, line_index: []size, line: size) size = {
 
 // Returns the line containing the given byte offset (0-based). Uses binary
 // search on the line index.
+//
+// @param line_index: borrowed
 fn line_for_offset(line_index: []size, off: size) size = {
 	if (len(line_index) == 0) return 0;
 	// Find largest i such that line_index[i] <= off.
@@ -112,11 +126,15 @@ fn line_for_offset(line_index: []size, off: size) size = {
 
 // Counts code units in `bytes` (a single line's content, no trailing newline)
 // according to the given encoding.
+//
+// @param bytes: borrowed
 fn column_units(bytes: []u8, enc: encoding) size = count_units(bytes, enc);
 
 // Returns the number of LSP code units in `bytes` (UTF-8 input) under the
 // given negotiated encoding: byte count for UTF-8, codepoint count for
 // UTF-32, UTF-16 code-unit count (surrogate pairs count as 2) for UTF-16.
+//
+// @param bytes: borrowed
 export fn count_units(bytes: []u8, enc: encoding) size = {
 	switch (enc) {
 	case encoding::UTF8 =>
@@ -130,6 +148,8 @@ export fn count_units(bytes: []u8, enc: encoding) size = {
 
 // Returns the byte offset within `bytes` at which `units` code units have
 // been consumed (clamped to len(bytes)).
+//
+// @param bytes: borrowed
 fn units_to_byte(bytes: []u8, enc: encoding, units: size) size = {
 	switch (enc) {
 	case encoding::UTF8 =>
@@ -141,6 +161,7 @@ fn units_to_byte(bytes: []u8, enc: encoding, units: size) size = {
 	};
 };
 
+// @param bytes: borrowed
 fn count_runes(bytes: []u8) size = {
 	let n = 0z;
 	let i = 0z;
@@ -159,6 +180,7 @@ fn count_runes(bytes: []u8) size = {
 	return n;
 };
 
+// @param bytes: borrowed
 fn runes_to_byte(bytes: []u8, units: size) size = {
 	let n = 0z;
 	let i = 0z;
@@ -180,6 +202,8 @@ fn runes_to_byte(bytes: []u8, units: size) size = {
 
 // Counts UTF-16 code units corresponding to the UTF-8 byte slice. Code points
 // above 0xFFFF require a surrogate pair (2 code units).
+//
+// @param bytes: borrowed
 fn count_utf16_units(bytes: []u8) size = {
 	let n = 0z;
 	let dec = utf8::decode(bytes);
@@ -205,6 +229,7 @@ fn count_utf16_units(bytes: []u8) size = {
 	};
 };
 
+// @param bytes: borrowed
 fn utf16_units_to_byte(bytes: []u8, units: size) size = {
 	let n = 0z;
 	let consumed = 0z;

@@ -28,6 +28,9 @@ def MAX_WALK_DEPTH: u32 = 256;
 //
 // Duplicates within the result are removed (so e.g. `(A | A)` yields a
 // single ident).
+//
+// @returns: owned
+// @param t: borrowed
 export fn collect_referenced_idents(t: *ast::_type) []ast::ident = {
 	let out: []ast::ident = [];
 	walk_type(t, &out, 0);
@@ -36,6 +39,9 @@ export fn collect_referenced_idents(t: *ast::_type) []ast::ident = {
 
 // Returns the underlying _type of a `type T = U;` decl, or void for any
 // other decl variant.
+//
+// @returns: borrowed from d
+// @param d: borrowed
 export fn type_decl_underlying(d: *ast::decl) (*ast::_type | void) = {
 	match (d.decl) {
 	case let t: ast::decl_type =>
@@ -45,6 +51,8 @@ export fn type_decl_underlying(d: *ast::decl) (*ast::_type | void) = {
 	};
 };
 
+// @param t: borrowed
+// @param out: borrowed
 fn walk_type(t: *ast::_type, out: *[]ast::ident, depth: u32) void = {
 	if (depth >= MAX_WALK_DEPTH) return;
 	const next = depth + 1;
@@ -79,6 +87,8 @@ fn walk_type(t: *ast::_type, out: *[]ast::ident, depth: u32) void = {
 	};
 };
 
+// @param membs: borrowed
+// @param out: borrowed
 fn walk_struct_members(
 	membs: []ast::struct_member,
 	out: *[]ast::ident,
@@ -97,6 +107,8 @@ fn walk_struct_members(
 	};
 };
 
+// @param out: borrowed
+// @param id: borrowed
 fn add_ident(out: *[]ast::ident, id: ast::ident) void = {
 	let cur = *out;
 	for (let i = 0z; i < len(cur); i += 1) {
@@ -110,6 +122,8 @@ fn add_ident(out: *[]ast::ident, id: ast::ident) void = {
 	*out = cur;
 };
 
+// @param a: borrowed
+// @param b: borrowed
 fn ident_eq(a: ast::ident, b: ast::ident) bool = {
 	if (len(a) != len(b)) return false;
 	for (let i = 0z; i < len(a); i += 1) {
@@ -119,6 +133,8 @@ fn ident_eq(a: ast::ident, b: ast::ident) bool = {
 };
 
 // Frees the result of [[collect_referenced_idents]].
+//
+// @param idents: owned
 export fn finish_idents(idents: []ast::ident) void = {
 	for (let i = 0z; i < len(idents); i += 1) {
 		for (let j = 0z; j < len(idents[i]); j += 1) {

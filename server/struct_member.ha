@@ -33,13 +33,20 @@ def MEMBER_RESOLVE_MAX_DEPTH: int = 16;
 // A successful struct-member lookup.
 type struct_member_match = struct {
 	// The member's type AST node, for hover rendering.
+	//
+	// @borrowed
 	field_type: *ast::_type,
 	// The member's doc comment (the leading `// ...` lines on the line
 	// before the field declaration), or "" if absent. Borrowed.
+	//
+	// @borrowed
 	docs: str,
 	// File context that owns `field_type` and is the home of the struct
 	// definition. Used to compute the LSP Location for go-to-definition.
+	//
+	// @borrowed
 	owner_text: []u8,
+	// @borrowed
 	owner_uri: str,
 	// Byte range of the field name within `owner_text`.
 	name_start: size,
@@ -49,6 +56,8 @@ type struct_member_match = struct {
 // Cursor-on-member-access detection. Returns true if `ident_start` is
 // preceded directly by a single `.` (not `..`, not `::`, no intervening
 // whitespace). The canonical Hare style has no space around the dot.
+//
+// @param data: borrowed
 fn is_member_access_at(data: []u8, ident_start: size) bool = {
 	if (ident_start == 0) return false;
 	if (data[ident_start - 1] != '.': u8) return false;
@@ -59,6 +68,10 @@ fn is_member_access_at(data: []u8, ident_start: size) bool = {
 
 // Top-level entry point: if `off` is on a struct-member ident, resolves
 // the member and returns a [[struct_member_match]]. Returns void otherwise.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
 fn resolve_struct_member_at(
 	s: *server,
 	doc: *document,
@@ -96,6 +109,8 @@ fn resolve_struct_member_at(
 };
 
 // --- AST walker: finds an access_field whose name ends at `field_start`. ---
+// @param su: borrowed
+// @param name: borrowed
 fn find_access_field_in_subunit(
 	su: *ast::subunit,
 	field_start: size,
@@ -114,6 +129,8 @@ fn find_access_field_in_subunit(
 	return void;
 };
 
+// @param d: borrowed
+// @param name: borrowed
 fn scan_decl_for_field(
 	d: *ast::decl,
 	field_start: size,
@@ -147,6 +164,9 @@ fn scan_decl_for_field(
 // `loc.end` as the START offset of the last consumed rune (see
 // [[hare::lex::prevloc]]), so for an access_field `recv.field` the
 // reported `loc.end.off` is the start of `field`.
+//
+// @param e: borrowed
+// @param name: borrowed
 fn scan_expr_for_field(
 	e: *ast::expr,
 	field_start: size,
@@ -356,6 +376,11 @@ type located_type = struct {
 // Returns the type of the given expression as a located_type, or void if
 // we don't know. `su` is the subunit of the open document (used to look
 // up local bindings).
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param e: borrowed
 fn type_of_expr(
 	s: *server,
 	doc: *document,
@@ -400,6 +425,11 @@ fn type_of_expr(
 // Looks up the type of `id` at byte position `off` within the open doc's
 // subunit. Tries locals (function params and let/const bindings) first,
 // then top-level decls (local + workspace + stdlib).
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param id: borrowed
 fn type_of_identifier(
 	s: *server,
 	doc: *document,
@@ -425,6 +455,9 @@ fn type_of_identifier(
 	return type_of_decl(s, doc, d);
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param d: borrowed
 fn type_of_decl(
 	s: *server,
 	doc: *document,
@@ -459,6 +492,10 @@ fn type_of_decl(
 // document if we can't locate it; that's safe because we only use the
 // text/uri for position computation, and a mismatch can only cause a
 // degraded (not incorrect) jump target.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param d: borrowed
 fn locate_decl(s: *server, doc: *document, d: *ast::decl) ([]u8, str) = {
 	const cache = parse_of(doc);
 	for (let i = 0z; i < len(cache.pr.subunit.decls); i += 1) {
@@ -480,6 +517,11 @@ fn locate_decl(s: *server, doc: *document, d: *ast::decl) ([]u8, str) = {
 // Resolves a local binding (function parameter, let, const, def) at
 // `off` within the function containing it; returns its declared or
 // inferred type as a located_type. Only handles single-segment idents.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param name: borrowed
 fn find_local_binding_type(
 	s: *server,
 	doc: *document,
@@ -521,6 +563,11 @@ fn find_local_binding_type(
 	return void;
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param e: borrowed
+// @param name: borrowed
 fn walk_for_binding_type(
 	s: *server,
 	doc: *document,
@@ -608,6 +655,7 @@ fn walk_for_binding_type(
 	};
 };
 
+// @param exprs: borrowed
 fn mc_contains(exprs: []*ast::expr, off: size) bool = {
 	for (let i = 0z; i < len(exprs); i += 1) {
 		const e = exprs[i];
@@ -620,6 +668,11 @@ fn mc_contains(exprs: []*ast::expr, off: size) bool = {
 
 // Returns the declared type of `bd`, or the inferred type of its init if
 // no type was written.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param bd: borrowed
 fn binding_type(
 	s: *server,
 	doc: *document,
@@ -643,6 +696,11 @@ fn binding_type(
 // callee, as a located_type whose owner is the file declaring the
 // callee. Returns void if the callee isn't a simple identifier or can't
 // be resolved.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param c: borrowed
 fn call_return_located_type(
 	s: *server,
 	doc: *document,
@@ -684,6 +742,11 @@ fn call_return_located_type(
 };
 
 // Strips `?`/`!` from `inner`'s type — returns the non-error component.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param inner: borrowed
 fn strip_errors_located(
 	s: *server,
 	doc: *document,
@@ -722,6 +785,9 @@ fn strip_errors_located(
 	};
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param t: borrowed
 fn alias_is_error(
 	s: *server,
 	doc: *document,
@@ -755,6 +821,9 @@ fn alias_is_error(
 // Returns the member type within `holder` for the field named `name`, as
 // a located_type whose owner is the file containing the struct. Chases
 // alias and pointer wrappers down to a struct or union.
+//
+// @param s: borrowed
+// @param name: borrowed
 fn member_type_in_type(
 	s: *server,
 	holder: located_type,
@@ -777,6 +846,9 @@ fn member_type_in_type(
 // Full member lookup including doc comment and source range of the
 // field name. Returns void if `holder` isn't a struct or union (after
 // chasing aliases/pointers) or `name` isn't a member.
+//
+// @param s: borrowed
+// @param name: borrowed
 fn lookup_member_in_type(
 	s: *server,
 	holder: located_type,
@@ -833,6 +905,10 @@ fn lookup_member_in_type(
 
 // Resolves an alias ident to its decl. Tries the open document (if
 // provided) first, then the workspace and stdlib indexes.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param id: borrowed
 fn resolve_alias_decl(
 	s: *server,
 	doc: nullable *document,
@@ -874,6 +950,9 @@ fn resolve_alias_decl(
 // Returns the open document whose uri matches, if any. Used to provide
 // an alias resolution context that prefers the file where the type was
 // declared.
+//
+// @param s: borrowed
+// @param uri: borrowed
 fn find_doc_for_uri(s: *server, uri: str) nullable *document = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		if (s.documents[i].uri == uri) return &s.documents[i];
@@ -883,6 +962,9 @@ fn find_doc_for_uri(s: *server, uri: str) nullable *document = {
 
 // Like [[locate_decl]] but takes a fallback holder for when we can't
 // find the decl in either the open doc or the file parse cache.
+//
+// @param s: borrowed
+// @param d: borrowed
 fn locate_decl_anywhere(
 	s: *server,
 	d: *ast::decl,
@@ -911,6 +993,9 @@ fn locate_decl_anywhere(
 // Resolves a file path to its workspace_entry.uri (so we return owned
 // strings the index holds). Falls back to `file://<path>`-style by way
 // of a workspace_entry scan; if no match, returns the path itself.
+//
+// @param s: borrowed
+// @param path: borrowed
 fn fpe_uri(s: *server, path: str) str = {
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		if (s.workspace_index.entries[i].path == path) {
@@ -925,6 +1010,8 @@ fn fpe_uri(s: *server, path: str) str = {
 	return path;
 };
 
+// @param members: borrowed
+// @param name: borrowed
 fn lookup_in_members(
 	holder: located_type,
 	members: []ast::struct_member,
@@ -957,6 +1044,8 @@ fn lookup_in_members(
 // struct_field directly, but the type's loc.start.off is right after
 // the `:` separator, so we can find the name by walking back over
 // whitespace + `:` + whitespace + identifier bytes.
+//
+// @param data: borrowed
 fn field_name_range(data: []u8, f: ast::struct_field) (size, size) = {
 	let i = f._type.loc.start.off: size;
 	// Walk back over whitespace before the type.
@@ -990,6 +1079,10 @@ fn is_sm_ws(b: u8) bool = {
 // --- Response builders. ---
 // Tries to send a hover response for a struct-member ident. Returns
 // true if it handled the request (sent a response); false otherwise.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
 export fn try_send_struct_member_hover(
 	s: *server,
 	r: lsp::request,
@@ -1055,6 +1148,10 @@ export fn try_send_struct_member_hover(
 
 // Tries to send a definition / declaration / implementation response
 // for a struct-member ident. Returns true if it handled the request.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
 export fn try_send_struct_member_definition(
 	s: *server,
 	r: lsp::request,
@@ -1100,6 +1197,10 @@ export fn try_send_struct_member_definition(
 // Renders a struct field's signature line for hover. Format mirrors
 // what we already show for top-level decls:
 //   (field) name: type
+//
+// @param name: borrowed
+// @param t: borrowed
+// @returns: owned
 fn render_field_signature(name: str, t: *ast::_type) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);

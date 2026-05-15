@@ -39,14 +39,19 @@ def INDEX_INLINE_BATCHES: size = 4;
 
 // One queued indexing job. Owned by `server.pending_index_jobs`.
 export type workspace_index_job = struct {
+	// @owned
 	paths: []str,
 	cursor: size,
 	total: size,
+	// @owned
 	token: progress_token,
 	// The index the job populates (workspace or stdlib).
+	// @borrowed
 	target: *analysis::workspace_index,
 	// Human-readable progress title and completion log message.
+	// @borrowed
 	title: str,
+	// @borrowed
 	done_msg_prefix: str,
 	// Whether the begin/report progress notifications have been sent.
 	begin_sent: bool,
@@ -71,6 +76,12 @@ export type workspace_index_job = struct {
 // slice and its strings. If an existing job is already populating the
 // same `target`, the new paths are appended to it instead of creating a
 // second job.
+//
+// @param s: borrowed
+// @param roots: borrowed
+// @param target: borrowed
+// @param title: borrowed
+// @param done_msg_prefix: borrowed
 export fn start_index_job(
 	s: *server,
 	roots: []str,
@@ -130,6 +141,8 @@ export fn start_index_job(
 
 // Drains one batch of the head job (if any). Called from the main
 // dispatch loop between messages. No-op when the queue is empty.
+//
+// @param s: borrowed
 export fn drain_index_job(s: *server) void = {
 	if (len(s.pending_index_jobs) == 0) return;
 	const job = s.pending_index_jobs[0];
@@ -139,6 +152,7 @@ export fn drain_index_job(s: *server) void = {
 	};
 };
 
+// @param s: borrowed
 fn drain_index_job_inline(s: *server, max_batches: size) void = {
 	for (let i = 0z; i < max_batches; i += 1) {
 		if (len(s.pending_index_jobs) == 0) return;
@@ -150,6 +164,8 @@ fn drain_index_job_inline(s: *server, max_batches: size) void = {
 	};
 };
 
+// @param s: borrowed
+// @param job: borrowed
 fn drain_one_batch(s: *server, job: *workspace_index_job) void = {
 	if (!job.begin_sent) {
 		progress_begin(s, job.token, job.title, "", 0, true);
@@ -174,6 +190,7 @@ fn drain_one_batch(s: *server, job: *workspace_index_job) void = {
 	};
 };
 
+// @param s: borrowed
 fn finish_head_job(s: *server) void = {
 	if (len(s.pending_index_jobs) == 0) return;
 	const job = s.pending_index_jobs[0];
@@ -192,6 +209,10 @@ fn finish_head_job(s: *server) void = {
 	delete(s.pending_index_jobs[0]);
 };
 
+// @param s: borrowed
+// @param target: borrowed
+// @param paths: borrowed
+// @param done_msg_prefix: borrowed
 fn drain_paths_no_progress(
 	s: *server,
 	target: *analysis::workspace_index,
@@ -209,6 +230,8 @@ fn drain_paths_no_progress(
 
 // Releases all queued jobs at server shutdown. Does not emit progress
 // notifications — the transport is going away.
+//
+// @param s: borrowed
 export fn finish_pending_index(s: *server) void = {
 	for (let i = 0z; i < len(s.pending_index_jobs); i += 1) {
 		const job = s.pending_index_jobs[i];

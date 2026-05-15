@@ -38,6 +38,7 @@ export type binding_kind = enum {
 // is acceptable for rename within a single file since the e2e shadowing
 // test only requires outer scopes to be unaffected).
 export type scope_binding = struct {
+	// @owned
 	name: str,
 	kind: binding_kind,
 	name_span: ast::location,
@@ -48,7 +49,9 @@ export type scope_binding = struct {
 // A node in the scope tree. Owns its bindings; children are owned by the
 // containing scope_graph.
 export type scope_node = struct {
+	// @borrowed
 	parent: nullable *scope_node,
+	// @owned
 	bindings: []scope_binding,
 	children: []*scope_node,
 	start: u32,
@@ -59,12 +62,16 @@ export type scope_node = struct {
 // scope; toplevel decls live here. `nodes` keeps a flat list of every
 // allocated scope_node so finish_scope_graph can free them all.
 export type scope_graph = struct {
+	// @borrowed
 	root: *scope_node,
+	// @owned
 	nodes: []*scope_node,
 };
 
 // Builds a scope graph from a parsed subunit. AST locations must already
 // be in byte offsets (post-fixup_parse_result).
+//
+// @param su: borrowed
 export fn build_scope_graph(su: *ast::subunit) scope_graph = {
 	let g = scope_graph {
 		root = alloc_scope_node(null, 0, ~0u32),
@@ -91,6 +98,8 @@ export fn build_scope_graph(su: *ast::subunit) scope_graph = {
 };
 
 // Releases memory owned by the scope graph.
+//
+// @param g: borrowed
 export fn finish_scope_graph(g: *scope_graph) void = {
 	for (let i = 0z; i < len(g.nodes); i += 1) {
 		const n = g.nodes[i];
@@ -107,6 +116,9 @@ export fn finish_scope_graph(g: *scope_graph) void = {
 // Resolves the cursor at `off` to the innermost scope binding for `name`.
 // Walks the innermost scope outward through parents. Returns void when no
 // binding is in scope.
+//
+// @param g: borrowed
+// @param name: borrowed
 export fn resolve_binding_at_byte(
 	g: *scope_graph,
 	name: str,
@@ -142,6 +154,7 @@ export fn resolve_binding_at_byte(
 	return void;
 };
 
+// @param node: borrowed
 fn find_innermost_scope(node: *scope_node, off: u32) *scope_node = {
 	for (let i = 0z; i < len(node.children); i += 1) {
 		const c = node.children[i];
@@ -152,6 +165,7 @@ fn find_innermost_scope(node: *scope_node, off: u32) *scope_node = {
 	return node;
 };
 
+// @param parent: borrowed
 fn alloc_scope_node(
 	parent: nullable *scope_node,
 	start: u32,
@@ -166,6 +180,8 @@ fn alloc_scope_node(
 	})!;
 };
 
+// @param g: borrowed
+// @param parent: borrowed
 fn push_scope(
 	g: *scope_graph,
 	parent: *scope_node,
@@ -178,6 +194,8 @@ fn push_scope(
 	return n;
 };
 
+// @param scope: borrowed
+// @param name: borrowed
 fn add_binding(
 	scope: *scope_node,
 	name: str,
@@ -196,6 +214,8 @@ fn add_binding(
 	})!;
 };
 
+// @param root: borrowed
+// @param d: borrowed
 fn add_toplevel_binding(root: *scope_node, d: *ast::decl) void = {
 	const (id, name_loc) = match (d.decl) {
 	case let f: ast::decl_func =>
@@ -214,6 +234,9 @@ fn add_toplevel_binding(root: *scope_node, d: *ast::decl) void = {
 	add_binding(root, name, binding_kind::TOPLEVEL_DECL, name_loc, 0, ~0u32);
 };
 
+// @param g: borrowed
+// @param parent: borrowed
+// @param d: borrowed
 fn walk_func(
 	g: *scope_graph,
 	parent: *scope_node,
@@ -243,6 +266,9 @@ fn walk_func(
 	walk_expr(g, fn_scope, body);
 };
 
+// @param g: borrowed
+// @param scope: borrowed
+// @param e: borrowed
 fn walk_expr(g: *scope_graph, scope: *scope_node, e: *ast::expr) void = {
 	match (e.expr) {
 	case let b: ast::binding_expr =>
@@ -429,6 +455,9 @@ fn walk_expr(g: *scope_graph, scope: *scope_node, e: *ast::expr) void = {
 	};
 };
 
+// @param g: borrowed
+// @param scope: borrowed
+// @param mc: borrowed
 fn walk_match_case(
 	g: *scope_graph,
 	scope: *scope_node,
@@ -450,6 +479,7 @@ fn walk_match_case(
 	};
 };
 
+// @param exprs: borrowed
 fn case_expr_range(exprs: []*ast::expr) (u32, u32) = {
 	if (len(exprs) == 0) return (0u32, 0u32);
 	const s = exprs[0].loc.start.off: u32;

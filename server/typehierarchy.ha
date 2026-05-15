@@ -19,6 +19,7 @@ use hare::ast;
 use lsp;
 use strings;
 
+// @param s: borrowed
 export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos_th(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -63,6 +64,8 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 // idents in the underlying doesn't produce duplicate items. Cycle
 // avoidance across calls (e.g. A -> B -> A) is the client's
 // responsibility - the server returns one level per call.
+//
+// @param s: borrowed
 export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	const item = match (parse_item(r.params)) {
 	case let v: type_item =>
@@ -154,6 +157,9 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 // Returns a borrowed pointer to the subunit for a URI. Prefers the
 // open-document parse cache when the URI matches an open doc;
 // otherwise consults the on-disk file_parse_cache.
+//
+// @param s: borrowed
+// @param uri: borrowed
 fn load_subunit(s: *server, uri: str) (*ast::subunit | void) = {
 	match (find_document(s, uri)) {
 	case let d: *document =>
@@ -177,6 +183,8 @@ fn load_subunit(s: *server, uri: str) (*ast::subunit | void) = {
 // dedupe by (uri, name) so two decls in the same file that share a
 // short_name don't both emit. Cycle avoidance across calls is the
 // client's responsibility.
+//
+// @param s: borrowed
 export fn handle_subtypes(s: *server, r: lsp::request) void = {
 	const item = match (parse_item(r.params)) {
 	case let v: type_item =>
@@ -286,6 +294,10 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 
 // Returns the workspace_entry for the TYPE decl at (path, name), or
 // void when none exists. Used to anchor the supertypes/subtypes filter.
+//
+// @param s: borrowed
+// @param path: borrowed
+// @param name: borrowed
 fn find_workspace_type_entry(
 	s: *server,
 	path: str,
@@ -307,6 +319,7 @@ type type_item = struct {
 	uri: str,
 };
 
+// @param p: borrowed
 fn parse_item(p: (json::value | void)) (type_item | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -363,6 +376,8 @@ fn free_type_item(t: type_item) void = {
 	free(t.uri);
 };
 
+// @param su: borrowed
+// @param name: borrowed
 fn find_type_decl(su: *ast::subunit, name: str) (*ast::decl | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
@@ -377,6 +392,7 @@ fn find_type_decl(su: *ast::subunit, name: str) (*ast::decl | void) = {
 	return void;
 };
 
+// @param d: borrowed
 fn decl_type_short_name(d: *ast::decl) str = {
 	match (d.decl) {
 	case let t: ast::decl_type =>
@@ -387,8 +403,11 @@ fn decl_type_short_name(d: *ast::decl) str = {
 	};
 };
 
+// @param uri: borrowed
 fn uri_to_path_th(uri: str) str = lsp::uri_decode_path(uri);
 
+// @param slice: borrowed
+// @param needle: borrowed
 fn str_in(slice: []str, needle: str) bool = {
 	for (let i = 0z; i < len(slice); i += 1) {
 		if (slice[i] == needle) return true;
@@ -400,6 +419,13 @@ fn str_in(slice: []str, needle: str) bool = {
 // TypeHierarchyItem per match into `arr`. Skips an entry if its
 // (uri, name) matches `self_uri`+`self_name` (the input item) or is
 // already in `visited` (this-response dedup).
+//
+// @param s: borrowed
+// @param name: borrowed
+// @param arr: borrowed
+// @param visited: borrowed
+// @param self_uri: borrowed
+// @param self_name: borrowed
 fn emit_workspace_type_items(
 	s: *server,
 	name: str,
@@ -440,6 +466,9 @@ fn emit_workspace_type_items(
 	};
 };
 
+// @param vis: borrowed
+// @param uri: borrowed
+// @param name: borrowed
 fn visited_pair_has(vis: [](str, str), uri: str, name: str) bool = {
 	for (let i = 0z; i < len(vis); i += 1) {
 		if (vis[i].0 == uri && vis[i].1 == name) return true;
@@ -447,6 +476,10 @@ fn visited_pair_has(vis: [](str, str), uri: str, name: str) bool = {
 	return false;
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param uri: borrowed
+// @param name: borrowed
 fn build_type_item(
 	s: *server,
 	doc: *document,
@@ -477,6 +510,11 @@ fn build_type_item(
 	return item;
 };
 
+// @param s: borrowed
+// @param path: borrowed
+// @param uri: borrowed
+// @param name: borrowed
+// @param text: borrowed
 fn build_type_item_for_path(
 	s: *server,
 	path: str,
@@ -510,6 +548,9 @@ fn build_type_item_for_path(
 // Returns the byte offset of `name` within data[span_start..span_end]
 // matched as a whole word. Falls back to `span_start` when not found,
 // so a malformed decl still produces a sensible (if imprecise) range.
+//
+// @param data: borrowed
+// @param name: borrowed
 fn find_ident_in_type_decl(
 	data: []u8,
 	span_start: size,
@@ -543,6 +584,7 @@ fn is_word_byte_th(b: u8) bool = {
 	return b == '_': u8;
 };
 
+// @param p: borrowed
 fn parse_pos_th(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -608,6 +650,9 @@ fn encode_range_th(
 	return r;
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param arr: owned
 fn send_array_th(s: *server, id: lsp::id, arr: []json::value) void = {
 	const v: json::value = arr;
 	defer json::finish(v);

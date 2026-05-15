@@ -212,6 +212,9 @@ export fn run_doctor() int = {
 
 // Splits a HAREPATH-style colon-separated path list into entries with
 // empty segments dropped. Returns an owned slice of borrowed substrings.
+//
+// @returns: owned
+// @param s: borrowed
 export fn parse_harepath(s: str) []str = {
 	let out: []str = [];
 	if (len(s) == 0) return out;
@@ -224,6 +227,8 @@ export fn parse_harepath(s: str) []str = {
 };
 
 // Returns true if `p` starts with '/'.
+//
+// @param p: borrowed
 export fn path_is_absolute(p: str) bool = {
 	if (len(p) == 0) return false;
 	const b = strings::toutf8(p);
@@ -231,6 +236,9 @@ export fn path_is_absolute(p: str) bool = {
 };
 
 // True when `<dir>/<relpath>` exists as a regular file.
+//
+// @param dir: borrowed
+// @param relpath: borrowed
 fn has_file(dir: str, relpath: str) bool = {
 	const full = strings::concat(dir, "/", relpath)!;
 	defer free(full);
@@ -239,6 +247,8 @@ fn has_file(dir: str, relpath: str) bool = {
 
 // True when `dir` looks like a Hare stdlib root - i.e. it contains any
 // of [[STDLIB_MARKERS]].
+//
+// @param dir: borrowed
 fn looks_like_stdlib(dir: str) bool = {
 	for (let i = 0z; i < len(STDLIB_MARKERS); i += 1) {
 		if (has_file(dir, STDLIB_MARKERS[i])) return true;
@@ -249,6 +259,8 @@ fn looks_like_stdlib(dir: str) bool = {
 // Walks $PATH and returns the first entry where `<dir>/<name>` is
 // executable. Returns void if not found. The result is a freshly
 // allocated string; caller frees.
+//
+// @param name: borrowed
 fn find_on_path(name: str) (str | void) = {
 	const path_env = match (os::getenv("PATH")) {
 	case let s: str =>
@@ -270,6 +282,8 @@ fn find_on_path(name: str) (str | void) = {
 };
 
 // True when `p` exists and is a directory.
+//
+// @param p: borrowed
 fn is_directory(p: str) bool = {
 	match (os::stat(p)) {
 	case let st: fs::filestat =>
@@ -280,6 +294,8 @@ fn is_directory(p: str) bool = {
 };
 
 // True when the user has write access to `p`.
+//
+// @param p: borrowed
 fn is_writable_dir(p: str) bool = {
 	match (os::access(p, os::amode::W_OK)) {
 	case let ok: bool =>
@@ -371,6 +387,7 @@ fn report_hare_version() void = {
 	fmt::printfln("     {}", first_line(trimmed))!;
 };
 
+// @param s: borrowed
 fn first_line(s: str) str = {
 	match (strings::index(s, '\n')) {
 	case let i: size =>

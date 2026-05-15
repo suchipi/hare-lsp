@@ -13,6 +13,9 @@ use strings;
 
 // Re-runs the recovering parser on the given document and publishes
 // diagnostics. Called from didOpen/didChange/didSave (parse-only path).
+//
+// @param s: borrowed
+// @param doc: borrowed
 export fn refresh_diagnostics(s: *server, doc: *document) void = {
 	let arr = parse_diagnostics_for_doc(s, doc);
 	publish_diagnostics(s, doc.uri, doc.version, arr);
@@ -22,6 +25,9 @@ export fn refresh_diagnostics(s: *server, doc: *document) void = {
 // didSave when config.enable_build_diagnostics is true. Build diagnostics
 // can name other files in the same module; we group them by URI and
 // publish each group separately.
+//
+// @param s: borrowed
+// @param doc: borrowed
 export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 	let parse_arr = parse_diagnostics_for_doc(s, doc);
 
@@ -131,6 +137,10 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 // frees the old `last_build_uris` and leaves the field empty — the
 // caller is responsible for assigning the new tracking set (or
 // leaving it empty if no build pass happened).
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param keep: borrowed
 fn clear_stale_build_uris(s: *server, doc: *document, keep: []str) void = {
 	for (let i = 0z; i < len(doc.last_build_uris); i += 1) {
 		const prev = doc.last_build_uris[i];
@@ -141,6 +151,8 @@ fn clear_stale_build_uris(s: *server, doc: *document, keep: []str) void = {
 	doc.last_build_uris = [];
 };
 
+// @param slice: borrowed
+// @param needle: borrowed
 fn str_in_uri_slice(slice: []str, needle: str) bool = {
 	for (let i = 0z; i < len(slice); i += 1) {
 		if (slice[i] == needle) return true;
@@ -148,6 +160,8 @@ fn str_in_uri_slice(slice: []str, needle: str) bool = {
 	return false;
 };
 
+// @param by_uri: borrowed
+// @param uri: borrowed
 fn find_or_create_uri_bucket(by_uri: *[](str, []json::value), uri: str) size = {
 	let bu = *by_uri;
 	for (let i = 0z; i < len(bu); i += 1) {
@@ -164,6 +178,10 @@ fn find_or_create_uri_bucket(by_uri: *[](str, []json::value), uri: str) size = {
 // Output is capped at [[MAX_DIAGNOSTICS_PER_FILE]]; when the parser
 // produced more errors than that, a synthetic trailing diagnostic at the
 // end of the buffer notes the truncation count.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @returns: owned
 fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 	const cache = parse_of(doc);
 	const r = &cache.pr;
@@ -245,6 +263,8 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 // Error (1) by default; messages mentioning "unused" or "unreachable"
 // downgrade to Warning (2) so they don't clutter the problems pane at
 // error severity.
+//
+// @param message: borrowed
 fn severity_for(message: str) f64 = {
 	if (strings::contains(message, "unused") ||
 			strings::contains(message, "unreachable")) {
@@ -258,6 +278,10 @@ fn severity_for(message: str) f64 = {
 // payload that the code-action handler reads to materialize the
 // removal edit. Detection is delegated to codeactions::find_unused_imports;
 // they are in the same module so no re-export is needed.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @returns: owned
 fn unused_import_diagnostics(s: *server, doc: *document) []json::value = {
 	let out: []json::value = [];
 	const cache = parse_of(doc);
@@ -315,6 +339,9 @@ def DIAG_TAG_UNNECESSARY: f64 = 1.0;
 // the producer (parser or compiler) to carry secondary source
 // locations alongside each diagnostic, which neither does today. A
 // future revision can plumb that through when the structure exists.
+//
+// @param d: borrowed
+// @param message: borrowed
 export fn apply_unnecessary_tag_if_match(
 	d: *json::object,
 	message: str,
@@ -329,6 +356,10 @@ export fn apply_unnecessary_tag_if_match(
 
 // Sends textDocument/publishDiagnostics. `diagnostics` is consumed: ownership
 // of the slice and its contents transfers into the wire encoding.
+//
+// @param s: borrowed
+// @param uri: borrowed
+// @param diagnostics: owned
 export fn publish_diagnostics(
 	s: *server,
 	uri: str,
@@ -353,6 +384,8 @@ export fn publish_diagnostics(
 
 // Encodes an lsp::range into a json::value. Local copy to avoid pulling
 // documents.ha helpers into here circularly.
+//
+// @returns: owned
 fn encode_range(r: lsp::range) json::value = {
 	let o = json::newobject();
 	let s_obj = json::newobject();
@@ -367,6 +400,9 @@ fn encode_range(r: lsp::range) json::value = {
 };
 
 // Clears all diagnostics for a URI. Used when a document is closed.
+//
+// @param s: borrowed
+// @param uri: borrowed
 export fn clear_diagnostics(s: *server, uri: str) void = {
 	publish_diagnostics(s, uri, 0, []);
 };
@@ -374,6 +410,8 @@ export fn clear_diagnostics(s: *server, uri: str) void = {
 // --- pull-model diagnostics -----------------------------------------
 // Handles textDocument/diagnostic. The client wants the current diagnostic
 // state for a single document.
+//
+// @param s: borrowed
 export fn handle_textdocument_diagnostic(s: *server, r: lsp::request) void = {
 	const obj = match (params_object_diag(r.params)) {
 	case let o: json::object =>
@@ -411,6 +449,8 @@ export fn handle_textdocument_diagnostic(s: *server, r: lsp::request) void = {
 // document. Scope is intentionally open documents only — pulling
 // diagnostics for every file in the workspace on demand would parse
 // each one and is rarely what clients actually want.
+//
+// @param s: borrowed
 export fn handle_workspace_diagnostic(s: *server, r: lsp::request) void = {
 	let items: []json::value = [];
 	for (let i = 0z; i < len(s.documents); i += 1) {
@@ -430,6 +470,8 @@ export fn handle_workspace_diagnostic(s: *server, r: lsp::request) void = {
 // Sends a workspace/diagnostic/refresh request to the client. Used after
 // the workspace index changes in a way that may have invalidated previous
 // reports.
+//
+// @param s: borrowed
 export fn request_diagnostic_refresh(s: *server) void = {
 	const id = next_outgoing_id(s);
 	if (!send_request(s, id, "workspace/diagnostic/refresh", json::_null)) {
@@ -440,6 +482,8 @@ export fn request_diagnostic_refresh(s: *server) void = {
 
 // Sends a workspace/inlayHint/refresh request to the client. Used after
 // a settings change that affects which hints are produced.
+//
+// @param s: borrowed
 export fn request_inlay_hint_refresh(s: *server) void = {
 	const id = next_outgoing_id(s);
 	if (!send_request(s, id, "workspace/inlayHint/refresh", json::_null)) {
@@ -448,6 +492,8 @@ export fn request_inlay_hint_refresh(s: *server) void = {
 	pending_remember(s, id, "workspace/inlayHint/refresh");
 };
 
+// @param items: owned
+// @returns: owned
 fn full_report(items: []json::value) json::value = {
 	let o = json::newobject();
 	json::set(&o, "kind", "full": json::value)!;
@@ -455,6 +501,9 @@ fn full_report(items: []json::value) json::value = {
 	return o;
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param result: owned
 fn send_to_client(s: *server, id: lsp::id, result: json::value) void = {
 	defer json::finish(result);
 	match (lsp::encode_response_result(s.out, id, result)) {
@@ -465,15 +514,22 @@ fn send_to_client(s: *server, id: lsp::id, result: json::value) void = {
 };
 
 // Thin aliases over the shared lsp::json_* helpers.
+//
+// @param p: borrowed
 fn params_object_diag(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
 
+// @param o: borrowed
+// @param key: borrowed
 fn object_field_object_diag(
 	o: *json::object,
 	key: str,
 ) (json::object | void) = lsp::json_obj(o, key);
 
+// @param o: borrowed
+// @param key: borrowed
+// @returns: borrowed from o
 fn object_string_diag(
 	o: *json::object,
 	key: str,

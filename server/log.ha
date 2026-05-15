@@ -50,6 +50,8 @@ export fn log_level_from_env() log_level = {
 
 // Parses a level name. Accepts "debug", "info", "warn"/"warning",
 // "error" in any case. Returns void if unrecognized.
+//
+// @param s: borrowed
 export fn parse_log_level(s: str) (log_level | void) = {
 	if (ascii::strcasecmp(s, "debug") == 0) return log_level::DEBUG;
 	if (ascii::strcasecmp(s, "info") == 0) return log_level::INFO;
@@ -67,18 +69,28 @@ export fn level_enabled(
 ) bool = lvl: int >= min: int;
 
 // --- emit helpers ----------------------------------------------------
+// @param s: borrowed
+// @param args: borrowed
 export fn slog_debug(s: *server, args: fmt::formattable...) void = log_args(s,
 	log_level::DEBUG, args...);
 
+// @param s: borrowed
+// @param args: borrowed
 export fn slog_info(s: *server, args: fmt::formattable...) void = log_args(s,
 	log_level::INFO, args...);
 
+// @param s: borrowed
+// @param args: borrowed
 export fn slog_warn(s: *server, args: fmt::formattable...) void = log_args(s,
 	log_level::WARN, args...);
 
+// @param s: borrowed
+// @param args: borrowed
 export fn slog_error(s: *server, args: fmt::formattable...) void = log_args(s,
 	log_level::ERROR, args...);
 
+// @param s: borrowed
+// @param args: borrowed
 fn log_args(s: *server, lvl: log_level, args: fmt::formattable...) void = {
 	if (!level_enabled(s.log_min_level, lvl)) return;
 	write_log_prefix(lvl);

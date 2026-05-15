@@ -19,10 +19,13 @@ use strings;
 // resolved module path (e.g. ["unix", "poll"]); `display` is the joined
 // string used as the hover header (e.g. "unix::poll").
 type module_hover_target = struct {
+	// @owned
 	segments: []str,
+	// @owned
 	display: str,
 };
 
+// @param t: owned
 fn finish_module_hover_target(t: module_hover_target) void = {
 	for (let i = 0z; i < len(t.segments); i += 1) {
 		free(t.segments[i]);
@@ -47,6 +50,11 @@ fn finish_module_hover_target(t: module_hover_target) void = {
 //     segment, regardless of which `::` it is.
 //   - Otherwise: the segment under the cursor caps the resolved path
 //     (segments[0..=cursor_seg]).
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @returns: owned
 fn detect_module_hover(
 	s: *server,
 	doc: *document,
@@ -113,6 +121,8 @@ fn detect_module_hover(
 	return build_target(ident, len(ident));
 };
 
+// @param ident: borrowed
+// @returns: owned
 fn build_target(ident: []str, take: size) module_hover_target = {
 	let segs: []str = [];
 	for (let i = 0z; i < take; i += 1) {
@@ -131,6 +141,9 @@ fn build_target(ident: []str, take: size) module_hover_target = {
 // `::` anchor to the first segment. If `off` is before the first segment
 // (e.g. on the `use ` keyword), returns void so the caller falls back to
 // the full ident.
+//
+// @param data: borrowed
+// @param ident: borrowed
 fn segment_index_at(
 	data: []u8,
 	ident: []str,
@@ -177,6 +190,9 @@ fn segment_index_at(
 // Like segment_index_at but for a code-position path run: segments are
 // already extracted, and we know they cover [run_start..run_end] tightly
 // with `::` separators between.
+//
+// @param data: borrowed
+// @param segments: borrowed
 fn segment_index_in_run(
 	data: []u8,
 	run_start: size,
@@ -202,6 +218,8 @@ fn segment_index_in_run(
 
 // Returns the start/end byte offsets of the longest `ident(::ident)*` run
 // that contains `off`. Returns void if `off` isn't inside such a run.
+//
+// @param data: borrowed
 export fn path_run_at(data: []u8, off: size) ((size, size) | void) = {
 	if (off > len(data)) return void;
 	// Walk left.
@@ -239,6 +257,7 @@ export fn path_run_at(data: []u8, off: size) ((size, size) | void) = {
 	return (s, e);
 };
 
+// @param b: borrowed
 fn any_ident_byte(b: []u8) bool = {
 	for (let i = 0z; i < len(b); i += 1) {
 		if (is_ident_byte_local(b[i])) return true;
@@ -249,6 +268,9 @@ fn any_ident_byte(b: []u8) bool = {
 // Splits the byte run at `start..end` on `::`. Returned slice strings
 // borrow from `data` only conceptually; we dup so the caller can free
 // them uniformly.
+//
+// @param data: borrowed
+// @returns: owned
 fn parse_path_segments(data: []u8, start: size, end: size) []str = {
 	let out: []str = [];
 	let i = start;
@@ -270,6 +292,8 @@ fn parse_path_segments(data: []u8, start: size, end: size) []str = {
 	return out;
 };
 
+// @param s: borrowed
+// @returns: owned
 fn strs_to_ident(s: []str) []str = {
 	let out: []str = [];
 	for (let i = 0z; i < len(s); i += 1) {
@@ -278,6 +302,7 @@ fn strs_to_ident(s: []str) []str = {
 	return out;
 };
 
+// @param s: owned
 fn free_str_slice(s: []str) void = {
 	for (let i = 0z; i < len(s); i += 1) {
 		free(s[i]);
@@ -295,6 +320,9 @@ fn is_ident_byte_local(b: u8) bool = {
 // Reads the README file for the module at `dir`, returning its contents
 // as a string. Returns void if no README exists or it can't be read.
 // Tries `dir/README` first (Hare convention).
+//
+// @param dir: borrowed
+// @returns: owned
 fn read_module_readme(dir: str) (str | void) = {
 	const path = strings::concat(dir, "/README")!;
 	defer free(path);
@@ -332,6 +360,11 @@ fn read_module_readme(dir: str) (str | void) = {
 // hover markdown for that module (signature line "module foo::bar"
 // followed by the README, with [[refs]] linkified). Caller frees. Returns
 // void if `off` isn't on a module path or the module has no README.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @returns: owned
 export fn try_module_hover(
 	s: *server,
 	doc: *document,

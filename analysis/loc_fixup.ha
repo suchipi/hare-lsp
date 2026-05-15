@@ -31,6 +31,9 @@ use hare::lex;
 // rune-index (the lex convention) into a byte offset into `data`.
 // Not idempotent — call once per parse, with the source bytes the
 // parse was performed against.
+//
+// @param r: borrowed
+// @param data: borrowed
 export fn fixup_parse_result(r: *parse_result, data: []u8) void = {
 	const r2b = build_rune_to_byte_table(data);
 	defer free(r2b);
@@ -45,6 +48,8 @@ export fn fixup_parse_result(r: *parse_result, data: []u8) void = {
 	};
 };
 
+// @param d: borrowed
+// @param r2b: borrowed
 fn fixup_decl(d: *ast::decl, r2b: []size, data_len: size) void = {
 	fixup_location(&d.loc, r2b, data_len);
 	match (d.decl) {
@@ -89,6 +94,8 @@ fn fixup_decl(d: *ast::decl, r2b: []size, data_len: size) void = {
 	};
 };
 
+// @param t: borrowed
+// @param r2b: borrowed
 fn fixup_type(t: *ast::_type, r2b: []size, data_len: size) void = {
 	fixup_location(&t.loc, r2b, data_len);
 	match (t.repr) {
@@ -144,6 +151,8 @@ fn fixup_type(t: *ast::_type, r2b: []size, data_len: size) void = {
 	};
 };
 
+// @param m: borrowed
+// @param r2b: borrowed
 fn fixup_struct_member(
 	m: *ast::struct_member,
 	r2b: []size,
@@ -158,6 +167,8 @@ fn fixup_struct_member(
 	};
 };
 
+// @param e: borrowed
+// @param r2b: borrowed
 fn fixup_expr(e: *ast::expr, r2b: []size, data_len: size) void = {
 	fixup_location(&e.loc, r2b, data_len);
 	match (e.expr) {
@@ -356,6 +367,8 @@ fn fixup_expr(e: *ast::expr, r2b: []size, data_len: size) void = {
 	};
 };
 
+// @param l: borrowed
+// @param r2b: borrowed
 fn fixup_literal(l: ast::literal_expr, r2b: []size, data_len: size) void = {
 	match (l) {
 	case ast::plain_literal => void;
@@ -372,6 +385,8 @@ fn fixup_literal(l: ast::literal_expr, r2b: []size, data_len: size) void = {
 	};
 };
 
+// @param s: borrowed
+// @param r2b: borrowed
 fn fixup_struct_literal(
 	s: *ast::struct_literal,
 	r2b: []size,
@@ -394,6 +409,9 @@ fn fixup_struct_literal(
 
 // Translates a single ast::location's start/end from rune-offsets to
 // byte-offsets in place.
+//
+// @param loc: borrowed
+// @param r2b: borrowed
 fn fixup_location(loc: *ast::location, r2b: []size, data_len: size) void = {
 	loc.start.off = translate_off(loc.start.off, r2b, data_len);
 	loc.end.off = translate_off(loc.end.off, r2b, data_len);
@@ -401,12 +419,17 @@ fn fixup_location(loc: *ast::location, r2b: []size, data_len: size) void = {
 
 // Same, for a bare lex::location (used by enum_field, func_param,
 // parse_diagnostic).
+//
+// @param loc: borrowed
+// @param r2b: borrowed
 fn fixup_lex_location(loc: *lex::location, r2b: []size, data_len: size) void = {
 	loc.off = translate_off(loc.off, r2b, data_len);
 };
 
 // Translates a single rune-offset to a byte offset. Out-of-range
 // indices clamp to data_len.
+//
+// @param r2b: borrowed
 fn translate_off(off: i64, r2b: []size, data_len: size) i64 = {
 	if (off < 0) return 0;
 	const u = off: size;
@@ -416,6 +439,9 @@ fn translate_off(off: i64, r2b: []size, data_len: size) i64 = {
 
 // Builds a slice mapping rune index -> byte offset. Length is
 // (rune count) + 1, so the past-the-end position translates too.
+//
+// @returns: owned
+// @param data: borrowed
 export fn build_rune_to_byte_table(data: []u8) []size = {
 	let out: []size = [];
 	let i = 0z;

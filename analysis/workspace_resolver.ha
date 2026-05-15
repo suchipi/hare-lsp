@@ -13,6 +13,9 @@ use strings;
 // Collects the short-name modules imported in the file's `use` block. For
 // `use io;` adds "io"; for `use foo::bar;` adds "bar" (the last segment).
 // Caller frees the slice and each string via [[free_str_slice]].
+//
+// @returns: owned
+// @param su: borrowed
 export fn collect_imported_module_names(su: *ast::subunit) []str = {
 	let out: []str = [];
 	for (let i = 0z; i < len(su.imports); i += 1) {
@@ -26,6 +29,9 @@ export fn collect_imported_module_names(su: *ast::subunit) []str = {
 // Like [[collect_imported_module_names]] but returns the full module identifier
 // ("unix::poll") rather than just the last segment. Used by callers that
 // need the full path for directory lookups.
+//
+// @returns: owned
+// @param su: borrowed
 export fn collect_imported_module_paths(su: *ast::subunit) []str = {
 	let out: []str = [];
 	for (let i = 0z; i < len(su.imports); i += 1) {
@@ -39,6 +45,10 @@ export fn collect_imported_module_paths(su: *ast::subunit) []str = {
 // Finds the full module identifier for an import whose last segment matches
 // `qualifier` ("poll" -> "unix::poll" if such an import exists). Returns
 // the empty string when nothing matches; the result is always allocated.
+//
+// @returns: owned
+// @param su: borrowed
+// @param qualifier: borrowed
 export fn full_module_for_qualifier(su: *ast::subunit, qualifier: str) str = {
 	for (let i = 0z; i < len(su.imports); i += 1) {
 		const id = su.imports[i].ident;
@@ -51,6 +61,9 @@ export fn full_module_for_qualifier(su: *ast::subunit, qualifier: str) str = {
 
 // Joins an `ast::ident` (a sequence of segments) into the canonical
 // `::`-separated form. Caller frees.
+//
+// @returns: owned
+// @param id: borrowed
 export fn join_module_ident(id: ast::ident) str = {
 	let out: []u8 = [];
 	for (let i = 0z; i < len(id); i += 1) {
@@ -67,6 +80,8 @@ export fn join_module_ident(id: ast::ident) str = {
 };
 
 // Frees each string in a slice, then frees the slice itself.
+//
+// @param s: owned
 export fn free_str_slice(s: []str) void = {
 	for (let i = 0z; i < len(s); i += 1) {
 		free(s[i]);
@@ -86,6 +101,13 @@ export fn free_str_slice(s: []str) void = {
 //
 // Returns void when no workspace match is found. Callers that also want
 // stdlib coverage layer that on top (see `server/navigation.ha`).
+//
+// @returns: borrowed from idx
+// @param idx: borrowed
+// @param su: borrowed
+// @param file_module: borrowed
+// @param qualifier: borrowed
+// @param name: borrowed
 export fn workspace_lookup_for_subunit(
 	idx: *workspace_index,
 	su: *ast::subunit,

@@ -179,6 +179,9 @@ fn read_max_body_env() (size | void) = {
 // `<dir>/<name>`. Returns void if `dir` is empty (logging disabled)
 // or on any I/O error, so the LSP still starts even when the log
 // directory isn't writable.
+//
+// @param dir: borrowed
+// @param name: borrowed
 fn open_log_in_dir(dir: str, name: str) (io::file | void) = {
 	if (len(dir) == 0) return;
 	const path = strings::concat(dir, "/", name)!;

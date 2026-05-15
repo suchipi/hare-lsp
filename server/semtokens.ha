@@ -89,6 +89,7 @@ export fn token_legend() json::value = {
 	return legend;
 };
 
+// @param s: borrowed
 export fn handle_semantic_tokens_full(s: *server, r: lsp::request) void = {
 	const uri = match (uri_from_st(r.params)) {
 	case let s: str =>
@@ -122,6 +123,8 @@ export fn handle_semantic_tokens_full(s: *server, r: lsp::request) void = {
 // Delta encoding for semantic tokens. If the client's previousResultId
 // matches our stored id, we compute a coarse diff and emit a single edit
 // covering the differing slice. Otherwise we fall back to /full.
+//
+// @param s: borrowed
 export fn handle_semantic_tokens_full_delta(
 	s: *server,
 	r: lsp::request,
@@ -206,6 +209,7 @@ export fn handle_semantic_tokens_full_delta(
 	};
 };
 
+// @param s: borrowed
 export fn handle_semantic_tokens_range(s: *server, r: lsp::request) void = {
 	// Same data; clients filter by their own range. Full responses are
 	// fine here and avoid the complexity of a partial encoding.
@@ -216,6 +220,9 @@ export fn handle_semantic_tokens_range(s: *server, r: lsp::request) void = {
 //   - tokens prior to `lo` are identical in both arrays
 //   - tokens after `hi_old` (in old) and `hi_new` (in new) are identical
 //   - the slice [lo..hi_new) replaces [lo..hi_old) in the old array.
+//
+// @param old: borrowed
+// @param new: borrowed
 fn diff_bounds(old: []u32, new: []u32) (size, size, size) = {
 	const min_len = if (len(old) < len(new)) len(old) else len(new);
 	let lo: size = 0;
@@ -233,6 +240,7 @@ fn diff_bounds(old: []u32, new: []u32) (size, size, size) = {
 	return (lo, hi_old, hi_new);
 };
 
+// @param s: borrowed
 fn next_semantic_id(s: *server) str = {
 	const id = s.next_semantic_result_id;
 	s.next_semantic_result_id += 1;
@@ -250,11 +258,15 @@ fn next_semantic_id(s: *server) str = {
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
+// @param p: borrowed
 fn params_obj_st(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
 
 // Returns a flat []u32 of LSP-encoded token tuples for the given source.
+//
+// @param s: borrowed
+// @param data: borrowed
 fn compute_semantic_tokens(s: *server, data: []u8) []u32 = {
 	let result: []u32 = [];
 	let src = memio::fixed(data);
@@ -430,6 +442,9 @@ fn is_keyword(t: ltok) bool = {
 // for LIT_STR, a u64 for integer constants, a rune for LIT_RCONST) or
 // `lex::tokstr` (which returns canonical names like "u8" or "iconst" for
 // literal tokens, not the source spelling).
+//
+// @param data: borrowed
+// @param tok: borrowed
 fn token_byte_len(data: []u8, byte_off: size, tok: lex::token) size = {
 	if (byte_off >= len(data)) return 0;
 	const b = data[byte_off];
@@ -475,6 +490,7 @@ fn is_numeric_literal_kind(t: ltok) bool = {
 	};
 };
 
+// @param data: borrowed
 fn scan_numeric_literal(data: []u8, byte_off: size) size = {
 	let end = byte_off;
 	for (end < len(data)) {
@@ -513,6 +529,8 @@ fn scan_numeric_literal(data: []u8, byte_off: size) size = {
 // LSP semantic tokens can't span newlines. Returns `byte_end` if no
 // newline falls inside [byte_off, byte_end); otherwise the offset of
 // the newline byte.
+//
+// @param data: borrowed
 fn clip_to_line_end(data: []u8, byte_off: size, byte_end: size) size = {
 	const end = if (byte_end > len(data)) len(data) else byte_end;
 	for (let i = byte_off; i < end; i += 1) {
@@ -521,10 +539,17 @@ fn clip_to_line_end(data: []u8, byte_off: size, byte_end: size) size = {
 	return end;
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param tokens: borrowed
 fn send_tokens(s: *server, id: lsp::id, tokens: []u32) void = {
 	send_tokens_with_id(s, id, tokens, "");
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param tokens: borrowed
+// @param result_id: borrowed
 fn send_tokens_with_id(
 	s: *server,
 	id: lsp::id,
@@ -548,11 +573,14 @@ fn send_tokens_with_id(
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
 fn send_empty_tokens(s: *server, id: lsp::id) void = {
 	const empty: []u32 = [];
 	send_tokens(s, id, empty);
 };
 
+// @param p: borrowed
 fn uri_from_st(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
 	case let v: json::value =>

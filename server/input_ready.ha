@@ -22,6 +22,8 @@ use unix::poll;
 // disconnect or fd error also causes the caller to exit the drain loop
 // and let [[lsp::read]] surface the EOF or transport error through the
 // normal path.
+//
+// @param s: borrowed
 fn input_ready(s: *server) bool = {
 	if (len(bufio::scan_buffer(s.reader.src)) > 0) return true;
 	const fd = match (s.poll_fd) {

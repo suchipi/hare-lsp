@@ -11,6 +11,9 @@ use strings;
 // Returns the rendered signature and prose docs for `name` if it is a
 // Hare built-in function, language keyword, or primitive type, or void
 // otherwise. Both strings are freshly allocated; callers free them.
+//
+// @param name: borrowed
+// @returns: owned
 export fn lookup_builtin(name: str) ((str, str) | void) = {
 	for (let i = 0z; i < len(builtins); i += 1) {
 		if (builtins[i].name == name) {

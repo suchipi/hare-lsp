@@ -33,6 +33,8 @@ use strings;
 //   "Ownership: borrowed (heuristic: ...)"
 //
 // Caller frees.
+//
+// @returns: owned
 fn format_ownership_line(fact: analysis::ownership_fact, use_html: bool) str = {
 	if (fact.source == analysis::ownership_source::NONE) {
 		return strings::dup("")!;
@@ -61,6 +63,8 @@ fn kind_word(k: analysis::ownership) str = {
 };
 
 // Ownership fact for a local-file symbol (cached from indexing).
+//
+// @param sym: borrowed
 fn ownership_for_local_symbol(
 	sym: *analysis::symbol,
 ) analysis::ownership_fact = {
@@ -74,6 +78,8 @@ fn ownership_for_local_symbol(
 // Ownership fact for a workspace/stdlib entry. Layer 1 (annotations from
 // docs) first, then Layer 2 (stdlib table). When neither fires returns
 // the empty fact.
+//
+// @param e: borrowed
 fn ownership_for_workspace_entry(
 	e: *analysis::workspace_entry,
 ) analysis::ownership_fact = {
@@ -84,6 +90,8 @@ fn ownership_for_workspace_entry(
 
 // Ownership fact for a builtin name. Currently only `alloc` carries
 // ownership information; every other builtin returns the empty fact.
+//
+// @param name: borrowed
 fn ownership_for_builtin(name: str) analysis::ownership_fact = {
 	if (name == "alloc") {
 		return analysis::ownership_fact {
@@ -98,6 +106,10 @@ fn ownership_for_builtin(name: str) analysis::ownership_fact = {
 // Heuristic ownership for an expression. Used for local-binding hovers
 // (the init expression) and for any future expression-level hover.
 // Returns the empty fact when nothing matches.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param e: borrowed
 fn ownership_for_expr(
 	srv: *server,
 	doc: *document,
@@ -157,6 +169,10 @@ fn ownership_for_expr(
 // the callee's ownership. `alloc(...)` is special-cased via
 // `ownership_for_builtin`. Returns empty if the callee is unresolvable
 // or carries no ownership info.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param c: borrowed
 fn ownership_for_call(
 	srv: *server,
 	doc: *document,
@@ -191,6 +207,10 @@ fn ownership_for_call(
 
 // Ownership for the value bound by a local `let`/`const` binding: walks
 // the init expression with the heuristic walker.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param b: borrowed
 fn ownership_for_local_binding(
 	srv: *server,
 	doc: *document,
@@ -203,6 +223,10 @@ fn ownership_for_local_binding(
 // symbol in the file index and reads the cached param_ownerships slot.
 // Returns empty if the function isn't in the local index (e.g. cursor
 // is inside an unindexable decl).
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param param_name: borrowed
 fn ownership_for_param(
 	srv: *server,
 	doc: *document,
@@ -247,6 +271,11 @@ fn ownership_for_param(
 //
 // Mirrors the same dispatch as `find_local_binding`: function parameter
 // first, then `let`/`const` bindings.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param name: borrowed
 fn local_target_ownership(
 	srv: *server,
 	doc: *document,

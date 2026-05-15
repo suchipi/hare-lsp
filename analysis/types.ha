@@ -18,6 +18,10 @@ use strings;
 
 // Returns a best-effort type label for the expression at the given byte
 // offset within the file, or void if unknown.
+//
+// @returns: owned
+// @param text: borrowed
+// @param su: borrowed
 export fn type_of_expr_at(
 	text: []u8,
 	su: *ast::subunit,
@@ -51,6 +55,7 @@ export fn type_of_expr_at(
 	return void;
 };
 
+// @param t: borrowed
 fn render_type(t: *ast::_type) str = {
 	let buf = memio::dynamic();
 	defer match (io::close(&buf)) {
@@ -64,6 +69,7 @@ fn render_type(t: *ast::_type) str = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
+// @param e: borrowed
 fn type_of_literal(e: *ast::expr) (str | void) = {
 	match (e.expr) {
 	case let l: ast::literal_expr =>

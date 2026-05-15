@@ -98,6 +98,7 @@ def CIK_CONSTANT: f64 = 21.0;
 
 def CIK_MODULE: f64 = 9.0;
 
+// @param s: borrowed
 export fn handle_completion(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos_comp(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -161,6 +162,7 @@ type prefix_info = struct {
 	,
 };
 
+// @param data: borrowed
 fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 	// Find the start of the current ident-or-empty token.
 	let s = off;
@@ -210,6 +212,8 @@ def SORT_WORKSPACE: str = "2-";
 
 def SORT_KEYWORD: str = "3-";
 
+// @param arr: borrowed
+// @param partial: borrowed
 fn add_keywords(arr: *[]json::value, partial: str) void = {
 	let a = *arr;
 	for (let i = 0z; i < len(KEYWORDS); i += 1) {
@@ -226,6 +230,9 @@ fn add_keywords(arr: *[]json::value, partial: str) void = {
 	*arr = a;
 };
 
+// @param arr: borrowed
+// @param doc: borrowed
+// @param partial: borrowed
 fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 	let a = *arr;
 	const cache = parse_of(doc);
@@ -251,6 +258,10 @@ fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 	*arr = a;
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param arr: borrowed
+// @param partial: borrowed
 fn add_workspace_symbols(
 	s: *server,
 	doc: *document,
@@ -294,6 +305,8 @@ fn add_workspace_symbols(
 // Returns the list of module names already imported by `doc`, using the
 // last segment of each import's ident path as the module name. Caller
 // frees with strings_free_all.
+//
+// @param doc: borrowed
 fn doc_imported_modules(doc: *document) []str = {
 	let out: []str = [];
 	const cache = parse_of(doc);
@@ -306,6 +319,7 @@ fn doc_imported_modules(doc: *document) []str = {
 	return out;
 };
 
+// @param list: owned
 fn strings_free_all(list: []str) void = {
 	for (let i = 0z; i < len(list); i += 1) {
 		free(list[i]);
@@ -318,6 +332,12 @@ fn strings_free_all(list: []str) void = {
 // item that inserts `use <module>;` near the top of the file. The
 // inserted module is the leaf directory name (workspace_entry.module);
 // nested module paths like `encoding::json` are not yet recovered.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param item: borrowed
+// @param module: borrowed
+// @param imported: borrowed
 fn attach_auto_import(
 	s: *server,
 	doc: *document,
@@ -369,6 +389,10 @@ fn attach_auto_import(
 	json::put(item, "additionalTextEdits", edits: json::value)!;
 };
 
+// @param s: borrowed
+// @param arr: borrowed
+// @param module: borrowed
+// @param partial: borrowed
 fn add_module_members(
 	s: *server,
 	arr: *[]json::value,
@@ -410,6 +434,10 @@ fn add_module_members(
 // plus insertTextFormat: 2 (Snippet). For zero-arg functions emits
 // "name()$0". param_names may contain empty strings for unnamed params,
 // in which case we substitute `p<N>`.
+//
+// @param item: borrowed
+// @param name: borrowed
+// @param param_names: borrowed
 fn attach_function_snippet(
 	item: *json::object,
 	name: str,
@@ -482,6 +510,8 @@ fn symbol_kind_to_completion(k: analysis::symbol_kind) f64 = {
 
 // completionItem/resolve: just echo the input for now. Future revisions
 // will fetch the long doc here.
+//
+// @param s: borrowed
 export fn handle_completion_resolve(s: *server, r: lsp::request) void = {
 	const v: json::value = match (r.params) {
 	case let v: json::value =>
@@ -502,6 +532,7 @@ export fn handle_completion_resolve(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param p: borrowed
 fn parse_pos_comp(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -551,6 +582,9 @@ fn parse_pos_comp(p: (json::value | void)) ((str, lsp::position) | void) = {
 	return (uri, pos);
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param arr: owned
 fn send_array_comp(s: *server, id: lsp::id, arr: []json::value) void = {
 	let result = json::newobject();
 	json::put(&result, "isIncomplete", false: json::value)!;

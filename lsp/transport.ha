@@ -28,14 +28,19 @@ export type content_too_large = !size;
 export def DEFAULT_MAX_BODY: size = 32 * 1024 * 1024; // 32 MiB
 
 export type reader = struct {
+	// @borrowed
 	src: *bufio::scanner,
 	max_body: size,
 	// Reusable buffer for the message body. Grown on demand; never shrunk.
+	//
+	// @owned
 	body_buf: []u8,
 	// Captures the raw header bytes read during the most recent [[read]]
 	// call (including \r\n delimiters). Cleared at the start of every
 	// call; on transport-error return, callers can inspect via
 	// [[last_header_bytes]] to see what we did parse before the error.
+	//
+	// @owned
 	diag_header: []u8,
 };
 
@@ -43,6 +48,8 @@ export type reader = struct {
 //
 // The caller retains ownership of the underlying scanner and must call
 // [[bufio::finish]] on it after the reader is no longer needed.
+//
+// @param src: borrowed
 export fn new_reader(src: *bufio::scanner) reader = reader {
 	src = src,
 	max_body = DEFAULT_MAX_BODY,
@@ -51,6 +58,8 @@ export fn new_reader(src: *bufio::scanner) reader = reader {
 };
 
 // Like [[new_reader]] but with a custom maximum body size.
+//
+// @param src: borrowed
 export fn new_reader_with_limit(
 	src: *bufio::scanner,
 	max_body: size,
@@ -62,6 +71,8 @@ export fn new_reader_with_limit(
 };
 
 // Frees memory associated with a reader. Does not close the underlying handle.
+//
+// @param r: borrowed
 export fn finish_reader(r: *reader) void = {
 	free(r.body_buf);
 	free(r.diag_header);
@@ -70,12 +81,18 @@ export fn finish_reader(r: *reader) void = {
 // Returns the raw header bytes (including \r\n line endings) captured
 // during the most recent [[read]] call. Diagnostic only: useful when a
 // transport error returns to dump the partial header block to the log.
+//
+// @returns: borrowed from r
+// @param r: borrowed
 export fn last_header_bytes(r: *reader) const []u8 = r.diag_header;
 
 // Reads the next LSP message body from the stream.
 //
 // On success, returns a slice borrowed from the reader's internal buffer that
 // remains valid only until the next call to [[read]] on the same reader.
+//
+// @returns: borrowed from r
+// @param r: borrowed
 //
 // Per LSP base protocol, the framing is:
 //
@@ -189,6 +206,8 @@ export fn safe_close(h: io::handle) void = {
 //
 // The body is sent verbatim as the Content-Length-prefixed payload. Returns
 // the total number of bytes written (headers + blank line + body).
+//
+// @param body: borrowed
 export fn write(out: io::handle, body: const []u8) (size | io::error) = {
 	let total = 0z;
 	total += fmt::fprintf(out, "Content-Length: {}\r\n\r\n", len(body))?;
@@ -199,6 +218,9 @@ export fn write(out: io::handle, body: const []u8) (size | io::error) = {
 // Case-insensitive comparison against a lowercase ASCII literal. The literal
 // argument MUST be lowercase ASCII; the input string is compared byte-by-byte
 // with ASCII letters folded to lowercase. Non-ASCII bytes are not folded.
+//
+// @param input: borrowed
+// @param lower: borrowed
 fn header_eq(input: str, lower: str) bool = {
 	const a = strings::toutf8(input);
 	const b = strings::toutf8(lower);
@@ -215,6 +237,9 @@ fn header_eq(input: str, lower: str) bool = {
 
 // Returns a human-readable description of a transport error. The result may be
 // statically allocated and is overwritten on subsequent calls.
+//
+// @returns: borrowed
+// @param err: borrowed
 export fn strerror(err: transport_error) const str = {
 	static let buf: [256]u8 = [0...];
 	match (err) {

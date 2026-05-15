@@ -25,12 +25,15 @@ export type comment_info = struct {
 	is_trailing: bool,
 	// Text AFTER the `//`, with no leading space stripped and no
 	// trailing newline. Allocated string; freed by `finish_comments`.
+	//
+	// @owned
 	text: str,
 };
 
 // Cursor into a sorted comment list. Builders advance it past byte
 // offsets and pop the comments that fall before each position.
 export type comment_cursor = struct {
+	// @borrowed
 	comments: []comment_info,
 	pos: size,
 };
@@ -41,6 +44,9 @@ export type comment_cursor = struct {
 //
 // Returned slice is sorted by start_off. Caller frees via
 // finish_comments.
+//
+// @param data: borrowed
+// @returns: owned
 export fn collect_comments(data: []u8) []comment_info = {
 	let out: []comment_info = [];
 	let line: size = 0;
@@ -111,6 +117,8 @@ export fn collect_comments(data: []u8) []comment_info = {
 };
 
 // Frees all memory owned by a comment list.
+//
+// @param cs: owned
 export fn finish_comments(cs: []comment_info) void = {
 	for (let i = 0z; i < len(cs); i += 1) {
 		free(cs[i].text);
@@ -121,6 +129,9 @@ export fn finish_comments(cs: []comment_info) void = {
 // Returns a slice (borrowed from the cursor's comment list) of all
 // comments whose `start_off < boundary`, and advances the cursor past
 // them. Returns an empty slice if none.
+//
+// @param c: borrowed
+// @returns: borrowed from c
 export fn pop_before(c: *comment_cursor, boundary: size) []comment_info = {
 	const start = c.pos;
 	for (c.pos < len(c.comments) &&
@@ -129,6 +140,9 @@ export fn pop_before(c: *comment_cursor, boundary: size) []comment_info = {
 };
 
 // Returns (without consuming) the next pending comment, or void.
+//
+// @param c: borrowed
+// @returns: borrowed from c
 export fn peek(c: *comment_cursor) (*comment_info | void) = {
 	if (c.pos >= len(c.comments)) return;
 	return &c.comments[c.pos];
@@ -136,6 +150,8 @@ export fn peek(c: *comment_cursor) (*comment_info | void) = {
 
 // True iff there's a pending comment whose start_off lies in
 // [low, high).
+//
+// @param c: borrowed
 export fn has_in_range(c: *comment_cursor, low: size, high: size) bool = {
 	for (let i = c.pos; i < len(c.comments); i += 1) {
 		const off = c.comments[i].start_off;
@@ -158,6 +174,9 @@ export type blank_lines = []size;
 // `\n` in the run is recorded. `blank_between(prev_end, next_start)`
 // returns true iff at least one such offset falls in
 // `(prev_end, next_start)`. Caller frees with `free()`.
+//
+// @param data: borrowed
+// @returns: owned
 export fn collect_blank_lines(data: []u8) blank_lines = {
 	let out: []size = [];
 	let i = 0z;
@@ -212,6 +231,8 @@ export fn collect_blank_lines(data: []u8) blank_lines = {
 // Returns true iff at least one blank-line offset from `bl` lies in
 // the open interval (prev_end, next_start). Linear scan; the input is
 // sorted so a binary search would be a future micro-optimization.
+//
+// @param bl: borrowed
 export fn blank_between(
 	bl: blank_lines,
 	prev_end: size,

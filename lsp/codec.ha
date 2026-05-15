@@ -20,6 +20,10 @@ use strings;
 // returned as-is from the json::value (no copies).
 // Returns the value at obj[key] as a string, or void if the key is
 // absent or the value isn't a string.
+//
+// @returns: borrowed from o
+// @param o: borrowed
+// @param key: borrowed
 export fn json_str(o: *json::object, key: str) (str | void) = {
 	const p = match (json::get(o, key)) {
 	case let p: *json::value =>
@@ -36,6 +40,9 @@ export fn json_str(o: *json::object, key: str) (str | void) = {
 };
 
 // Returns the value at obj[key] as a number, or void.
+//
+// @param o: borrowed
+// @param key: borrowed
 export fn json_num(o: *json::object, key: str) (f64 | void) = {
 	const p = match (json::get(o, key)) {
 	case let p: *json::value =>
@@ -52,6 +59,10 @@ export fn json_num(o: *json::object, key: str) (f64 | void) = {
 };
 
 // Returns the value at obj[key] as an object, or void.
+//
+// @returns: borrowed from o
+// @param o: borrowed
+// @param key: borrowed
 export fn json_obj(o: *json::object, key: str) (json::object | void) = {
 	const p = match (json::get(o, key)) {
 	case let p: *json::value =>
@@ -68,6 +79,10 @@ export fn json_obj(o: *json::object, key: str) (json::object | void) = {
 };
 
 // Returns the value at obj[key] as an array, or void.
+//
+// @returns: borrowed from o
+// @param o: borrowed
+// @param key: borrowed
 export fn json_arr(o: *json::object, key: str) ([]json::value | void) = {
 	const p = match (json::get(o, key)) {
 	case let p: *json::value =>
@@ -84,6 +99,9 @@ export fn json_arr(o: *json::object, key: str) ([]json::value | void) = {
 };
 
 // Returns the value at obj[key] as a bool, or void.
+//
+// @param o: borrowed
+// @param key: borrowed
 export fn json_bool(o: *json::object, key: str) (bool | void) = {
 	const p = match (json::get(o, key)) {
 	case let p: *json::value =>
@@ -101,6 +119,9 @@ export fn json_bool(o: *json::object, key: str) (bool | void) = {
 
 // Unwraps `(json::value | void)` (the typical type of a request's
 // `params`) into a json::object, or returns void if it's not an object.
+//
+// @returns: borrowed from p
+// @param p: borrowed
 export fn params_object(p: (json::value | void)) (json::object | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -117,6 +138,7 @@ export fn params_object(p: (json::value | void)) (json::object | void) = {
 };
 
 // --- Position --------------------------------------------------------
+// @returns: owned
 export fn encode_position(p: position) (json::value | nomem) = {
 	let o = json::newobject();
 	let ok = false;
@@ -127,6 +149,7 @@ export fn encode_position(p: position) (json::value | nomem) = {
 	return o;
 };
 
+// @param v: borrowed
 export fn decode_position(v: json::value) (position | bad_message) = {
 	const o = match (v) {
 	case let o: json::object =>
@@ -160,6 +183,7 @@ export fn decode_position(v: json::value) (position | bad_message) = {
 };
 
 // --- Range ------------------------------------------------------------
+// @returns: owned
 export fn encode_range(r: range) (json::value | nomem) = {
 	let o = json::newobject();
 	let ok = false;
@@ -170,6 +194,7 @@ export fn encode_range(r: range) (json::value | nomem) = {
 	return o;
 };
 
+// @param v: borrowed
 export fn decode_range(v: json::value) (range | bad_message) = {
 	const o = match (v) {
 	case let o: json::object =>
@@ -193,6 +218,7 @@ export fn decode_range(v: json::value) (range | bad_message) = {
 };
 
 // --- Location ---------------------------------------------------------
+// @returns: owned
 export fn encode_location(l: location) (json::value | nomem) = {
 	let o = json::newobject();
 	let ok = false;
@@ -204,6 +230,8 @@ export fn encode_location(l: location) (json::value | nomem) = {
 };
 
 // --- TextDocumentIdentifier ------------------------------------------
+// @returns: owned
+// @param v: borrowed
 export fn decode_text_document_identifier(
 	v: json::value,
 ) (text_document_identifier | bad_message) = {
@@ -228,6 +256,7 @@ export fn decode_text_document_identifier(
 };
 
 // --- Diagnostic -------------------------------------------------------
+// @returns: owned
 export fn encode_diagnostic(d: diagnostic) (json::value | nomem) = {
 	let o = json::newobject();
 	let ok = false;
@@ -282,6 +311,9 @@ export fn encode_diagnostic(d: diagnostic) (json::value | nomem) = {
 // Invalid `%XX` sequences (non-hex digits, truncated at end of input)
 // are passed through verbatim; the caller will get a non-existent path
 // and io::open will fail, which is the right failure mode.
+//
+// @returns: owned
+// @param uri: borrowed
 export fn uri_decode_path(uri: str) str = {
 	const scheme = "file://";
 	const rest = if (strings::hasprefix(uri, scheme)) {

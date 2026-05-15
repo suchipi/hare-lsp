@@ -34,6 +34,7 @@ use strings;
 // `text` is empty and the segment matches zero-or-more path components.
 // Otherwise `text` is fnmatch'd against exactly one path component.
 export type pattern_segment = struct {
+	// @owned
 	text: str,
 	double_star: bool,
 };
@@ -52,6 +53,8 @@ export type pattern = struct {
 	dir_only: bool,
 	// Compiled segments (split on `/`). For an unanchored pattern with
 	// no internal `/` this is a single segment.
+	//
+	// @owned
 	segments: []pattern_segment,
 };
 
@@ -59,6 +62,8 @@ export type pattern = struct {
 // whitespace-only, a comment, or has no usable pattern after escape
 // handling. The returned pattern owns its segment strings; free via
 // [[pattern_finish]].
+//
+// @param line: borrowed
 export fn parse_pattern(line: str) (pattern | void) = {
 	const body = match (preprocess_line(line)) {
 	case let s: str =>
@@ -136,6 +141,9 @@ export fn parse_pattern(line: str) (pattern | void) = {
 
 // Parse a whole ignore-file contents. Lines are split on `\n`; CRLF is
 // tolerated. Caller frees via [[finish_patterns]].
+//
+// @returns: owned
+// @param text: borrowed
 export fn parse_patterns(text: []u8) []pattern = {
 	let out: []pattern = [];
 	const s = strings::fromutf8(text)!;
@@ -151,6 +159,8 @@ export fn parse_patterns(text: []u8) []pattern = {
 };
 
 // Free a pattern's owned data.
+//
+// @param p: borrowed
 export fn pattern_finish(p: *pattern) void = {
 	for (let i = 0z; i < len(p.segments); i += 1) {
 		if (!p.segments[i].double_star) {
@@ -161,6 +171,8 @@ export fn pattern_finish(p: *pattern) void = {
 };
 
 // Free a slice of patterns produced by [[parse_patterns]].
+//
+// @param ps: owned
 export fn finish_patterns(ps: []pattern) void = {
 	for (let i = 0z; i < len(ps); i += 1) {
 		pattern_finish(&ps[i]);
@@ -172,6 +184,8 @@ export fn finish_patterns(ps: []pattern) void = {
 // rejecting blanks and comments. The result is a freshly-allocated
 // owned string (or void). Trailing whitespace is preserved when the
 // previous character is an unescaped backslash (`foo\ ` -> `foo `).
+//
+// @param line: borrowed
 fn preprocess_line(line: str) (str | void) = {
 	const raw = strings::toutf8(line);
 	let end = len(raw);

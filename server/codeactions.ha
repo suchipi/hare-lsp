@@ -24,6 +24,7 @@ use sort;
 use sort::cmp;
 use strings;
 
+// @param s: borrowed
 export fn handle_code_action(s: *server, r: lsp::request) void = {
 	const obj = match (params_obj_ca(r.params)) {
 	case let o: json::object =>
@@ -61,6 +62,7 @@ export fn handle_code_action(s: *server, r: lsp::request) void = {
 	send_array_ca(s, r.id, arr);
 };
 
+// @param s: borrowed
 export fn handle_code_action_resolve(s: *server, r: lsp::request) void = {
 	// Action data is constructed eagerly above; resolve is a passthrough.
 	const v: json::value = match (r.params) {
@@ -82,6 +84,10 @@ export fn handle_code_action_resolve(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param uri: borrowed
+// @param arr: borrowed
 fn add_organize_imports_action(
 	s: *server,
 	doc: *document,
@@ -190,6 +196,8 @@ fn add_organize_imports_action(
 //   use foo = bar::baz; (import_alias — Hare syntax puts the alias first)
 //   use foo::{a, b};    (import_members)
 //   use foo::*;         (import_wildcard)
+//
+// @param imp: borrowed
 fn render_import(imp: *ast::import) str = {
 	let parts: []str = [];
 	defer free(parts);
@@ -220,10 +228,14 @@ fn render_import(imp: *ast::import) str = {
 	};
 };
 
+// @param p: borrowed
 fn params_obj_ca(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
 
+// @param o: borrowed
+// @param key1: borrowed
+// @param key2: borrowed
 fn object_string_ca(o: *json::object, key1: str, key2: str) (str | void) = {
 	const sub = match (lsp::json_obj(o, key1)) {
 	case let oo: json::object =>
@@ -234,6 +246,9 @@ fn object_string_ca(o: *json::object, key1: str, key2: str) (str | void) = {
 	return lsp::json_str(&sub, key2);
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param arr: owned
 fn send_array_ca(s: *server, id: lsp::id, arr: []json::value) void = {
 	const v: json::value = arr;
 	defer json::finish(v);
@@ -250,6 +265,13 @@ fn send_array_ca(s: *server, id: lsp::id, arr: []json::value) void = {
 // `covered` is the set of import indices already emitted as quickfixes
 // by [[add_diagnostic_quickfixes]]; we skip those here so the same
 // import never produces two duplicate menu entries.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param uri: borrowed
+// @param params: borrowed
+// @param arr: borrowed
+// @param covered: borrowed
 fn add_unused_import_actions(
 	s: *server,
 	doc: *document,
@@ -326,6 +348,13 @@ fn add_unused_import_actions(
 // so the LSP client can correlate it with the lightbulb on the
 // offending line. Import indices it emits for are appended to
 // `*covered` so [[add_unused_import_actions]] can skip them.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param uri: borrowed
+// @param params: borrowed
+// @param arr: borrowed
+// @param covered: borrowed
 fn add_diagnostic_quickfixes(
 	s: *server,
 	doc: *document,
@@ -446,6 +475,7 @@ fn add_diagnostic_quickfixes(
 	};
 };
 
+// @param list: borrowed
 fn size_in_list(list: []size, v: size) bool = {
 	for (let i = 0z; i < len(list); i += 1) {
 		if (list[i] == v) return true;
@@ -454,6 +484,9 @@ fn size_in_list(list: []size, v: size) bool = {
 };
 
 // Indices into pr.subunit.imports that are wholly unused.
+//
+// @param data: borrowed
+// @param su: borrowed
 fn find_unused_imports(data: []u8, su: *ast::subunit) []size = {
 	let out: []size = [];
 	if (len(su.imports) == 0) return out;
@@ -504,6 +537,10 @@ fn find_unused_imports(data: []u8, su: *ast::subunit) []size = {
 // `bar::foo` is treated as a continuation and skipped. Comments, string
 // literals, char literals, and raw strings are skipped via
 // analysis::token_skip_noncode.
+//
+// @param data: borrowed
+// @param ns_names: borrowed
+// @param direct_names: borrowed
 fn collect_body_path_heads(
 	data: []u8,
 	start: size,
@@ -562,6 +599,8 @@ fn collect_body_path_heads(
 	};
 };
 
+// @param list: borrowed
+// @param s: borrowed
 fn str_in_list(list: []str, s: str) bool = {
 	for (let i = 0z; i < len(list); i += 1) {
 		if (list[i] == s) return true;
@@ -569,6 +608,7 @@ fn str_in_list(list: []str, s: str) bool = {
 	return false;
 };
 
+// @param list: owned
 fn strings_finish_all(list: []str) void = {
 	for (let i = 0z; i < len(list); i += 1) {
 		free(list[i]);
@@ -579,6 +619,8 @@ fn strings_finish_all(list: []str) void = {
 // Title to show in the editor's code-action menu. The introduced name
 // (last segment for void bindings, alias for aliased imports, full
 // member list otherwise) is the most useful piece for users.
+//
+// @param imp: borrowed
 fn unused_import_title(imp: *ast::import) str = {
 	match (imp.bindings) {
 	case void =>
@@ -607,6 +649,9 @@ fn unused_import_title(imp: *ast::import) str = {
 // past the terminating `;` and any single trailing newline. We do not
 // cross newlines walking back, so any blank line above the import is
 // preserved.
+//
+// @param data: borrowed
+// @param imp: borrowed
 fn import_removal_range(data: []u8, imp: *ast::import) (size, size) = {
 	let s = imp.loc.start.off: size;
 	for (s > 0; s -= 1) {
@@ -629,6 +674,8 @@ fn import_removal_range(data: []u8, imp: *ast::import) (size, size) = {
 
 // LSP range from the request params, or void if absent. We use this to
 // decide whether to emit per-import quickfixes for a given import.
+//
+// @param params: borrowed
 fn extract_request_range(params: *json::object) (lsp::range | void) = {
 	const range_v = match (json::get(params, "range")) {
 	case let p: *json::value =>
@@ -650,6 +697,9 @@ fn extract_request_range(params: *json::object) (lsp::range | void) = {
 // which is how editors encode a bare cursor position - we treat it as
 // the point at `a` and require it to fall in [imp_start, imp_end]; this
 // matches user intent ("the cursor is on this line").
+//
+// @param data: borrowed
+// @param line_index: borrowed
 fn range_overlaps_unused(
 	data: []u8,
 	line_index: []size,
@@ -674,6 +724,9 @@ fn range_overlaps_unused(
 
 // Builds a single TextEdit removing [start..end) by emitting an empty
 // replacement at that range. Caller appends the result to a TextEdit[].
+//
+// @param data: borrowed
+// @param line_index: borrowed
 fn build_removal_edit(
 	data: []u8,
 	line_index: []size,
@@ -699,6 +752,9 @@ fn build_removal_edit(
 };
 
 // Wraps a TextEdit[] in a WorkspaceEdit { changes: { uri: edits } }.
+//
+// @param uri: borrowed
+// @param edits: owned
 fn build_workspace_edit(uri: str, edits: []json::value) json::value = {
 	let changes = json::newobject();
 	json::put(&changes, uri, edits: json::value)!;

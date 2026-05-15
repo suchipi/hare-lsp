@@ -30,6 +30,10 @@ use time;
 // Runs the dep-walk + per-module `hare build -t o` flow for `doc`,
 // returning the aggregated diagnostics. Caller takes ownership via
 // [[finish_build_diagnostics]].
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @returns: owned
 export fn run_dep_build_for_doc(
 	s: *server,
 	doc: *document,
@@ -107,6 +111,9 @@ fn remaining_budget_ms(total_ms: u32, deadline: time::instant) u32 = {
 };
 
 // Returns the directory containing `file_path`. Caller frees.
+//
+// @param file_path: borrowed
+// @returns: owned
 fn parent_dir_of_file(file_path: str) str = {
 	const idx = match (strings::rindex(file_path, '/')) {
 	case let i: size =>
@@ -136,6 +143,7 @@ type cache_entry = struct {
 	dir: str,
 };
 
+// @param c: borrowed
 fn finish_dep_resolver_cache(c: *dep_resolver_ctx) void = {
 	for (let i = 0z; i < len(c.cache); i += 1) {
 		free(c.cache[i].ident);
@@ -144,6 +152,9 @@ fn finish_dep_resolver_cache(c: *dep_resolver_ctx) void = {
 	free(c.cache);
 };
 
+// @param ctx: borrowed
+// @param ident: borrowed
+// @returns: owned
 fn dep_resolver_fn(ctx: *opaque, ident: []str) (str | void) = {
 	const c = ctx: *dep_resolver_ctx;
 	const joined = strings::join("::", ident...)!;
@@ -178,6 +189,10 @@ fn dep_resolver_fn(ctx: *opaque, ident: []str) (str | void) = {
 
 // Joins workspace-folder paths and stdlib search paths with `:` into a
 // single HAREPATH string. Caller frees.
+//
+// @param folders: borrowed
+// @param stdlib: borrowed
+// @returns: owned
 fn compose_harepath(folders: []str, stdlib: []str) str = {
 	let parts: []str = [];
 	defer free(parts);
@@ -194,6 +209,12 @@ fn compose_harepath(folders: []str, stdlib: []str) str = {
 // parsed diagnostics. `cwd` is the working dir for the child;
 // `timeout_ms` is the remaining slice of the whole-didSave budget for
 // this one subprocess.
+//
+// @param s: borrowed
+// @param module_dir: borrowed
+// @param cwd: borrowed
+// @param harepath: borrowed
+// @returns: owned
 fn run_build_obj(
 	s: *server,
 	module_dir: str,
@@ -224,6 +245,9 @@ fn run_build_obj(
 // Appends `incoming` into `acc`, dropping entries that are duplicates
 // (by path/line/col/message) of something already in `acc`. Transfers
 // ownership of accepted entries; frees the rest.
+//
+// @param acc: borrowed
+// @param incoming: owned
 fn merge_dedup_diags(
 	acc: *[]build_diagnostic,
 	incoming: []build_diagnostic,
@@ -240,6 +264,7 @@ fn merge_dedup_diags(
 	free(incoming);
 };
 
+// @param acc: borrowed
 fn build_diag_already_in(acc: *[]build_diagnostic, d: build_diagnostic) bool = {
 	for (let i = 0z; i < len(acc); i += 1) {
 		const a = acc[i];

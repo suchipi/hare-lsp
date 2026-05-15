@@ -90,6 +90,8 @@ export fn main() void = {
 // Parses argv (minus the binary name). Returns either a `cli` value or
 // a sentinel error indicating that the program should exit immediately
 // (help, version, or usage failure).
+//
+// @param args: borrowed
 fn parse_args(args: []str) (cli | cli_error) = {
 	let c = cli {
 		mode = mode::NONE,
@@ -203,6 +205,8 @@ fn print_usage(out: io::handle) void = {
 
 // Handles --stdout mode for a single path. Returns the process exit
 // code.
+//
+// @param path: borrowed
 fn run_stdout(path: str) int = {
 	const label = if (path == "-") "<stdin>" else path;
 	const data = if (path == "-") {
@@ -242,6 +246,9 @@ fn run_stdout(path: str) int = {
 // ignore file - the user pointed at this specific path, and silently
 // skipping it would be surprising. Ignore files only narrow what a
 // directory walk discovers, matching prettier's behaviour.
+//
+// @param path: borrowed
+// @param st: borrowed
 fn process_path(path: str, opts: ignore_opts, st: *state) void = {
 	const abs = strings::dup(os::resolve(path))!;
 	defer free(abs);
@@ -267,6 +274,8 @@ type arg_class = enum {
 
 // Classifies an explicit CLI path argument. Symlinks are followed (the
 // user asked for this path by name; don't second-guess them).
+//
+// @param abs: borrowed
 fn classify_arg(abs: str) arg_class = {
 	const real = match (os::realpath(abs)) {
 	case let s: str =>
@@ -285,11 +294,15 @@ fn classify_arg(abs: str) arg_class = {
 	};
 };
 
+// @param abs: borrowed
+// @param ud: borrowed
 fn process_file_cb(abs: str, ud: nullable *opaque) void = {
 	const st = ud: *state;
 	process_file(abs, st);
 };
 
+// @param abs: borrowed
+// @param st: borrowed
 fn process_file(abs: str, st: *state) void = {
 	const data = match (read_file(abs)) {
 	case let d: []u8 =>
@@ -331,6 +344,8 @@ fn process_file(abs: str, st: *state) void = {
 	};
 };
 
+// @param label: borrowed
+// @param e: borrowed
 fn report_format_error(label: str, e: *server::format_error) void = {
 	match (e.location) {
 	case let loc: lex::location =>
@@ -341,6 +356,7 @@ fn report_format_error(label: str, e: *server::format_error) void = {
 	};
 };
 
+// @param path: borrowed
 fn read_file(path: str) ([]u8 | fs::error | io::error) = {
 	const f = os::open(path)?;
 	defer io::close(f)!;
@@ -353,6 +369,9 @@ fn read_file(path: str) ([]u8 | fs::error | io::error) = {
 // care about, so an interrupted run leaves either the old file
 // intact or the new one in place - never a partial write.
 // Original file's permissions are preserved when known.
+//
+// @param path: borrowed
+// @param data: borrowed
 fn write_file(path: str, data: []u8) (void | fs::error | io::error) = {
 	const mode = match (os::stat(path)) {
 	case let st: fs::filestat =>
@@ -388,6 +407,8 @@ fn write_file(path: str, data: []u8) (void | fs::error | io::error) = {
 	};
 };
 
+// @param tmp_path: borrowed
+// @param data: borrowed
 fn write_tmp(
 	tmp_path: str,
 	mode: fs::mode,
@@ -398,6 +419,7 @@ fn write_tmp(
 	io::writeall(f, data)?;
 };
 
+// @param path: borrowed
 fn safe_remove(path: str) void = {
 	match (os::remove(path)) {
 	case void => void;

@@ -16,12 +16,17 @@ use strings;
 
 // A workspace folder.
 export type workspace_folder = struct {
+	// @owned
 	uri: str,
+	// @owned
 	name: str,
 };
 
 // Replaces the server's workspace folder list. Takes ownership of the slice
 // elements' strings — caller transfers them in. The previous list is freed.
+//
+// @param s: borrowed
+// @param folders: owned
 export fn set_workspace_folders(
 	s: *server,
 	folders: []workspace_folder,
@@ -35,6 +40,9 @@ export fn set_workspace_folders(
 };
 
 // Returns true if a folder with the given URI is currently known.
+//
+// @param s: borrowed
+// @param uri: borrowed
 export fn has_workspace_folder(s: *server, uri: str) bool = {
 	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
 		if (s.workspace_folders[i].uri == uri) return true;
@@ -50,6 +58,10 @@ export fn has_workspace_folder(s: *server, uri: str) bool = {
 // directory) means a relative `HARECACHE` like `.cache` lands in the
 // project's cache rather than scattering `.cache/` directories beside
 // every file the user touches.
+//
+// @param s: borrowed
+// @param file_path: borrowed
+// @returns: owned
 export fn workspace_root_for_path(s: *server, file_path: str) str = {
 	let best: str = "";
 	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
@@ -76,6 +88,10 @@ export fn workspace_root_for_path(s: *server, file_path: str) str = {
 // sites so that single-file editing (no open workspace folder) still
 // has a sensible cwd; otherwise the child inherits the LSP's own cwd,
 // which is `/` under vscode-languageclient.
+//
+// @param s: borrowed
+// @param file_path: borrowed
+// @returns: owned
 export fn spawn_cwd_for_path(s: *server, file_path: str) str = {
 	const root = workspace_root_for_path(s, file_path);
 	if (len(root) > 0) return root;
@@ -95,6 +111,9 @@ export fn spawn_cwd_for_path(s: *server, file_path: str) str = {
 // Accepts either an array of {uri, name} objects, or null/missing. A `rootUri`
 // fallback is handled by the caller (initialize) to keep this function
 // focused on the array shape.
+//
+// @param v: borrowed
+// @returns: owned
 export fn decode_workspace_folders(v: json::value) []workspace_folder = {
 	const arr = match (v) {
 	case let a: []json::value =>
@@ -140,6 +159,8 @@ export fn decode_workspace_folders(v: json::value) []workspace_folder = {
 // Sends a workspace/workspaceFolders request to the client. Returns the
 // outgoing request id, or void on transport failure. The eventual response
 // is processed by [[apply_workspace_folders_response]].
+//
+// @param s: borrowed
 export fn request_workspace_folders(s: *server) (i64 | void) = {
 	const id = next_outgoing_id(s);
 	if (!send_request(s, id, "workspace/workspaceFolders", json::_null)) {
@@ -151,6 +172,9 @@ export fn request_workspace_folders(s: *server) (i64 | void) = {
 
 // Applies the result payload from a workspace/workspaceFolders response. The
 // payload is either a json array of folder objects or null.
+//
+// @param s: borrowed
+// @param result: borrowed
 export fn apply_workspace_folders_response(
 	s: *server,
 	result: json::value,
@@ -163,6 +187,8 @@ export fn apply_workspace_folders_response(
 // `added` and `removed` arrays. Removed folders have their indexed
 // entries dropped; added folders are immediately scanned and indexed
 // so workspace-wide features see the new content.
+//
+// @param s: borrowed
 export fn handle_did_change_workspace_folders(
 	s: *server,
 	n: lsp::notification,
@@ -254,10 +280,16 @@ export fn handle_did_change_workspace_folders(
 // Strips the "file://" scheme and percent-decodes to yield a
 // directory path. Workspace folder URIs use this scheme exclusively
 // in practice.
+//
+// @param uri: borrowed
+// @returns: owned
 fn uri_to_dir_path(uri: str) str = lsp::uri_decode_path(uri);
 
 // Drops every workspace_index entry whose path is under `root_dir`.
 // Used when a workspace folder is removed.
+//
+// @param s: borrowed
+// @param root_dir: borrowed
 fn drop_index_entries_under(s: *server, root_dir: str) void = {
 	// Build a prefix that matches "root_dir/" so we don't drop entries
 	// from sibling directories that happen to share a name prefix.
@@ -292,6 +324,8 @@ fn drop_index_entries_under(s: *server, root_dir: str) void = {
 	};
 };
 
+// @param s: borrowed
+// @param uri: borrowed
 fn remove_workspace_folder(s: *server, uri: str) void = {
 	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
 		if (s.workspace_folders[i].uri == uri) {

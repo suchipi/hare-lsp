@@ -24,6 +24,8 @@ use strings;
 //      when present (e.g. Alpine's `hare` apk), else /usr/local/src/hare
 //      (the upstream source-install default). stdlib and third-party are
 //      checked independently.
+//
+// @param s: borrowed
 fn stdlib_search_paths(s: *server) []str = {
 	let out: []str = [];
 	if (len(s.config.harepath) > 0) {
@@ -74,6 +76,9 @@ fn default_thirdparty_root() str = {
 //
 // Indexing reads every .ha file in the module's directory; expect a small
 // but non-zero latency on first use of each module.
+//
+// @param s: borrowed
+// @param module: borrowed
 export fn ensure_stdlib_module_indexed(s: *server, module: str) bool = {
 	if (len(module) == 0) return false;
 	for (let i = 0z; i < len(s.indexed_stdlib_modules); i += 1) {
@@ -107,6 +112,8 @@ export fn ensure_stdlib_module_indexed(s: *server, module: str) bool = {
 
 // Splits "unix::poll" into "unix/poll" for the filesystem path. A module
 // without "::" is returned as-is.
+//
+// @param module: borrowed
 fn module_subpath(module: str) str = {
 	let out: []u8 = [];
 	const bytes = strings::toutf8(module);
@@ -122,6 +129,7 @@ fn module_subpath(module: str) str = {
 	return strings::fromutf8(out)!;
 };
 
+// @param path: borrowed
 fn is_directory(path: str) bool = {
 	match (os::stat(path)) {
 	case let st: fs::filestat =>
@@ -136,6 +144,8 @@ fn is_directory(path: str) bool = {
 // most once per server session. Used by `workspace/symbol` so a user
 // can fuzzy-search across the whole stdlib without having navigated
 // through each module first.
+//
+// @param s: borrowed
 export fn ensure_full_stdlib_indexed(s: *server) void = {
 	if (s.stdlib_fully_indexed) return;
 	s.stdlib_fully_indexed = true;

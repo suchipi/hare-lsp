@@ -19,6 +19,7 @@ export type range = struct {
 
 // LSP Location: a (uri, range) pair pointing into a text document.
 export type location = struct {
+	// @owned
 	uri: str,
 	range: range,
 };
@@ -27,6 +28,7 @@ export type location = struct {
 // origin_selection_range is optional; void means "no preview range".
 export type location_link = struct {
 	origin_selection_range: (range | void),
+	// @owned
 	target_uri: str,
 	target_range: range,
 	target_selection_range: range,
@@ -34,11 +36,13 @@ export type location_link = struct {
 
 // LSP TextDocumentIdentifier.
 export type text_document_identifier = struct {
+	// @owned
 	uri: str,
 };
 
 // LSP VersionedTextDocumentIdentifier.
 export type versioned_text_document_identifier = struct {
+	// @owned
 	uri: str,
 	version: i32,
 };
@@ -46,6 +50,7 @@ export type versioned_text_document_identifier = struct {
 // LSP TextEdit.
 export type text_edit = struct {
 	range: range,
+	// @owned
 	new_text: str,
 };
 
@@ -75,8 +80,11 @@ export type diagnostic = struct {
 	range: range,
 	severity: (diagnostic_severity | void),
 	code: (str | i32 | void),
+	// @owned
 	source: str,
+	// @owned
 	message: str,
+	// @owned
 	tags: []diagnostic_tag,
 };
 

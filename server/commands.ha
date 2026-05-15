@@ -15,6 +15,7 @@ use unix;
 use unix::poll;
 use unix::signal;
 
+// @param s: borrowed
 export fn handle_execute_command(s: *server, r: lsp::request) void = {
 	const obj = match (params_obj_xc(r.params)) {
 	case let o: json::object =>
@@ -62,6 +63,8 @@ export fn handle_execute_command(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param s: borrowed
+// @param args: borrowed
 fn execute_run_test(s: *server, r: lsp::request, args: []json::value) void = {
 	const uri = match (first_arg_str(args)) {
 	case let s: str =>
@@ -94,6 +97,8 @@ fn execute_run_test(s: *server, r: lsp::request, args: []json::value) void = {
 	send_null_xc(s, r.id);
 };
 
+// @param s: borrowed
+// @param args: borrowed
 fn execute_run_module(s: *server, r: lsp::request, args: []json::value) void = {
 	const uri = match (first_arg_str(args)) {
 	case let s: str =>
@@ -119,6 +124,11 @@ fn execute_run_module(s: *server, r: lsp::request, args: []json::value) void = {
 // workspace root so a relative `HARECACHE` doesn't pollute random
 // directories. An empty `dir` leaves the child in our own cwd.
 // Synchronous.
+//
+// @param s: borrowed
+// @param subcmd: borrowed
+// @param dir: borrowed
+// @param extra: borrowed
 fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	let argv: []str = [];
 	defer free(argv);
@@ -235,6 +245,8 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	};
 };
 
+// @param args: borrowed
+// @returns: borrowed from args
 fn first_arg_str(args: []json::value) (str | void) = {
 	if (len(args) == 0) return void;
 	match (args[0]) {
@@ -245,8 +257,12 @@ fn first_arg_str(args: []json::value) (str | void) = {
 	};
 };
 
+// @param uri: borrowed
+// @returns: owned
 fn uri_to_path_xc(uri: str) str = lsp::uri_decode_path(uri);
 
+// @param path: borrowed
+// @returns: borrowed from path
 fn dirname_xc(path: str) str = {
 	const idx = strings::rindex(path, '/');
 	match (idx) {
@@ -257,10 +273,13 @@ fn dirname_xc(path: str) str = {
 	};
 };
 
+// @param p: borrowed
 fn params_obj_xc(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
 
+// @param s: borrowed
+// @param id: borrowed
 fn send_null_xc(s: *server, id: lsp::id) void = {
 	const v: json::value = json::_null;
 	match (lsp::encode_response_result(s.out, id, v)) {

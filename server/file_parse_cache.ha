@@ -49,8 +49,10 @@ export def FILE_PARSE_CACHE_CAP: size = 32;
 
 // One cached parse for a single file on disk.
 export type file_parse_entry = struct {
+	// @owned
 	path: str,
 	mtime: time::instant,
+	// @owned
 	text: []u8,
 	pr: analysis::parse_result,
 	idx: analysis::file_index,
@@ -71,6 +73,8 @@ export fn new_file_parse_cache() file_parse_cache = file_parse_cache {
 };
 
 // Releases all entries.
+//
+// @param c: borrowed
 export fn finish_file_parse_cache(c: *file_parse_cache) void = {
 	for (let i = 0z; i < len(c.entries); i += 1) {
 		free_file_parse_entry(&c.entries[i]);
@@ -78,6 +82,7 @@ export fn finish_file_parse_cache(c: *file_parse_cache) void = {
 	free(c.entries);
 };
 
+// @param e: borrowed
 fn free_file_parse_entry(e: *file_parse_entry) void = {
 	free(e.path);
 	free(e.text);
@@ -88,6 +93,10 @@ fn free_file_parse_entry(e: *file_parse_entry) void = {
 // Looks up the entry for `path`, validating mtime. Returns null if the
 // file can't be read; otherwise returns a borrowed pointer that's
 // valid until the next call.
+//
+// @param c: borrowed
+// @param path: borrowed
+// @returns: borrowed from c
 export fn file_parse_cache_get(
 	c: *file_parse_cache,
 	path: str,
@@ -145,6 +154,8 @@ fn instant_eq(a: time::instant, b: time::instant) bool = {
 	return a.sec == b.sec && a.nsec == b.nsec;
 };
 
+// @param c: borrowed
+// @param path: borrowed
 fn drop_path(c: *file_parse_cache, path: str) void = {
 	for (let i = 0z; i < len(c.entries); i += 1) {
 		if (c.entries[i].path == path) {
@@ -155,6 +166,7 @@ fn drop_path(c: *file_parse_cache, path: str) void = {
 	};
 };
 
+// @param c: borrowed
 fn evict_lru(c: *file_parse_cache) void = {
 	if (len(c.entries) == 0) return;
 	let oldest = 0z;
@@ -177,6 +189,8 @@ fn evict_lru(c: *file_parse_cache) void = {
 	delete(c.entries[last]);
 };
 
+// @param path: borrowed
+// @returns: owned
 fn read_path_bytes(path: str) ([]u8 | void) = {
 	const f = match (os::open(path)) {
 	case let h: io::file =>
@@ -204,6 +218,9 @@ fn read_path_bytes(path: str) ([]u8 | void) = {
 // Drops the cached entry for `path`, if any. Used when an external file
 // event (didChangeWatchedFiles) reports the path was created, changed,
 // or deleted — the cached parse is no longer valid.
+//
+// @param c: borrowed
+// @param path: borrowed
 export fn file_parse_cache_drop_path(c: *file_parse_cache, path: str) void = {
 	drop_path(c, path);
 };
@@ -212,6 +229,8 @@ export fn file_parse_cache_drop_path(c: *file_parse_cache, path: str) void = {
 // failed because the path doesn't exist (as opposed to other I/O
 // errors). Callers use this to self-heal a stale workspace_index
 // entry - see [[cached_parse_or_drop_stale]] in workspace_index.ha.
+//
+// @param path: borrowed
 export fn file_path_missing(path: str) bool = {
 	match (os::stat(path)) {
 	case fs::filestat =>
@@ -223,6 +242,9 @@ export fn file_path_missing(path: str) bool = {
 
 // Drops every cached entry whose path is at or under `root_dir`.
 // Used when a workspace folder is removed or a file is deleted.
+//
+// @param c: borrowed
+// @param root_dir: borrowed
 export fn file_parse_cache_drop_under(
 	c: *file_parse_cache,
 	root_dir: str,

@@ -46,18 +46,28 @@ export type server = struct {
 	// Pending server-initiated requests awaiting a response from the client.
 	// Keyed by request id; carries the method name so handlers can route
 	// responses appropriately.
+	//
+	// @owned
 	pending_requests: []pending_request,
 	// Active progress tokens that have received a workDoneProgress/cancel
 	// notification from the client. Handlers should poll this set.
+	//
+	// @owned
 	cancelled_progress: []str,
 	// Set of in-flight client request ids that have been issued $/cancelRequest
 	// — handlers should consult this and abort early. Stored as a slice for
 	// simplicity; LSP rarely cancels more than a handful at once.
+	//
+	// @owned
 	cancelled_ids: []lsp::id,
 	// Active workspace folders, populated from initialize and updated via
 	// workspace/didChangeWorkspaceFolders.
+	//
+	// @owned
 	workspace_folders: []workspace_folder,
 	// Dynamic capability registrations issued via client/registerCapability.
+	//
+	// @owned
 	registrations: []registration,
 	// Counter for synthesizing unique registration ids.
 	next_registration_seq: u64,
@@ -72,6 +82,8 @@ export type server = struct {
 	// non-ASCII files) or fall back to UTF-16 otherwise.
 	negotiated_encoding: analysis::encoding,
 	// Open documents, keyed by URI.
+	//
+	// @owned
 	documents: []document,
 	// Workspace-wide symbol index.
 	workspace_index: analysis::workspace_index,
@@ -81,6 +93,8 @@ export type server = struct {
 	stdlib_index: analysis::workspace_index,
 	// Module identifiers (joined with "::") that have already been
 	// scanned into stdlib_index, so we don't re-index on every hover.
+	//
+	// @owned
 	indexed_stdlib_modules: []str,
 	// LRU cache of disk-file parses, used by cross-file features
 	// (workspace_hover, type-hierarchy subtypes, references workspace
@@ -93,6 +107,8 @@ export type server = struct {
 	// appended via [[start_index_job]]. Both workspace and full-stdlib
 	// indexing flow through this queue so they don't trample each
 	// other.
+	//
+	// @owned
 	pending_index_jobs: []*workspace_index_job,
 	// True after [[ensure_full_stdlib_indexed]] has enqueued a job
 	// (whether or not it has finished). Used to make
@@ -107,6 +123,7 @@ export type server = struct {
 // Tracks an outgoing request the server is waiting on a response for.
 export type pending_request = struct {
 	id: i64,
+	// @owned
 	method: str,
 };
 
@@ -129,6 +146,8 @@ export def EXIT_ERROR: int = 1;
 // `poll_fd` is the underlying fd to peek between background-indexing batches
 // for input readiness; pass `void` if no pollable fd is available (e.g.
 // unit tests that read from a memio handle). See `input_ready`.
+//
+// @param reader_src: borrowed
 export fn new(
 	reader_src: *bufio::scanner,
 	out: io::handle,
@@ -142,6 +161,8 @@ export fn new(
 // is set so very large workspace edits can be accepted. Constructs the
 // reader directly with the custom limit rather than allocating a
 // default reader and immediately replacing it.
+//
+// @param reader_src: borrowed
 export fn new_with_max_body(
 	reader_src: *bufio::scanner,
 	out: io::handle,
@@ -187,6 +208,8 @@ fn new_with_reader(
 
 // Releases resources held by the server. Does not close the underlying I/O
 // handles — those are owned by the caller.
+//
+// @param s: borrowed
 export fn finish(s: *server) void = {
 	lsp::finish_reader(&s.reader);
 	for (let i = 0z; i < len(s.cancelled_ids); i += 1) {
@@ -237,6 +260,8 @@ export fn finish(s: *server) void = {
 
 // Runs the main message loop until the client sends `exit` (or EOF). Returns
 // the appropriate process exit code.
+//
+// @param s: borrowed
 export fn run(s: *server) int = {
 	for (s.state != server_state::EXITED) {
 		// Cooperative background work: drain index batches as long
@@ -307,6 +332,9 @@ export fn run(s: *server) int = {
 
 // Dispatches a single decoded message. Frees nothing — the caller frees the
 // message after dispatch returns.
+//
+// @param s: borrowed
+// @param msg: borrowed
 fn dispatch(s: *server, msg: lsp::message) void = {
 	match (msg) {
 	case let r: lsp::request =>
@@ -318,6 +346,7 @@ fn dispatch(s: *server, msg: lsp::message) void = {
 	};
 };
 
+// @param s: borrowed
 fn handle_response(s: *server, r: lsp::response) void = {
 	const id_num = match (r.id) {
 	case let f: f64 =>
@@ -356,6 +385,8 @@ fn handle_response(s: *server, r: lsp::response) void = {
 };
 
 // Returns the index of a pending request with the given id, or -1 if absent.
+//
+// @param s: borrowed
 fn pending_index(s: *server, id: i64) int = {
 	for (let i = 0z; i < len(s.pending_requests); i += 1) {
 		if (s.pending_requests[i].id == id) return i: int;
@@ -370,6 +401,9 @@ fn pending_index(s: *server, id: i64) int = {
 // Bounded by [[MAX_PENDING_REQUESTS]]: when full, the oldest pending entry
 // is dropped. A client that never replies to outgoing requests otherwise
 // grows this slice without bound.
+//
+// @param s: borrowed
+// @param method: borrowed
 export fn pending_remember(s: *server, id: i64, method: str) void = {
 	if (len(s.pending_requests) >= s.config.limits.max_pending_requests) {
 		free(s.pending_requests[0].method);
@@ -383,6 +417,9 @@ export fn pending_remember(s: *server, id: i64, method: str) void = {
 
 // Reports whether a previously-issued progress token has been cancelled by
 // the client.
+//
+// @param s: borrowed
+// @param token: borrowed
 export fn progress_is_cancelled(s: *server, token: str) bool = {
 	for (let i = 0z; i < len(s.cancelled_progress); i += 1) {
 		if (s.cancelled_progress[i] == token) return true;
@@ -390,6 +427,7 @@ export fn progress_is_cancelled(s: *server, token: str) bool = {
 	return false;
 };
 
+// @param s: borrowed
 fn handle_request(s: *server, r: lsp::request) void = {
 	// Lifecycle gating. Most methods are only valid in the READY state.
 	switch (s.state) {
@@ -507,6 +545,7 @@ fn handle_request(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param s: borrowed
 fn handle_notification(s: *server, n: lsp::notification) void = {
 	switch (n.method) {
 	case "initialized" =>
@@ -555,6 +594,7 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 	};
 };
 
+// @param s: borrowed
 fn handle_progress_cancel(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
 	case let v: json::value =>
@@ -583,6 +623,7 @@ fn handle_progress_cancel(s: *server, n: lsp::notification) void = {
 	append(s.cancelled_progress, strings::dup(token)!)!;
 };
 
+// @param s: borrowed
 fn handle_initialize(s: *server, r: lsp::request) void = {
 	if (s.state != server_state::PRE_INIT) {
 		send_error(s, r.id, lsp::INVALID_REQUEST, "initialize received twice");
@@ -630,6 +671,7 @@ fn handle_initialize(s: *server, r: lsp::request) void = {
 	s.state = server_state::INITIALIZING;
 };
 
+// @param s: borrowed
 fn build_initialize_result(s: *server) (json::value | nomem) = {
 	let r = json::newobject();
 	let ok = false;
@@ -799,6 +841,8 @@ fn build_initialize_result(s: *server) (json::value | nomem) = {
 	return r;
 };
 
+// @param s: borrowed
+// @param o: borrowed
 fn extract_init_param_pid(s: *server, o: *json::object) void = {
 	match (json::get(o, "processId")) {
 	case let p: *json::value =>
@@ -811,6 +855,8 @@ fn extract_init_param_pid(s: *server, o: *json::object) void = {
 	};
 };
 
+// @param s: borrowed
+// @param o: borrowed
 fn extract_init_param_trace(s: *server, o: *json::object) void = {
 	match (json::get(o, "trace")) {
 	case let p: *json::value =>
@@ -823,6 +869,8 @@ fn extract_init_param_trace(s: *server, o: *json::object) void = {
 	};
 };
 
+// @param s: borrowed
+// @param o: borrowed
 fn extract_init_param_capabilities(s: *server, o: *json::object) void = {
 	const caps = match (json::get(o, "capabilities")) {
 	case let p: *json::value =>
@@ -841,6 +889,8 @@ fn extract_init_param_capabilities(s: *server, o: *json::object) void = {
 	s.client_capabilities = dup;
 };
 
+// @param s: borrowed
+// @param o: borrowed
 fn extract_init_param_workspace_folders(s: *server, o: *json::object) void = {
 	// Prefer workspaceFolders if present; fall back to rootUri / rootPath
 	// for older clients that haven't migrated.
@@ -874,6 +924,9 @@ fn extract_init_param_workspace_folders(s: *server, o: *json::object) void = {
 // strings like ["utf-16", "utf-8"]) and picks the preferred encoding.
 // UTF-8 wins when both are offered (better for non-ASCII performance);
 // otherwise we keep the default UTF-16.
+//
+// @param s: borrowed
+// @param o: borrowed
 fn extract_init_param_position_encodings(s: *server, o: *json::object) void = {
 	const caps = match (json::get(o, "capabilities")) {
 	case let p: *json::value =>
@@ -927,6 +980,7 @@ fn extract_init_param_position_encodings(s: *server, o: *json::object) void = {
 
 };
 
+// @param s: borrowed
 fn handle_shutdown(s: *server, r: lsp::request) void = {
 	s.state = server_state::SHUTTING_DOWN;
 	const result: json::value = json::_null;
@@ -937,6 +991,7 @@ fn handle_shutdown(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param s: borrowed
 fn handle_cancel_request(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
 	case let v: json::value =>
@@ -972,6 +1027,7 @@ fn handle_cancel_request(s: *server, n: lsp::notification) void = {
 	record_cancellation(s, id);
 };
 
+// @param s: borrowed
 fn handle_set_trace(s: *server, n: lsp::notification) void = {
 	const params = match (n.params) {
 	case let v: json::value =>
@@ -1000,6 +1056,7 @@ fn handle_set_trace(s: *server, n: lsp::notification) void = {
 	s.trace = parse_trace(str_val);
 };
 
+// @param v: borrowed
 fn parse_trace(v: str) lsp::trace_value = {
 	switch (v) {
 	case "off" =>
@@ -1013,6 +1070,9 @@ fn parse_trace(v: str) lsp::trace_value = {
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
+// @param msg: borrowed
 fn send_error(
 	s: *server,
 	id: (lsp::id | void),
@@ -1035,10 +1095,16 @@ fn send_error(
 // the level explicitly. Both emit at ERROR level since every existing
 // site reports a hard I/O or protocol failure. User-visible logging
 // goes through window/logMessage (see server::window).
+//
+// @param s: borrowed
+// @param msg: borrowed
 fn log_stderr(s: *server, msg: str) void = {
 	slog_error(s, msg);
 };
 
+// @param s: borrowed
+// @param prefix: borrowed
+// @param msg: borrowed
 fn log_stderr_strerror(s: *server, prefix: str, msg: str) void = {
 	slog_error(s, prefix, ":", msg);
 };
@@ -1051,6 +1117,8 @@ def DIAG_HEADER_CAP: size = 512;
 // failing call. Emits both the byte count and a printable-escaped quote
 // so binary noise stays readable in the log. No-op when nothing was
 // captured (e.g. the error fired before any line was scanned).
+//
+// @param s: borrowed
 fn log_transport_context(s: *server) void = {
 	const ctx = lsp::last_header_bytes(&s.reader);
 	if (len(ctx) == 0) {
@@ -1071,6 +1139,9 @@ fn log_transport_context(s: *server) void = {
 // Renders bytes as a printable string, escaping CR, LF, tab, backslash,
 // double-quote, and any non-printable bytes as \xNN. The result is
 // wrapped in double quotes. Caller frees.
+//
+// @param data: borrowed
+// @returns: owned
 fn quote_bytes_for_log(data: []u8) str = {
 	let out: []u8 = [];
 	const hex: [16]u8 = [

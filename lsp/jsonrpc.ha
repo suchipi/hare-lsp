@@ -51,14 +51,19 @@ export type message = (request | notification | response);
 // A request from peer to us. Expects a response keyed by [[id]].
 export type request = struct {
 	id: id,
+	// @owned
 	method: str,
 	// May be void if the request had no params, an object, or an array.
+	//
+	// @owned
 	params: (json::value | void),
 };
 
 // A one-way notification from peer to us.
 export type notification = struct {
+	// @owned
 	method: str,
+	// @owned
 	params: (json::value | void),
 };
 
@@ -66,14 +71,18 @@ export type notification = struct {
 // result is set (success) or error is set, never both.
 export type response = struct {
 	id: id,
+	// @owned
 	body: (json::value | response_error),
 };
 
 // A JSON-RPC response error.
 export type response_error = struct {
 	code: error_code,
+	// @owned
 	message: str,
 	// May be void; carries arbitrary structured data per JSON-RPC.
+	//
+	// @owned
 	data: (json::value | void),
 };
 
@@ -85,6 +94,9 @@ export type decode_error = !str;
 //
 // The caller takes ownership of any allocated json::value embedded in the
 // returned message variants and must call [[finish_message]] when done.
+//
+// @returns: owned
+// @param body: borrowed
 export fn decode(body: const []u8) (message | decode_error | json::error) = {
 	const v = match (json::load(&fixed_reader(body))) {
 	case let v: json::value =>
@@ -218,6 +230,7 @@ export fn decode(body: const []u8) (message | decode_error | json::error) = {
 	};
 };
 
+// @param obj: borrowed
 fn decode_id(obj: *json::object) (id | decode_error) = {
 	match (obj_get(obj, "id")) {
 	case let f: f64 =>
@@ -231,6 +244,8 @@ fn decode_id(obj: *json::object) (id | decode_error) = {
 
 // Frees memory associated with a decoded message. This frees the strings
 // allocated for method/id and any embedded params/result/data values.
+//
+// @param m: owned
 export fn finish_message(m: message) void = {
 	match (m) {
 	case let r: request =>
@@ -264,6 +279,7 @@ export fn finish_message(m: message) void = {
 	};
 };
 
+// @param i: owned
 fn free_id(i: id) void = {
 	match (i) {
 	case f64 => void;
@@ -274,6 +290,9 @@ fn free_id(i: id) void = {
 
 // Encodes and frames a successful response. Returns total bytes written
 // (headers + blank line + body).
+//
+// @param id: borrowed
+// @param result: borrowed
 export fn encode_response_result(
 	out: io::handle,
 	id: id,
@@ -290,6 +309,8 @@ export fn encode_response_result(
 };
 
 // Encodes and frames an error response.
+//
+// @param msg_id: borrowed
 export fn encode_response_error(
 	out: io::handle,
 	msg_id: (id | void),
@@ -317,6 +338,9 @@ export fn encode_response_error(
 };
 
 // Encodes and frames a notification.
+//
+// @param method: borrowed
+// @param params: borrowed
 export fn encode_notification(
 	out: io::handle,
 	method: str,
@@ -337,6 +361,10 @@ export fn encode_notification(
 };
 
 // Encodes and frames a server-initiated request to the client.
+//
+// @param id: borrowed
+// @param method: borrowed
+// @param params: borrowed
 export fn encode_request(
 	out: io::handle,
 	id: id,
@@ -359,6 +387,7 @@ export fn encode_request(
 	return write(out, memio::buffer(&buf));
 };
 
+// @param i: borrowed
 fn encode_id(out: io::handle, i: id) (size | io::error) = {
 	match (i) {
 	case let f: f64 =>
@@ -369,6 +398,8 @@ fn encode_id(out: io::handle, i: id) (size | io::error) = {
 };
 
 // --- helpers ---------------------------------------------------------
+// @param o: borrowed
+// @param key: borrowed
 fn obj_has(o: *json::object, key: str) bool = {
 	return json::get(o, key) is *json::value;
 };
@@ -376,6 +407,9 @@ fn obj_has(o: *json::object, key: str) bool = {
 // Returns the value at key as a borrowed reference inside the json variant.
 // The variant is the "narrowest" interpretation; callers `match` to extract.
 // Returns void if the key is absent.
+//
+// @param o: borrowed
+// @param key: borrowed
 fn obj_get(o: *json::object, key: str) (json::value | void) = {
 	match (json::get(o, key)) {
 	case let v: *json::value =>
@@ -388,6 +422,9 @@ fn obj_get(o: *json::object, key: str) (json::value | void) = {
 // Removes a key from the object, returning ownership of the value to the
 // caller. Returns void if the key is absent. The caller is responsible for
 // passing the value to [[json::finish]] when done.
+//
+// @param o: borrowed
+// @param key: borrowed
 fn obj_take_owned(o: *json::object, key: str) (json::value | void) = {
 	return json::take(o, key);
 };
@@ -404,12 +441,15 @@ const fixed_vtable = io::vtable {
 	...
 };
 
+// @param src: borrowed
 fn fixed_reader(src: const []u8) fixed = fixed {
 	stream = &fixed_vtable,
 	src = src,
 	off = 0,
 };
 
+// @param s: borrowed
+// @param buf: borrowed
 fn fixed_read(s: *io::stream, buf: []u8) (size | io::EOF | io::error) = {
 	let f = s: *fixed;
 	if (f.off >= len(f.src)) return io::EOF;

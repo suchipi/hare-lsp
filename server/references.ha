@@ -31,6 +31,8 @@ use os;
 use strings;
 
 // Handles textDocument/references.
+//
+// @param s: borrowed
 export fn handle_references(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -127,6 +129,7 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param p: borrowed
 fn extract_include_decl(p: (json::value | void)) bool = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -167,6 +170,8 @@ fn extract_include_decl(p: (json::value | void)) bool = {
 // Returns a freshly-allocated slice of paths corresponding to each
 // open document's URI (percent-decoded). Caller must call
 // [[finish_open_paths]] to free both the slice and its elements.
+//
+// @param s: borrowed
 fn collect_open_paths(s: *server) []str = {
 	let out: []str = [];
 	for (let i = 0z; i < len(s.documents); i += 1) {
@@ -175,6 +180,7 @@ fn collect_open_paths(s: *server) []str = {
 	return out;
 };
 
+// @param paths: owned
 fn finish_open_paths(paths: []str) void = {
 	for (let i = 0z; i < len(paths); i += 1) {
 		free(paths[i]);
@@ -182,6 +188,8 @@ fn finish_open_paths(paths: []str) void = {
 	free(paths);
 };
 
+// @param open_paths: borrowed
+// @param path: borrowed
 fn is_in_open_paths(open_paths: []str, path: str) bool = {
 	for (let i = 0z; i < len(open_paths); i += 1) {
 		if (open_paths[i] == path) return true;
@@ -189,6 +197,10 @@ fn is_in_open_paths(open_paths: []str, path: str) bool = {
 	return false;
 };
 
+// @param s: borrowed
+// @param doc: borrowed
+// @param target: borrowed
+// @param expected: borrowed
 fn find_references_in_doc(
 	s: *server,
 	doc: *document,
@@ -219,6 +231,10 @@ fn find_references_in_doc(
 	return arr;
 };
 
+// @param s: borrowed
+// @param path: borrowed
+// @param target: borrowed
+// @param expected: borrowed
 fn find_references_in_file_on_disk(
 	s: *server,
 	path: str,
@@ -276,6 +292,8 @@ type scope_local = struct {
 	scope_end: u32,
 };
 
+// @param doc: borrowed
+// @param name: borrowed
 fn scope_local_binding(
 	doc: *document,
 	name: str,
@@ -297,6 +315,11 @@ fn scope_local_binding(
 
 // Scans a buffer for ident-token occurrences of `target` and returns a
 // new []json::value with the corresponding Location objects.
+//
+// @param data: borrowed
+// @param uri: borrowed
+// @param line_index: borrowed
+// @param target: borrowed
 fn scan_text_for_ident_static(
 	data: []u8,
 	uri: str,
@@ -312,6 +335,11 @@ fn scan_text_for_ident_static(
 // and block comments so a match inside text/prose doesn't produce a
 // false-positive reference (which would otherwise let a rename silently
 // rewrite a doc comment).
+//
+// @param data: borrowed
+// @param uri: borrowed
+// @param line_index: borrowed
+// @param target: borrowed
 fn scan_text_for_ident_static_in_range(
 	data: []u8,
 	uri: str,
@@ -334,6 +362,9 @@ fn scan_text_for_ident_static_in_range(
 // begin in `data[start..end]`. Same skipping rules as the location-
 // emitting scan but returns offsets so callers can filter before
 // building Location objects.
+//
+// @param data: borrowed
+// @param target: borrowed
 fn scan_text_for_ident_offsets_in_range(
 	data: []u8,
 	target: str,
@@ -378,6 +409,10 @@ fn scan_text_for_ident_offsets_in_range(
 // Builds an LSP Location JSON value for an ident hit at byte offset `off`
 // of length `name_len`. Always uses UTF-16 positions (matching the scan
 // callers' historical behavior).
+//
+// @param data: borrowed
+// @param uri: borrowed
+// @param line_index: borrowed
 fn build_location(
 	data: []u8,
 	uri: str,
@@ -407,6 +442,8 @@ fn build_location(
 // Handles textDocument/prepareRename. Returns the identifier's range (so
 // the editor pre-selects it) or null/an error if the cursor isn't on a
 // valid ident.
+//
+// @param s: borrowed
 export fn handle_prepare_rename(s: *server, r: lsp::request) void = {
 	const (uri, pos) = match (parse_pos(r.params)) {
 	case let v: (str, lsp::position) =>
@@ -457,6 +494,8 @@ export fn handle_prepare_rename(s: *server, r: lsp::request) void = {
 
 // Handles textDocument/rename. Validates the new name and produces a
 // WorkspaceEdit replacing every textual occurrence.
+//
+// @param s: borrowed
 export fn handle_rename(s: *server, r: lsp::request) void = {
 	const new_name = match (extract_new_name(r.params)) {
 	case let s: str =>
@@ -603,6 +642,7 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 	};
 };
 
+// @param p: borrowed
 fn extract_new_name(p: (json::value | void)) (str | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -629,6 +669,7 @@ fn extract_new_name(p: (json::value | void)) (str | void) = {
 	};
 };
 
+// @param name: borrowed
 fn is_valid_hare_ident(name: str) bool = {
 	const b = strings::toutf8(name);
 	if (len(b) == 0) return false;
@@ -714,6 +755,7 @@ fn is_ident_first(b: u8) bool = {
 	return b == '_': u8;
 };
 
+// @param p: borrowed
 fn parse_pos(p: (json::value | void)) ((str, lsp::position) | void) = {
 	const v = match (p) {
 	case let v: json::value =>
@@ -763,6 +805,8 @@ fn parse_pos(p: (json::value | void)) ((str, lsp::position) | void) = {
 	return (uri, pos);
 };
 
+// @param s: borrowed
+// @param id: borrowed
 fn send_empty_array_local(s: *server, id: lsp::id) void = {
 	const arr: []json::value = [];
 	const v: json::value = arr;
@@ -773,6 +817,8 @@ fn send_empty_array_local(s: *server, id: lsp::id) void = {
 	};
 };
 
+// @param s: borrowed
+// @param id: borrowed
 fn send_null_result_local(s: *server, id: lsp::id) void = {
 	const v: json::value = json::_null;
 	match (lsp::encode_response_result(s.out, id, v)) {

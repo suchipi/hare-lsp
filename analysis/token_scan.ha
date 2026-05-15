@@ -33,6 +33,8 @@
 //   - otherwise -> return i unchanged.
 //
 // Bounded by `limit` (usually `len(data)`).
+//
+// @param data: borrowed
 export fn token_skip_noncode(data: []u8, i: size, limit: size) size = {
 	if (i >= limit) return i;
 	const b = data[i];

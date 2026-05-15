@@ -17,6 +17,9 @@ use strings;
 // For an open document, uses the open-doc parse cache. Otherwise consults
 // the file_parse_cache (which reads + parses on demand). Returns void
 // when neither path is available, signaling the hit should be dropped.
+//
+// @param s: borrowed
+// @param path: borrowed
 fn subunit_for_path(s: *server, path: str) (*ast::subunit | void) = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		const doc = &s.documents[i];
@@ -38,6 +41,12 @@ fn subunit_for_path(s: *server, path: str) (*ast::subunit | void) = {
 // or void when no workspace match exists (e.g. unindexed file, fresh
 // symbol, or stdlib-only target). The caller falls back to the existing
 // behavior (return all textual hits) when this returns void.
+//
+// @returns: borrowed from s
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @param ident_str: borrowed
 export fn expected_entry_for_cursor(
 	s: *server,
 	doc: *document,
@@ -62,6 +71,11 @@ export fn expected_entry_for_cursor(
 //
 // Hits in files that aren't workspace-indexed (stdlib, third-party)
 // return false because there's no entry to match against.
+//
+// @param s: borrowed
+// @param path: borrowed
+// @param text: borrowed
+// @param expected: borrowed
 export fn hit_resolves_to(
 	s: *server,
 	path: str,
