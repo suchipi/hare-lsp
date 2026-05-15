@@ -4,6 +4,7 @@
 // e2e: textDocument/completion and completionItem/resolve.
 
 use encoding::json;
+use os;
 use strings;
 
 @test fn e2e_completion_includes_local_decls() void = {
@@ -117,6 +118,79 @@ export fn main() void = {
 		};
 	};
 	assert(saw_return, "completion should include Hare keywords");
+};
+
+@test fn e2e_completion_qualified_by_module() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	// rootUri matters: workspace indexing scans this folder so qualified
+	// completion can list module members.
+	const root = os::getcwd();
+	const init_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
+			root, `","workspaceFolders":[{"uri":"file://`, root,
+			`","name":"hare-lsp"}],"capabilities":{}}}`)!;
+	defer free(init_msg);
+	send(&s, strings::toutf8(init_msg));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample = `use server;
+export fn main() void = {
+	let _ = server::
+};
+`;
+	const did_open = build_did_open("file:///qual_comp.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Wait for indexing to settle so `server::*` symbols are populated.
+	for (let i = 0z; i < 20z; i += 1) {
+		const body = recv(&s);
+		defer free(body);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, "indexed") &&
+				strings::contains(text, "file(s)")) break;
+	};
+
+	// Cursor right after `server::` on line 2, character 17.
+	const req =
+		`{"jsonrpc":"2.0","id":1810,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///qual_comp.ha"},"position":{"line":2,"character":17}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1810.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+
+	// Every returned item must belong to the `server` module — detail is
+	// `<module>::<short>` for workspace entries.
+	assert(
+		len(items) > 0,
+		"qualified completion after `server::` must return at least one member"
+	);
+	let saw_run = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		// Keywords and unrelated top-level symbols must not leak in.
+		assert(
+			label != "let" && label != "return" && label != "if",
+			"qualified completion must not include Hare keywords"
+		);
+		if (label == "run") saw_run = true;
+	};
+	assert(
+		saw_run,
+		"qualified completion after `server::` should include `run` from server/server.ha"
+	);
 };
 
 @test fn e2e_completion_resolve_passthrough() void = {

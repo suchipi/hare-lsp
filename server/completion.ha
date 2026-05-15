@@ -378,13 +378,7 @@ fn add_module_members(
 	let a = *arr;
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const e = &s.workspace_index.entries[i];
-		// full_name has the form "<file_module>::<short>" or just "<short>"
-		// because we don't currently resolve module paths from disk
-		// layout. As a heuristic, match if module appears as a prefix
-		// component or if entry.full_name starts with "module::".
-		const want_prefix = strings::concat(module, "::")!;
-		defer free(want_prefix);
-		if (!strings::hasprefix(e.full_name, want_prefix)) continue;
+		if (e.module != module) continue;
 		if (!e.exported) continue;
 		if (len(partial) > 0 && !strings::hasprefix(e.short_name, partial)) continue;
 		let item = json::newobject();
