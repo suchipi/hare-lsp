@@ -168,6 +168,8 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 		add_keywords(&arr, prefix_info.partial);
 		add_file_locals(&arr, doc, prefix_info.partial);
 		add_workspace_symbols(s, doc, &arr, prefix_info.partial);
+		add_stdlib_symbols(s, doc, &arr, prefix_info.partial);
+		add_module_name_completions(s, doc, &arr, prefix_info.partial);
 	};
 	free(prefix_info.module);
 	free(prefix_info.partial);
@@ -333,6 +335,12 @@ def SORT_WORKSPACE: str = "2-";
 // @borrowed
 def SORT_KEYWORD: str = "3-";
 
+// Stdlib sits below workspace/keyword: a user who hasn't imported the
+// module yet probably wants their local code first.
+//
+// @borrowed
+def SORT_STDLIB: str = "4-";
+
 // @param arr: borrowed
 // @param partial: borrowed
 fn add_keywords(arr: *[]json::value, partial: str) void = {
@@ -423,9 +431,193 @@ fn add_workspace_symbols(
 	*arr = a;
 };
 
-// Returns the list of module names already imported by `doc`, using the
-// last segment of each import's ident path as the module name. Caller
-// frees with strings_free_all.
+// Emits exported stdlib and third-party symbols for the PLAIN
+// (unqualified) completion case, attaching an auto-import edit that
+// inserts `use <qualified>;` for the entry's module. Both trees flow
+// through `s.stdlib_index` (they share [[stdlib_search_paths]]) so the
+// same loop covers both. Mirrors [[add_workspace_symbols]] in iteration
+// and result-cap policy. Filters to exported entries — unlike the
+// workspace index, where private symbols are legitimately visible from
+// sibling files, stdlib internals must never be offered as completions.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param arr: borrowed
+// @param partial: borrowed
+fn add_stdlib_symbols(
+	s: *server,
+	doc: *document,
+	arr: *[]json::value,
+	partial: str,
+) void = {
+	let a = *arr;
+	// Stdlib has ~10k entries on a typical Hare install; without at
+	// least one character to filter by, the completion list would
+	// flood the client. The workspace symbol path has the same risk
+	// but its index is much smaller, so it scans unconditionally.
+	if (len(partial) == 0) {
+		*arr = a;
+		return;
+	};
+	const imported = doc_imported_modules(doc);
+	defer strings_free_all(imported);
+	let added = 0z;
+	for (let i = 0z; i < len(s.stdlib_index.entries) && added < 200z; i += 1) {
+		const e = &s.stdlib_index.entries[i];
+		if (!e.exported) continue;
+		if (!strings::hasprefix(e.short_name, partial)) continue;
+		const qualified = stdlib_qualified_module(s, e.path);
+		defer free(qualified);
+		// Skip entries whose module we can't determine — without a
+		// qualified name there's no auto-import edit to attach, and
+		// suggesting the leaf-name `use json;` would be wrong for
+		// `encoding::json`.
+		if (len(qualified) == 0) continue;
+		let item = json::newobject();
+		json::set(&item, "label", e.short_name: json::value)!;
+		json::put(&item, "kind", symbol_kind_to_completion(e.kind))!;
+		json::set(&item, "detail", e.full_name: json::value)!;
+		if (len(e.docs) > 0) {
+			json::set(&item, "documentation", e.docs: json::value)!;
+		};
+		const sort = strings::concat(SORT_STDLIB, e.short_name)!;
+		defer free(sort);
+		json::set(&item, "sortText", sort: json::value)!;
+		if (e.kind == analysis::symbol_kind::FUNCTION) {
+			attach_function_snippet(&item, e.short_name, e.param_names);
+		};
+		attach_auto_import(s, doc, &item, qualified, imported);
+		append(a, item: json::value)!;
+		added += 1;
+	};
+	*arr = a;
+};
+
+// Emits MODULE-kind completion items for every workspace, stdlib, and
+// third-party module whose leaf name starts with `partial`. Lets a user
+// type `json` (or `bufio`, `strings`, …) and pick the module itself; the
+// attached auto-import edit inserts `use <qualified>;` so the user can
+// immediately follow up with `json::loadstr(…)` after accepting.
+//
+// Deduplicates by qualified module name so each module appears once
+// regardless of how many decls it contributes to the index. Workspace
+// modules use [[analysis::workspace_entry.module]] (a leaf name, since
+// `module_from_path` only returns the leaf — nested workspace modules
+// like `hare::parse` therefore show up by their leaf only); stdlib and
+// third-party modules use [[stdlib_qualified_module]] on the entry's
+// path so nested system modules like `encoding::json` insert the
+// correct `use` line.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param arr: borrowed
+// @param partial: borrowed
+fn add_module_name_completions(
+	s: *server,
+	doc: *document,
+	arr: *[]json::value,
+	partial: str,
+) void = {
+	if (len(partial) == 0) return;
+	let a = *arr;
+	const imported = doc_imported_modules(doc);
+	defer strings_free_all(imported);
+	let seen: []str = [];
+	defer strings_free_all(seen);
+
+	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
+		const e = &s.workspace_index.entries[i];
+		if (len(e.module) == 0) continue;
+		if (!strings::hasprefix(e.module, partial)) continue;
+		if (module_already_seen(seen, e.module)) continue;
+		append(seen, strings::dup(e.module)!)!;
+		emit_module_completion(s, doc, &a, e.module, e.module, imported);
+	};
+
+	for (let i = 0z; i < len(s.stdlib_index.entries); i += 1) {
+		const e = &s.stdlib_index.entries[i];
+		const qualified = stdlib_qualified_module(s, e.path);
+		if (len(qualified) == 0) {
+			free(qualified);
+			continue;
+		};
+		const leaf = module_leaf_name(qualified);
+		if (!strings::hasprefix(leaf, partial)) {
+			free(qualified);
+			continue;
+		};
+		if (module_already_seen(seen, qualified)) {
+			free(qualified);
+			continue;
+		};
+		append(seen, qualified)!;
+		emit_module_completion(s, doc, &a, leaf, qualified, imported);
+	};
+	*arr = a;
+};
+
+// @param seen: borrowed
+// @param qualified: borrowed
+fn module_already_seen(seen: []str, qualified: str) bool = {
+	for (let i = 0z; i < len(seen); i += 1) {
+		if (seen[i] == qualified) return true;
+	};
+	return false;
+};
+
+// Returns the segment after the final "::" — the part the user types
+// when referencing the module unqualified. For "encoding::json" this
+// is "json"; for "bufio" it's "bufio".
+//
+// The returned slice borrows from `qualified`; no allocation.
+//
+// @param qualified: borrowed
+// @returns: borrowed from qualified
+fn module_leaf_name(qualified: str) str = {
+	match (strings::rindex(qualified, "::")) {
+	case let idx: size =>
+		return strings::sub(qualified, idx + 2, strings::end);
+	case void =>
+		return qualified;
+	};
+};
+
+// @param s: borrowed
+// @param doc: borrowed
+// @param arr: borrowed
+// @param label: borrowed
+// @param qualified: borrowed
+// @param imported: borrowed
+fn emit_module_completion(
+	s: *server,
+	doc: *document,
+	arr: *[]json::value,
+	label: str,
+	qualified: str,
+	imported: []str,
+) void = {
+	let a = *arr;
+	let item = json::newobject();
+	json::set(&item, "label", label: json::value)!;
+	json::put(&item, "kind", CIK_MODULE)!;
+	json::set(&item, "detail", qualified: json::value)!;
+	// Sort just below stdlib symbols so the literal module name is
+	// reachable but doesn't crowd out exact-match symbol completions.
+	const sort = strings::concat(SORT_STDLIB, "m-", label)!;
+	defer free(sort);
+	json::set(&item, "sortText", sort: json::value)!;
+	attach_auto_import(s, doc, &item, qualified, imported);
+	append(a, item: json::value)!;
+	*arr = a;
+};
+
+// Returns the *leaf* name of each `use` declaration in `doc` (the
+// segment Hare actually references the module by — e.g.
+// `use hare::parse;` is referenced as `parse::…`). Auto-import dedups
+// against this list using leaf-vs-leaf matching, which is the right
+// granularity: two imports sharing a leaf would create an ambiguous
+// reference in Hare, so suggesting one when the other is already
+// imported would be a mistake. Caller frees with strings_free_all.
 //
 // @param doc: borrowed
 // @returns: owned
@@ -449,11 +641,24 @@ fn strings_free_all(list: []str) void = {
 	free(list);
 };
 
-// When the entry's module is non-empty and not present in the doc's
-// existing imports, attaches an additionalTextEdits to the completion
-// item that inserts `use <module>;` near the top of the file. The
-// inserted module is the leaf directory name (workspace_entry.module);
-// nested module paths like `encoding::json` are not yet recovered.
+// When `module` is non-empty and its leaf isn't already in `imported`
+// (the leaf-name list from [[doc_imported_modules]]), attaches an
+// additionalTextEdits to the completion item that inserts
+// `use <module>;`. Insertion goes after the last existing `use` line or
+// at the top of the file when there are none.
+//
+// `module` is written verbatim into the `use` line: workspace callers
+// pass the leaf-only name (the only form a workspace_entry currently
+// records); stdlib callers pass the fully-qualified name (e.g.
+// "encoding::json") via [[stdlib_qualified_module]].
+//
+// Dedup compares **leaf** to **leaf** rather than full string to full
+// string: Hare references a module by the last segment of its ident, so
+// two imports sharing a leaf would shadow each other. Comparing leaves
+// here means we (a) skip `use hare::parse;` when the doc already has
+// any `parse` import, and (b) skip `use encoding::json;` when the doc
+// already has a `json` import — both of which would otherwise produce
+// either a redundant or ambiguous `use` line.
 //
 // @param s: borrowed
 // @param doc: borrowed
@@ -468,8 +673,9 @@ fn attach_auto_import(
 	imported: []str,
 ) void = {
 	if (len(module) == 0) return;
+	const leaf = module_leaf_name(module);
 	for (let i = 0z; i < len(imported); i += 1) {
-		if (imported[i] == module) return;
+		if (imported[i] == leaf) return;
 	};
 	const data = analysis::bytes(&doc.buf);
 	const cache = parse_of(doc);

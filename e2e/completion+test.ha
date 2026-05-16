@@ -271,6 +271,250 @@ export fn main() void = {
 	);
 };
 
+@test fn e2e_completion_stdlib_auto_import_inserts_use_line() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	// rootUri is required so the server reaches READY and the
+	// `initialized` handler enqueues both the workspace and stdlib
+	// indexing jobs.
+	const root = os::getcwd();
+	const init_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
+			root, `","workspaceFolders":[{"uri":"file://`, root,
+			`","name":"hare-lsp"}],"capabilities":{}}}`)!;
+	defer free(init_msg);
+	send(&s, strings::toutf8(init_msg));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	// `bufio::newscanner` is a familiar stdlib name we can rely on.
+	// The open doc deliberately omits `use bufio;` so the auto-import
+	// path has work to do.
+	const sample = `export fn main() void = {
+	let _ = newsca
+};
+`;
+	const did_open = build_did_open("file:///stdlib_autoimport.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Wait for the stdlib indexing job to finish — without it,
+	// `add_stdlib_symbols` would skip `newscanner` since its entry
+	// wouldn't be in `s.stdlib_index` yet.
+	for (let i = 0z; i < 200z; i += 1) {
+		const body = recv(&s);
+		defer free(body);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, "indexed stdlib") &&
+				strings::contains(text, "file(s)")) break;
+	};
+
+	// Cursor sits right after "newsca" on line 1, character 15.
+	const req =
+		`{"jsonrpc":"2.0","id":1820,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///stdlib_autoimport.ha"},"position":{"line":1,"character":15}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1820.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		if (label != "newscanner") continue;
+		found = true;
+		const edits = match (json::get(&it, "additionalTextEdits")) {
+		case let p: *json::value =>
+			yield *p as []json::value;
+		case => abort(
+			"stdlib auto-import: newscanner item must carry additionalTextEdits"
+		);
+		};
+		assert(len(edits) >= 1, "stdlib auto-import: edits array must be non-empty");
+		const e0 = edits[0] as json::object;
+		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+		assert(
+			strings::contains(new_text, "use bufio;"),
+			"stdlib auto-import: edit must insert `use bufio;`"
+		);
+		break;
+	};
+	assert(
+		found,
+		"completion after partial `newsca` must offer `newscanner` from stdlib bufio"
+	);
+};
+
+@test fn e2e_completion_third_party_auto_import_inserts_use_line() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	// Same setup as the stdlib test — `ensure_full_stdlib_indexed`
+	// walks every stdlib_search_paths root, which includes the
+	// third-party tree, so `encoding::json` ends up in s.stdlib_index
+	// alongside the stdlib modules.
+	const root = os::getcwd();
+	const init_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
+			root, `","workspaceFolders":[{"uri":"file://`, root,
+			`","name":"hare-lsp"}],"capabilities":{}}}`)!;
+	defer free(init_msg);
+	send(&s, strings::toutf8(init_msg));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	// `encoding::json::newobject` is unambiguously third-party on
+	// the standard upstream install. Doc deliberately omits the use
+	// line so auto-import has work to do.
+	const sample = `export fn main() void = {
+	let _ = newobje
+};
+`;
+	const did_open = build_did_open("file:///third_party_autoimport.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	for (let i = 0z; i < 200z; i += 1) {
+		const body = recv(&s);
+		defer free(body);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, "indexed stdlib") &&
+				strings::contains(text, "file(s)")) break;
+	};
+
+	// Cursor sits right after "newobje" on line 1, character 16.
+	const req =
+		`{"jsonrpc":"2.0","id":1821,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///third_party_autoimport.ha"},"position":{"line":1,"character":16}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1821.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		if (label != "newobject") continue;
+		found = true;
+		const edits = match (json::get(&it, "additionalTextEdits")) {
+		case let p: *json::value =>
+			yield *p as []json::value;
+		case => abort(
+			"third-party auto-import: newobject item must carry additionalTextEdits"
+		);
+		};
+		assert(len(edits) >= 1);
+		const e0 = edits[0] as json::object;
+		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+		assert(
+			strings::contains(new_text, "use encoding::json;"),
+			"third-party auto-import: edit must insert `use encoding::json;`"
+		);
+		break;
+	};
+	assert(
+		found,
+		"completion after partial `newobje` must offer `newobject` from third-party encoding::json"
+	);
+};
+
+@test fn e2e_completion_module_name_auto_import() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	const root = os::getcwd();
+	const init_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
+			root, `","workspaceFolders":[{"uri":"file://`, root,
+			`","name":"hare-lsp"}],"capabilities":{}}}`)!;
+	defer free(init_msg);
+	send(&s, strings::toutf8(init_msg));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	// Type just `json` — expect a MODULE-kind suggestion that inserts
+	// `use encoding::json;` (third-party on the standard install).
+	const sample = `export fn main() void = {
+	json
+};
+`;
+	const did_open = build_did_open("file:///module_name.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	for (let i = 0z; i < 200z; i += 1) {
+		const body = recv(&s);
+		defer free(body);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, "indexed stdlib") &&
+				strings::contains(text, "file(s)")) break;
+	};
+
+	// Cursor sits right after "json" on line 1, character 5.
+	const req =
+		`{"jsonrpc":"2.0","id":1830,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///module_name.ha"},"position":{"line":1,"character":5}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1830.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		if (label != "json") continue;
+		const kind = *(json::get(&it, "kind") as *json::value) as f64;
+		if (kind != 9.0) continue;
+		found = true;
+		const detail = *(json::get(&it, "detail") as *json::value) as str;
+		assert(
+			detail == "encoding::json",
+			"module-name completion detail must be the qualified module path"
+		);
+		const edits = match (json::get(&it, "additionalTextEdits")) {
+		case let p: *json::value =>
+			yield *p as []json::value;
+		case => abort(
+			"module-name completion: `json` item must carry an auto-import edit"
+		);
+		};
+		assert(len(edits) >= 1);
+		const e0 = edits[0] as json::object;
+		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+		assert(strings::contains(new_text, "use encoding::json;"));
+		break;
+	};
+	assert(
+		found,
+		"completion after typing `json` must offer the module itself as a MODULE item"
+	);
+};
+
 @test fn e2e_completion_member_access_returns_struct_fields() void = {
 	let s = spawn_session();
 	defer finish_session(&s);

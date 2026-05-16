@@ -557,6 +557,11 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 			register_file_watchers(s);
 			// Build the initial workspace index.
 			scan_workspace_folders(s);
+			// Kick off the chunked stdlib scan in the background so
+			// completion's auto-import path has stdlib entries to
+			// suggest by the time the user starts typing. Runs
+			// alongside the workspace index via the same job queue.
+			ensure_full_stdlib_indexed(s);
 		};
 	case "exit" =>
 		s.state = server_state::EXITED;

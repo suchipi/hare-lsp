@@ -139,11 +139,98 @@ fn is_directory(path: str) bool = {
 	};
 };
 
+// Returns the fully-qualified module name (e.g. "encoding::json", "os")
+// for a file located under one of the stdlib OR third-party search roots.
+// Both trees share [[stdlib_search_paths]], so the helper handles them
+// uniformly: prefix-matches `path` against each search root and joins the
+// remaining directory segments with `::`, peeling +tag/-tag dirs that
+// Hare treats as part of the parent module.
+//
+// Falls back to [[analysis::module_from_path]] (the leaf-directory name)
+// when no search root matches. Caller frees.
+//
+// @param s: borrowed
+// @param path: borrowed
+// @returns: owned
+export fn stdlib_qualified_module(s: *server, path: str) str = {
+	const roots = stdlib_search_paths(s);
+	defer {
+		for (let i = 0z; i < len(roots); i += 1) free(roots[i]);
+		free(roots);
+	};
+	for (let i = 0z; i < len(roots); i += 1) {
+		const root = roots[i];
+		if (len(root) == 0) continue;
+		if (!strings::hasprefix(path, root)) continue;
+		let rel = strings::sub(path, len(root), strings::end);
+		// Require a path-component boundary. Without this, a root
+		// "/foo" would silently absorb "/foo-bar/x.ha" (since both
+		// share the literal "/foo" prefix) and produce a bogus
+		// module name like "-bar::...". The default install layouts
+		// don't overlap, but a custom HAREPATH may.
+		if (len(rel) > 0 && !strings::hasprefix(rel, "/")) continue;
+		if (strings::hasprefix(rel, "/")) {
+			rel = strings::sub(rel, 1, strings::end);
+		};
+		// Strip the filename — keep only the directory portion.
+		const dir = match (strings::rindex(rel, '/')) {
+		case let idx: size =>
+			yield strings::sub(rel, 0, idx);
+		case void =>
+			// File sits at the root: there's no enclosing module.
+			return strings::dup("")!;
+		};
+		return qualified_module_from_rel_dir(dir);
+	};
+	return analysis::module_from_path(path);
+};
+
+// Joins a relative-from-stdlib-root directory like "encoding/json" or
+// "unix/poll/+linux" into the module identifier ("encoding::json" /
+// "unix::poll"). Drops trailing +tag/-tag segments because Hare's build
+// tag directories belong to their parent module rather than naming a
+// module of their own.
+//
+// @param dir: borrowed
+// @returns: owned
+fn qualified_module_from_rel_dir(dir: str) str = {
+	let segs: [](size, size) = [];
+	defer free(segs);
+	const bytes = strings::toutf8(dir);
+	let start = 0z;
+	for (let i = 0z; i <= len(bytes); i += 1) {
+		if (i == len(bytes) || bytes[i] == '/': u8) {
+			if (i > start) append(segs, (start, i))!;
+			start = i + 1;
+		};
+	};
+	// Peel trailing +tag/-tag segments.
+	for (len(segs) > 0) {
+		const (s0, e0) = segs[len(segs) - 1];
+		if (e0 <= s0) break;
+		const c = bytes[s0];
+		if (c != '+': u8 && c != '-': u8) break;
+		delete(segs[len(segs) - 1]);
+	};
+	if (len(segs) == 0) return strings::dup("")!;
+	let out: []u8 = [];
+	for (let i = 0z; i < len(segs); i += 1) {
+		if (i > 0) {
+			append(out, ':': u8)!;
+			append(out, ':': u8)!;
+		};
+		const (s0, e0) = segs[i];
+		append(out, bytes[s0..e0]...)!;
+	};
+	return strings::fromutf8(out)!;
+};
+
 // Enqueues a chunked indexing job that walks every `*.ha` file under
-// each stdlib search path into `s.stdlib_index`. Idempotent: runs at
+// each search root (stdlib AND third-party — they share the same
+// [[stdlib_search_paths]]) into `s.stdlib_index`. Idempotent: runs at
 // most once per server session. Used by `workspace/symbol` so a user
-// can fuzzy-search across the whole stdlib without having navigated
-// through each module first.
+// can fuzzy-search across the whole stdlib and third-party tree
+// without having navigated through each module first.
 //
 // @param s: borrowed
 export fn ensure_full_stdlib_indexed(s: *server) void = {
