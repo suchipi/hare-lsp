@@ -326,6 +326,403 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	abort("barbar entry missing");
 };
 
+@test fn completion_auto_import_skipped_for_nested_workspace_import() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	// Workspace module — module_from_path stores the leaf "parse"
+	// regardless of how deep the file lives in the workspace tree.
+	const provider = strings::toutf8("export fn parser_func() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/hare/parse/p.ha", provider);
+
+	// Doc imports the qualified form `use hare::parse;`. Hare
+	// references this module by its leaf `parse`, so any second `use
+	// parse;` would shadow it. Auto-import must therefore NOT attach a
+	// `use parse;` edit just because `e.module == "parse"` differs
+	// from the literal import ident "hare::parse".
+	comp_open(&s, "file:///nested.ha",
+		"use hare::parse;\\nfn main() void = parser\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///nested.ha"},"position":{"line":1,"character":24}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 90.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 90.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "parser_func") continue;
+		found = true;
+		match (json::get(&item, "additionalTextEdits")) {
+		case let p: *json::value =>
+			abort(
+				"workspace auto-import: nested import (use hare::parse;) must suppress redundant `use parse;` edit"
+			);
+		case => void;
+		};
+		break;
+	};
+	assert(found);
+};
+
+@test fn completion_auto_import_for_stdlib_uses_qualified_module() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	// Pin HAREPATH so stdlib_qualified_module has a deterministic root
+	// to strip; the default probes /usr/src and /usr/local/src which
+	// will differ across hosts.
+	free(s.config.harepath);
+	s.config.harepath = strings::dup("/repo/stdlib")!;
+	const seed = strings::toutf8("export fn loadstr(input: str) void = void;\n");
+	analysis::index_file(&s.stdlib_index, "/repo/stdlib/encoding/json/loader.ha",
+		seed);
+
+	// Doc has no `use encoding::json;`. Cursor sits after "load".
+	comp_open(&s, "file:///z.ha", "fn main() void = load\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///z.ha"},"position":{"line":0,"character":21}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 70.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 70.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "loadstr") continue;
+		found = true;
+		const edits =
+			*(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
+		assert(len(edits) >= 1);
+		const e0 = edits[0] as json::object;
+		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+		assert(
+			strings::contains(new_text, "use encoding::json;"),
+			"stdlib auto-import must insert the qualified module path"
+		);
+		break;
+	};
+	assert(found, "stdlib loadstr should be offered as an unqualified completion");
+};
+
+@test fn completion_auto_import_for_stdlib_skipped_when_qualified_import_present(
+
+) void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup("/repo/stdlib")!;
+	const seed = strings::toutf8("export fn loadstr(input: str) void = void;\n");
+	analysis::index_file(&s.stdlib_index, "/repo/stdlib/encoding/json/loader.ha",
+		seed);
+
+	// Doc already imports the qualified module. The completion should
+	// still surface `loadstr` but must NOT attach a redundant edit.
+	comp_open(&s, "file:///z2.ha",
+		"use encoding::json;\\nfn main() void = load\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///z2.ha"},"position":{"line":1,"character":21}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 71.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 71.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "loadstr") continue;
+		found = true;
+		match (json::get(&item, "additionalTextEdits")) {
+		case let p: *json::value => abort(
+			"expected no additionalTextEdits when encoding::json is already imported"
+		);
+		case => void;
+		};
+		break;
+	};
+	assert(found);
+};
+
+@test fn completion_module_name_suggests_stdlib_module() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup("/repo/stdlib")!;
+	const seed = strings::toutf8("export fn loadstr(input: str) void = void;\n");
+	analysis::index_file(&s.stdlib_index, "/repo/stdlib/encoding/json/loader.ha",
+		seed);
+
+	// Typing just `js` — the user wants the module name itself, not a
+	// symbol inside it. We must offer a MODULE item with the qualified
+	// detail so it's distinguishable from any "js"-prefixed symbol.
+	comp_open(&s, "file:///mod.ha", "fn main() void = js\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///mod.ha"},"position":{"line":0,"character":19}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 80.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 80.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "json") continue;
+		const kind = *(json::get(&item, "kind") as *json::value) as f64;
+		if (kind != 9.0) continue;
+		found = true;
+		const detail = *(json::get(&item, "detail") as *json::value) as str;
+		assert(
+			detail == "encoding::json",
+			"module-name completion detail must show the qualified path"
+		);
+		const edits =
+			*(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
+		assert(len(edits) >= 1);
+		const e0 = edits[0] as json::object;
+		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+		assert(strings::contains(new_text, "use encoding::json;"));
+		break;
+	};
+	assert(
+		found,
+		"typing a module-name prefix should offer a MODULE-kind item with auto-import"
+	);
+};
+
+@test fn completion_module_name_dedupes_repeated_module() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup("/repo/stdlib")!;
+	// Two files in the same module — module suggestion must only
+	// appear once.
+	analysis::index_file(&s.stdlib_index, "/repo/stdlib/bufio/scanner.ha",
+		strings::toutf8("export fn newscanner() void = void;\n"));
+	analysis::index_file(&s.stdlib_index, "/repo/stdlib/bufio/writer.ha",
+		strings::toutf8("export fn newwriter() void = void;\n"));
+
+	comp_open(&s, "file:///dedup.ha", "fn main() void = bu\\n");
+	const params =
+		`{"textDocument":{"uri":"file:///dedup.ha"},"position":{"line":0,"character":19}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 81.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 81.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let bufio_count = 0;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "bufio") continue;
+		const kind = *(json::get(&item, "kind") as *json::value) as f64;
+		if (kind != 9.0) continue;
+		bufio_count += 1;
+	};
+	assert(
+		bufio_count == 1,
+		"module-name completion must dedupe — `bufio` should appear exactly once"
+	);
+};
+
+@test fn completion_module_name_skipped_when_already_imported() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup("/repo/stdlib")!;
+	analysis::index_file(&s.stdlib_index, "/repo/stdlib/encoding/json/loader.ha",
+		strings::toutf8("export fn loadstr(s: str) void = void;\n"));
+
+	// Doc already imports `encoding::json`. The module-name suggestion
+	// is still useful (user typed `js`), but it must not carry a
+	// redundant auto-import edit.
+	comp_open(&s, "file:///already.ha",
+		"use encoding::json;\\nfn main() void = js\\n");
+	const params =
+		`{"textDocument":{"uri":"file:///already.ha"},"position":{"line":1,"character":19}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 82.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 82.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "json") continue;
+		const kind = *(json::get(&item, "kind") as *json::value) as f64;
+		if (kind != 9.0) continue;
+		found = true;
+		match (json::get(&item, "additionalTextEdits")) {
+		case let p: *json::value => abort(
+			"module-name completion must NOT attach an auto-import edit when the module is already imported"
+		);
+		case => void;
+		};
+		break;
+	};
+	assert(found);
+};
+
+@test fn completion_module_name_workspace_module() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	const provider = strings::toutf8("export fn helper() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/mymod/p.ha", provider);
+
+	comp_open(&s, "file:///wsmod.ha", "fn main() void = my\\n");
+	const params =
+		`{"textDocument":{"uri":"file:///wsmod.ha"},"position":{"line":0,"character":19}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 83.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 83.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "mymod") continue;
+		const kind = *(json::get(&item, "kind") as *json::value) as f64;
+		if (kind != 9.0) continue;
+		found = true;
+		const edits =
+			*(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
+		assert(len(edits) >= 1);
+		const e0 = edits[0] as json::object;
+		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+		assert(strings::contains(new_text, "use mymod;"));
+		break;
+	};
+	assert(
+		found,
+		"typing `my` should offer the workspace module `mymod` with auto-import"
+	);
+};
+
+@test fn completion_auto_import_for_stdlib_skips_unexported() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup("/repo/stdlib")!;
+	const seed = strings::toutf8("fn internal_helper() void = void;\n");
+	analysis::index_file(&s.stdlib_index, "/repo/stdlib/encoding/json/loader.ha",
+		seed);
+
+	comp_open(&s, "file:///z3.ha", "fn main() void = inter\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///z3.ha"},"position":{"line":0,"character":22}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 72.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 72.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		assert(
+			label != "internal_helper",
+			"private stdlib symbols must not appear in unqualified completion"
+		);
+	};
+};
+
 @test fn completion_qualified_filters_by_module() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);

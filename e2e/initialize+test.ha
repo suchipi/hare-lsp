@@ -222,17 +222,27 @@ fn wait_for_response(s: *session, id: f64) []u8 = {
 		let v = json::loadstr(text)!;
 		const matched = match (v) {
 		case let obj: json::object =>
-			yield match (json::get(&obj, "id")) {
-			case let p: *json::value =>
-				yield match (*p) {
-				case let n: f64 =>
-					yield n == id;
-				case =>
+			// Server-initiated requests share the JSON-RPC `id` field
+			// with our client-side request ids but always carry a
+			// `method`. The id namespaces are independent per LSP, so
+			// gate on the *response* shape (no method, has result/error)
+			// to avoid accidentally matching a server request that
+			// happens to use the same numeric id.
+			yield match (json::get(&obj, "method")) {
+			case *json::value =>
+				yield false;
+			case void =>
+				yield match (json::get(&obj, "id")) {
+				case let p: *json::value =>
+					yield match (*p) {
+					case let n: f64 =>
+						yield n == id;
+					case =>
+						yield false;
+					};
+				case void =>
 					yield false;
 				};
-			case void =>
-				// Notification: no id. Not what we want.
-				yield false;
 			};
 		case =>
 			yield false;
