@@ -2240,20 +2240,42 @@ fn build_array_literal(
 	bc: *build_ctx,
 ) doc = {
 	const force_break = source_opens_multiline(bc, loc, ['[': u8]);
+	const lit_end = loc.end.off: size;
 	let inner: []doc = [];
 	append(inner, leading_softline(force_break, ""))!;
 	for (let i = 0z; i < len(a.values); i += 1) {
+		// In multi-line mode, surface any leading full-line comments
+		// that the user wrote between this item and the previous one
+		// (or between the opening `[` and the first item).
+		if (force_break) {
+			const _ = push_comments_before(&inner, bc.c,
+				a.values[i].loc.start.off: size);
+		};
 		append(inner, build_expr_doc(a.values[i], bc))!;
 		if (i + 1 < len(a.values)) {
 			append(inner, text(","))!;
+		} else if (!a.expand) {
+			// Trailing comma in broken layout — emit BEFORE flushing
+			// trailing comments so a `// note` on the last item still
+			// lands inline with `<item>,` instead of after `]`.
+			append(inner, if_broken(","))!;
+		};
+		// Flush any trailing comment that shares this item's source
+		// line (e.g. `"x", // first`). Without this the comment leaks
+		// out past the closing `]`.
+		if (force_break) {
+			const next_off = if (i + 1 < len(a.values))
+				a.values[i + 1].loc.start.off: size
+				else lit_end;
+			flush_trailing_comments_to_eol(&inner, bc.c, next_off,
+				a.values[i].loc.end.off: size, bc.data);
+		};
+		if (i + 1 < len(a.values)) {
 			append(inner, line(" "))!;
 		};
 	};
 	if (a.expand) {
 		append(inner, text("..."))!;
-	};
-	if (len(a.values) > 0 && !a.expand) {
-		append(inner, if_broken(","))!;
 	};
 
 	let g_items: []doc = [];
@@ -2272,17 +2294,28 @@ fn build_tuple_literal(
 	bc: *build_ctx,
 ) doc = {
 	const force_break = source_opens_multiline(bc, loc, ['(': u8]);
+	const lit_end = loc.end.off: size;
 	let inner: []doc = [];
 	append(inner, leading_softline(force_break, ""))!;
 	for (let i = 0z; i < len(t); i += 1) {
+		if (force_break) {
+			const _ = push_comments_before(&inner, bc.c, t[i].loc.start.off: size);
+		};
 		append(inner, build_expr_doc(t[i], bc))!;
 		if (i + 1 < len(t)) {
 			append(inner, text(","))!;
+		} else {
+			append(inner, if_broken(","))!;
+		};
+		if (force_break) {
+			const next_off = if (i + 1 < len(t)) t[i + 1].loc.start.off: size
+				else lit_end;
+			flush_trailing_comments_to_eol(&inner, bc.c, next_off,
+				t[i].loc.end.off: size, bc.data);
+		};
+		if (i + 1 < len(t)) {
 			append(inner, line(" "))!;
 		};
-	};
-	if (len(t) > 0) {
-		append(inner, if_broken(","))!;
 	};
 
 	let g_items: []doc = [];

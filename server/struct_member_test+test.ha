@@ -12,15 +12,21 @@ use strings;
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
-	// Line 0: type point = struct { x: int };
-	// Line 1: fn f(p: point) void = { let _ = p.x; };
-	// `x` in `p.x` is at column 34 of line 1.
+	// Line 0: type point = struct { coord: int };
+	// Line 1: fn f(p: point) void = { let _ = p.coord; };
+	// Cursor lands on the trailing 'd' of `p.coord` — the START of
+	// the LAST rune of the field name, which is what hare::lex::prevloc
+	// reports as `loc.end.off`. Single-char field names mask the bug
+	// because start-of-last-rune == start-of-name for ASCII 1-char
+	// identifiers.
 	const src =
-		"type point = struct { x: int };\\nfn f(p: point) void = { let _ = p.x; };\\n";
+		"type point = struct { coord: int };\\nfn f(p: point) void = { let _ = p.coord; };\\n";
 	nav_open(&s, "file:///sm_hover.ha", src);
 
-	const params =
-		`{"textDocument":{"uri":"file:///sm_hover.ha"},"position":{"line":1,"character":34}}`;
+	const (line, col) = find_pos(src, "p.coord");
+	const params = pos_params("file:///sm_hover.ha", line,
+		col + len("p.coord"): u32 - 1);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -47,17 +53,22 @@ use strings;
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
 	// Line 0: type point = struct {
-	// Line 1: \t// horizontal coordinate
-	// Line 2: \tx: int,
+	// Line 1: \t// 横座標 - horizontal coordinate
+	// Line 2: \tcoord: int,
 	// Line 3: };
-	// Line 4: fn f(p: point) void = { let _ = p.x; };
-	// `x` at column 34 of line 4.
+	// Line 4: fn f(p: point) void = { let _ = p.coord; };
+	// `coord` last rune ('d') at col 38 of line 4. The doc comment
+	// includes a multi-byte UTF-8 sequence (`横座標`, 3 runes / 9
+	// bytes) so this case also catches loc_fixup regressions where
+	// rune offsets aren't translated to byte offsets.
 	const src =
-		"type point = struct {\\n\\t// horizontal coordinate\\n\\tx: int,\\n};\\nfn f(p: point) void = { let _ = p.x; };\\n";
+		"type point = struct {\\n\\t// 横座標 - horizontal coordinate\\n\\tcoord: int,\\n};\\nfn f(p: point) void = { let _ = p.coord; };\\n";
 	nav_open(&s, "file:///sm_docs.ha", src);
 
-	const params =
-		`{"textDocument":{"uri":"file:///sm_docs.ha"},"position":{"line":4,"character":34}}`;
+	const (line, col) = find_pos(src, "p.coord");
+	const params = pos_params("file:///sm_docs.ha", line,
+		col + len("p.coord"): u32 - 1);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -82,12 +93,16 @@ use strings;
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
+	// `coord` in `p.coord` on line 1; cursor on the trailing 'd' is
+	// the start of the last rune, the bug-sensitive spot.
 	const src =
-		"type point = struct { x: int };\\nfn f(p: point) void = { let _ = p.x; };\\n";
+		"type point = struct { coord: int };\\nfn f(p: point) void = { let _ = p.coord; };\\n";
 	nav_open(&s, "file:///sm_def.ha", src);
 
-	const params =
-		`{"textDocument":{"uri":"file:///sm_def.ha"},"position":{"line":1,"character":34}}`;
+	const (line, col) = find_pos(src, "p.coord");
+	const params = pos_params("file:///sm_def.ha", line,
+		col + len("p.coord"): u32 - 1);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -106,7 +121,7 @@ use strings;
 	assert(uri == "file:///sm_def.ha");
 	const range = *(json::get(&result, "range") as *json::value) as json::object;
 	const start = *(json::get(&range, "start") as *json::value) as json::object;
-	// Field `x` lives on line 0; "type point = struct { x: int };" -> col 22.
+	// Field `coord` lives on line 0; "type point = struct { coord: int };" -> col 22.
 	assert(*(json::get(&start, "line") as *json::value) as f64 == 0.0);
 	assert(*(json::get(&start, "character") as *json::value) as f64 == 22.0);
 };
@@ -115,14 +130,17 @@ use strings;
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
-	// Line 1: "fn f(p: *point) void = { let _ = p.x; };"
-	// p in (p: *point) param, .x at column 35.
+	// Line 1: "fn f(p: *point) void = { let _ = p.coord; };"
+	// Cursor on trailing 'd' of `p.coord` is the start of the last
+	// rune, the bug-sensitive spot for `loc.end.off`.
 	const src =
-		"type point = struct { x: int };\\nfn f(p: *point) void = { let _ = p.x; };\\n";
+		"type point = struct { coord: int };\\nfn f(p: *point) void = { let _ = p.coord; };\\n";
 	nav_open(&s, "file:///sm_ptr.ha", src);
 
-	const params =
-		`{"textDocument":{"uri":"file:///sm_ptr.ha"},"position":{"line":1,"character":35}}`;
+	const (line, col) = find_pos(src, "p.coord");
+	const params = pos_params("file:///sm_ptr.ha", line,
+		col + len("p.coord"): u32 - 1);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -177,16 +195,19 @@ use strings;
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
-	// Line 0: type inner = struct { x: int };
+	// Line 0: type inner = struct { coord: int };
 	// Line 1: type outer = struct { i: inner };
-	// Line 2: fn f(o: outer) void = { let _ = o.i.x; };
-	// On line 2 the literal text after `{ let _ = o.i.x` has `x` at column 36.
+	// Line 2: fn f(o: outer) void = { let _ = o.i.coord; };
+	// Cursor on trailing 'd' of `o.i.coord` is the start of the last
+	// rune of the chained field.
 	const src =
-		"type inner = struct { x: int };\\ntype outer = struct { i: inner };\\nfn f(o: outer) void = { let _ = o.i.x; };\\n";
+		"type inner = struct { coord: int };\\ntype outer = struct { i: inner };\\nfn f(o: outer) void = { let _ = o.i.coord; };\\n";
 	nav_open(&s, "file:///sm_chain.ha", src);
 
-	const params =
-		`{"textDocument":{"uri":"file:///sm_chain.ha"},"position":{"line":2,"character":36}}`;
+	const (line, col) = find_pos(src, "o.i.coord");
+	const params = pos_params("file:///sm_chain.ha", line,
+		col + len("o.i.coord"): u32 - 1);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
