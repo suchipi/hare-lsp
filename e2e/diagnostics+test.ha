@@ -143,52 +143,6 @@ use strings;
 	assert(saw_b, "workspace diagnostic must report ws_diag_b.ha");
 };
 
-// Reads frames until a publishDiagnostics for `uri` arrives, returning
-// the matching frame's body bytes. Caller takes ownership and must
-// free the slice. Aborts if no matching frame shows up within the
-// harness's recv budget.
-fn wait_for_publish_diagnostics(s: *session, uri: str) []u8 = {
-	for (let i = 0z; i < 50z; i += 1) {
-		const body = recv(s);
-		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, `"method":"textDocument/publishDiagnostics"`) &&
-				strings::contains(text, uri)) {
-			return body;
-		};
-		free(body);
-	};
-	fmt::fatalf("e2e: never received publishDiagnostics for {}", uri);
-};
-
-// Parses a publishDiagnostics notification frame and returns the parsed
-// JSON root alongside the params.diagnostics slice borrowed from inside
-// it. The caller must `json::finish(root)` when done; the slice becomes
-// invalid at that point.
-fn parse_publish_diagnostics(body: []u8) (json::value, []json::value) = {
-	const text = strings::fromutf8(body)!;
-	let v = json::loadstr(text)!;
-	const obj = v as json::object;
-	const params = *(json::get(&obj, "params") as *json::value) as json::object;
-	const diags =
-		*(json::get(&params, "diagnostics") as *json::value) as []json::value;
-	return (v, diags);
-};
-
-fn write_didsave_file(path: str, body: str) void = {
-	const f = match (os::create(path, 0o644: fs::mode)) {
-	case let f: io::file =>
-		yield f;
-	case let e: fs::error =>
-		fmt::fatalf("e2e: cannot create {}: {}", path, fs::strerror(e));
-	};
-	defer io::close(f)!;
-	match (io::writeall(f, strings::toutf8(body))) {
-	case size => void;
-	case let e: io::error =>
-		fmt::fatalf("e2e: cannot write {}: {}", path, io::strerror(e));
-	};
-};
-
 // Library modules have no `main` function. `hare build <library-dir>`
 // (the default `-t bin`) would fail with "no main function defined";
 // the dep-build path uses `-t o` (object build) so library modules
@@ -198,8 +152,8 @@ fn write_didsave_file(path: str, body: str) void = {
 	const cwd = os::getcwd();
 	const root = strings::concat(cwd, "/.tmp/e2e-didsave-library-mod")!;
 	defer free(root);
-	cleanup_didsave_root(root);
-	defer cleanup_didsave_root(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
 
 	match (os::mkdirs(root, 0o755: fs::mode)) {
 	case void => void;
@@ -208,15 +162,15 @@ fn write_didsave_file(path: str, body: str) void = {
 	};
 	const helpers_path = strings::concat(root, "/helpers.ha")!;
 	defer free(helpers_path);
-	write_didsave_file(helpers_path, "export fn helper() int = 42;\n");
+	write_test_file(helpers_path, "export fn helper() int = 42;\n");
 	const lib_path = strings::concat(root, "/lib.ha")!;
 	defer free(lib_path);
 	// No `main` defined anywhere - this is a library module.
-	write_didsave_file(lib_path, "export fn use_helper() int = helper();\n");
+	write_test_file(lib_path, "export fn use_helper() int = helper();\n");
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 	drain_until_indexed_ref(&s);
 
 	const lib_uri = strings::concat("file://", lib_path)!;
@@ -250,8 +204,8 @@ fn write_didsave_file(path: str, body: str) void = {
 	const cwd = os::getcwd();
 	const root = strings::concat(cwd, "/.tmp/e2e-didsave-local-dep")!;
 	defer free(root);
-	cleanup_didsave_root(root);
-	defer cleanup_didsave_root(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
 
 	const app_dir = strings::concat(root, "/app")!;
 	defer free(app_dir);
@@ -271,13 +225,13 @@ fn write_didsave_file(path: str, body: str) void = {
 	defer free(main_path);
 	const lib_x_path = strings::concat(lib_dir, "/x.ha")!;
 	defer free(lib_x_path);
-	write_didsave_file(lib_x_path, "export fn provided() int = 7;\n");
-	write_didsave_file(main_path,
+	write_test_file(lib_x_path, "export fn provided() int = 7;\n");
+	write_test_file(main_path,
 		"use lib;\nexport fn main() void = { let _ = lib::provided(); };\n");
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 	drain_until_indexed_ref(&s);
 
 	const main_uri = strings::concat("file://", main_path)!;
@@ -311,8 +265,8 @@ fn write_didsave_file(path: str, body: str) void = {
 	const cwd = os::getcwd();
 	const root = strings::concat(cwd, "/.tmp/e2e-didsave-stdlib-skip")!;
 	defer free(root);
-	cleanup_didsave_root(root);
-	defer cleanup_didsave_root(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
 
 	match (os::mkdirs(root, 0o755: fs::mode)) {
 	case void => void;
@@ -327,11 +281,11 @@ fn write_didsave_file(path: str, body: str) void = {
 	// against the saved module with stdlib resolved via the
 	// inherited HAREPATH.
 	const body = "use strings;\nexport fn upper(s: str) str = strings::dup(s)!;\n";
-	write_didsave_file(main_path, body);
+	write_test_file(main_path, body);
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 	drain_until_indexed_ref(&s);
 
 	const main_uri = strings::concat("file://", main_path)!;
@@ -369,8 +323,8 @@ fn write_didsave_file(path: str, body: str) void = {
 	const cwd = os::getcwd();
 	const root = strings::concat(cwd, "/.tmp/e2e-didsave-stale-clear")!;
 	defer free(root);
-	cleanup_didsave_root(root);
-	defer cleanup_didsave_root(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
 
 	match (os::mkdirs(root, 0o755: fs::mode)) {
 	case void => void;
@@ -382,12 +336,12 @@ fn write_didsave_file(path: str, body: str) void = {
 	const main_path = strings::concat(root, "/main.ha")!;
 	defer free(main_path);
 	// Start with sibling.ha broken: references an undefined symbol.
-	write_didsave_file(sibling_path, "export fn s() void = undefined_symbol();\n");
-	write_didsave_file(main_path, "export fn m() void = void;\n");
+	write_test_file(sibling_path, "export fn s() void = undefined_symbol();\n");
+	write_test_file(main_path, "export fn m() void = void;\n");
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 	drain_until_indexed_ref(&s);
 
 	const main_uri = strings::concat("file://", main_path)!;
@@ -435,7 +389,7 @@ fn write_didsave_file(path: str, body: str) void = {
 	// editor drops the now-stale entry. The main.ha publish that
 	// also fires this round is fine; the wait helper drains past it
 	// looking for the sibling publish specifically.
-	write_didsave_file(sibling_path, "export fn s() void = void;\n");
+	write_test_file(sibling_path, "export fn s() void = void;\n");
 	send(&s, strings::toutf8(save_msg));
 
 	const sibling_cleared = wait_for_publish_diagnostics(&s, sibling_uri);
@@ -449,13 +403,6 @@ fn write_didsave_file(path: str, body: str) void = {
 	);
 };
 
-fn cleanup_didsave_root(root: str) void = {
-	match (os::rmdirall(root)) {
-	case void => void;
-	case fs::error => void;
-	};
-};
-
 // Regression: the didSave dep-build path uses `hare build -t o` to type-
 // check modules. Without `-o /dev/null`, hare drops `<module>.o` into the
 // child's cwd (the workspace folder), littering the user's repo. Verifies
@@ -464,8 +411,8 @@ fn cleanup_didsave_root(root: str) void = {
 	const cwd = os::getcwd();
 	const root = strings::concat(cwd, "/.tmp/e2e-didsave-no-obj-files")!;
 	defer free(root);
-	cleanup_didsave_root(root);
-	defer cleanup_didsave_root(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
 
 	match (os::mkdirs(root, 0o755: fs::mode)) {
 	case void => void;
@@ -475,11 +422,11 @@ fn cleanup_didsave_root(root: str) void = {
 	const main_path = strings::concat(root, "/main.ha")!;
 	defer free(main_path);
 	const body = "export fn add(a: int, b: int) int = a + b;\n";
-	write_didsave_file(main_path, body);
+	write_test_file(main_path, body);
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 	drain_until_indexed_ref(&s);
 
 	const main_uri = strings::concat("file://", main_path)!;
