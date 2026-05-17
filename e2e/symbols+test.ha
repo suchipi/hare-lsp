@@ -137,7 +137,9 @@ export fn ask() int = answer();
 };
 
 @test fn e2e_workspace_symbol_finds_open_decl() void = {
-	let s = spawn_session();
+	// Pinned to spawn_session_with_logs so the log-dir codepath is
+	// exercised on every test run. See e2e/README.md.
+	let s = spawn_session_with_logs("logs-workspace-symbol");
 	defer finish_session(&s);
 	do_init(&s);
 

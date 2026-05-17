@@ -5,13 +5,12 @@
 
 use encoding::json;
 use fmt;
-use fs;
-use io;
-use os;
 use strings;
 
 @test fn e2e_references_finds_call_site_and_decl() void = {
-	let s = spawn_session();
+	// Pinned to spawn_session_with_logs so the log-dir codepath is
+	// exercised on every test run. See e2e/README.md.
+	let s = spawn_session_with_logs("logs-refs");
 	defer finish_session(&s);
 	do_init(&s);
 
@@ -287,11 +286,11 @@ export fn shadow() void = {
 // `mod_a` must return hits only from `mod_a`.
 @test fn e2e_references_distinguishes_same_name_across_modules() void = {
 	const root = setup_crossmod_workspace("refs");
-	defer cleanup_crossmod_workspace(root);
+	defer cleanup_workspace(root);
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 	drain_until_indexed_ref(&s);
 
 	const uri_a = strings::concat("file://", root, "/mod_a/file.ha")!;
@@ -342,11 +341,11 @@ export fn shadow() void = {
 // touch only mod_a's file.
 @test fn e2e_rename_distinguishes_same_name_across_modules() void = {
 	const root = setup_crossmod_workspace("rename");
-	defer cleanup_crossmod_workspace(root);
+	defer cleanup_workspace(root);
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 	drain_until_indexed_ref(&s);
 
 	const uri_a = strings::concat("file://", root, "/mod_a/file.ha")!;
@@ -410,79 +409,15 @@ export fn shadow() void = {
 };
 
 // Sets up `.tmp/e2e-crossmod-<label>/{mod_a,mod_b}/file.ha`, returns the
-// absolute path to the root. Caller frees and should call
-// [[cleanup_crossmod_workspace]].
+// absolute path to the root. Caller defers [[cleanup_workspace]].
 fn setup_crossmod_workspace(label: str) str = {
-	const cwd = os::getcwd();
-	const root = strings::concat(cwd, "/.tmp/e2e-crossmod-", label)!;
-	// Clean up any leftover state from a previous run before recreating.
-	cleanup_crossmod_workspace(root);
-	const mod_a = strings::concat(root, "/mod_a")!;
-	defer free(mod_a);
-	const mod_b = strings::concat(root, "/mod_b")!;
-	defer free(mod_b);
-	match (os::mkdirs(mod_a, 0o755: fs::mode)) {
-	case void => void;
-	case let e: fs::error =>
-		fmt::fatalf("e2e: cannot mkdir {}: {}", mod_a, fs::strerror(e));
-	};
-	match (os::mkdirs(mod_b, 0o755: fs::mode)) {
-	case void => void;
-	case let e: fs::error =>
-		fmt::fatalf("e2e: cannot mkdir {}: {}", mod_b, fs::strerror(e));
-	};
-	const file_a = strings::concat(mod_a, "/file.ha")!;
-	defer free(file_a);
-	const file_b = strings::concat(mod_b, "/file.ha")!;
-	defer free(file_b);
-	write_test_file(file_a, "export fn samename() int = 1;\n");
-	write_test_file(file_b, "export fn samename() int = 2;\n");
-	return root;
-};
-
-fn cleanup_crossmod_workspace(root: str) void = {
-	match (os::rmdirall(root)) {
-	case void => void;
-	case fs::error => void;
-	};
-};
-
-fn write_test_file(path: str, body: str) void = {
-	const f = match (os::create(path, 0o644: fs::mode)) {
-	case let f: io::file =>
-		yield f;
-	case let e: fs::error =>
-		fmt::fatalf("e2e: cannot create {}: {}", path, fs::strerror(e));
-	};
-	defer io::close(f)!;
-	match (io::writeall(f, strings::toutf8(body))) {
-	case size => void;
-	case let e: io::error =>
-		fmt::fatalf("e2e: cannot write {}: {}", path, io::strerror(e));
-	};
-};
-
-fn init_with_workspace_folder(s: *session, root: str) void = {
-	const msg =
-		strings::concat(
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
-			root, `","workspaceFolders":[{"uri":"file://`, root,
-			`","name":"crossmod"}],"capabilities":{}}}`)!;
-	defer free(msg);
-	send(s, strings::toutf8(msg));
-	free(wait_for_response(s, 1.0));
-	send(s,
-		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
-};
-
-fn drain_until_indexed_ref(s: *session) void = {
-	for (let i = 0z; i < 20z; i += 1) {
-		const body = recv(s);
-		defer free(body);
-		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed") &&
-				strings::contains(text, "file(s)")) return;
-	};
+	const dir_label = strings::concat("crossmod-", label)!;
+	defer free(dir_label);
+	const files: [](str, str) = [
+		("mod_a/file.ha", "export fn samename() int = 1;\n"),
+		("mod_b/file.ha", "export fn samename() int = 2;\n"),
+	];
+	return make_workspace(dir_label, files);
 };
 
 @test fn e2e_rename_rejects_invalid_identifier() void = {

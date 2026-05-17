@@ -11,7 +11,9 @@ use encoding::json;
 use strings;
 
 @test fn e2e_codelens_references_anchored_at_name() void = {
-	let s = spawn_session();
+	// Pinned to spawn_session_with_logs so the log-dir codepath is
+	// exercised on every test run. See e2e/README.md.
+	let s = spawn_session_with_logs("logs-codelens");
 	defer finish_session(&s);
 
 	send(&s,

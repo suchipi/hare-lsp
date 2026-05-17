@@ -1298,6 +1298,27 @@ fn binprec(op: binarithm_op) uint = {
 	};
 };
 
+// True when `op` is not associative — i.e. the right operand at the
+// same precedence level needs its own parens to preserve semantics.
+// `a - (b - 1)` is NOT the same as `a - b - 1` (which parses as
+// `(a - b) - 1`), so dropping the inner parens silently changes the
+// computation. The same holds for `/`, `%`, `<<`, `>>`. Addition,
+// multiplication, bitwise AND/OR/XOR, and the boolean operators are
+// associative under integer arithmetic (including unsigned wraparound)
+// and stay safe to flatten.
+fn binop_is_left_assoc_only(op: binarithm_op) bool = {
+	switch (op) {
+	case binarithm_op::MINUS,
+	binarithm_op::DIV,
+	binarithm_op::MODULO,
+	binarithm_op::LSHIFT,
+	binarithm_op::RSHIFT =>
+		return true;
+	case =>
+		return false;
+	};
+};
+
 // @param b: borrowed
 // @param bc: borrowed
 fn build_binarithm_expr(
@@ -1318,11 +1339,17 @@ fn build_binarithm_expr(
 	// lines (e.g. `if (a && b &&\n\t\tc && d)`) so they keep their
 	// soft break.
 	const sep: doc = if (prec <= binprec_lor()) line(" ") else text(" ");
+	// Right child of a non-associative op (e.g. `a - (b - 1)`) must
+	// keep its own parens even at equal precedence; bumping the
+	// effective parent precedence by one forces the inner
+	// `build_binarithm_expr` to wrap.
+	const rvalue_parent_prec = if (binop_is_left_assoc_only(
+				b.op)) prec + 1u else prec;
 	append(items, build_binexpr_operand(b.lvalue, bc, prec))!;
 	append(items, text(" "))!;
 	append(items, text(binarithm_op_str(b.op)))!;
 	append(items, sep)!;
-	append(items, build_binexpr_operand(b.rvalue, bc, prec))!;
+	append(items, build_binexpr_operand(b.rvalue, bc, rvalue_parent_prec))!;
 
 	if (need_outer_parens) {
 		append(items, text(")"))!;

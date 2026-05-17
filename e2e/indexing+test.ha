@@ -20,7 +20,7 @@ use time;
 fn gen_index_workspace(label: str, count: size) str = {
 	const cwd = os::getcwd();
 	const root = strings::concat(cwd, "/.tmp/e2e-indexing-", label)!;
-	cleanup_crossmod_workspace(root);
+	cleanup_workspace(root);
 	match (os::mkdirs(root, 0o755: fs::mode)) {
 	case void => void;
 	case let e: fs::error =>
@@ -167,11 +167,11 @@ fn parse_index_end_message(msg: str) index_end = {
 @test fn e2e_indexing_chunked_indexes_large_workspace() void = {
 	const FILE_COUNT: size = 150z;
 	const root = gen_index_workspace("chunked", FILE_COUNT);
-	defer cleanup_crossmod_workspace(root);
+	defer cleanup_workspace(root);
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 
 	// Eventually the server emits `$/progress` `end` with the final
 	// count. Allow up to 200 messages to drain (begin, intermediate
@@ -225,11 +225,11 @@ fn parse_index_end_message(msg: str) index_end = {
 @test fn e2e_indexing_cancel_stops_job() void = {
 	const TOTAL: size = 500z;
 	const root = gen_index_workspace("cancel", TOTAL);
-	defer cleanup_crossmod_workspace(root);
+	defer cleanup_workspace(root);
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 
 	// Read messages until we see a $/progress begin notification, then
 	// extract the token and send cancel.
@@ -283,11 +283,11 @@ fn parse_index_end_message(msg: str) index_end = {
 	// 600 files: the inline drain covers 200, so 8 more background
 	// batches must happen during the idle sleep below.
 	const root = gen_index_workspace("idle", 600z);
-	defer cleanup_crossmod_workspace(root);
+	defer cleanup_workspace(root);
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 
 	// Generous margin: 8 background batches of tiny files complete in
 	// well under a second even on slow hardware.

@@ -66,28 +66,6 @@ fn smoke_notification(notif: str, probe_uri: str, ping_id: f64) void = {
 	free(wait_for_response(&s, ping2_id));
 };
 
-// Renders an integer-valued f64 as decimal text for embedding in JSON
-// (we only ever use whole-number ids in these helpers).
-fn f64_to_int_str(v: f64) str = {
-	const n = v: i64;
-	let buf: [21]u8 = [0...];
-	let i = len(buf);
-	let val = if (n < 0) -n else n;
-	if (val == 0) {
-		i -= 1;
-		buf[i] = '0': u8;
-	};
-	for (val > 0; val /= 10) {
-		i -= 1;
-		buf[i] = '0': u8 + (val % 10): u8;
-	};
-	if (n < 0) {
-		i -= 1;
-		buf[i] = '-': u8;
-	};
-	return strings::dup(strings::fromutf8(buf[i..])!)!;
-};
-
 // $/cancelRequest with an id that doesn't match any in-flight request
 // is a no-op per LSP spec. The only observable behavior is that the
 // server keeps responding to subsequent requests.
