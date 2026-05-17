@@ -112,6 +112,18 @@ export fn start_index_job(
 		return;
 	};
 
+	// Defensive cap. Coalescing above means we shouldn't normally have
+	// more than one job per distinct target; the cap exists so a future
+	// change that adds targets without re-reading the queue semantics
+	// can't grow this slice without bound.
+	if (len(s.pending_index_jobs) >= s.config.limits.max_pending_index_jobs) {
+		slog_warn(s, "dropping new index job:", "pending_index_jobs at limit",
+			s.config.limits.max_pending_index_jobs);
+		drain_paths_no_progress(s, target, paths, done_msg_prefix);
+		analysis::free_path_slice(paths);
+		return;
+	};
+
 	const token = match (progress_create(s)) {
 	case let pair: (progress_token, i64) =>
 		yield pair.0;

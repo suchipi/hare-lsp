@@ -50,30 +50,8 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 	const build_diags = run_dep_build_for_doc(s, doc);
 	defer finish_build_diagnostics(build_diags);
 
-	// Group build diagnostics by URI.
-	let by_uri: [](str, []json::value) = [];
-	defer {
-		for (let i = 0z; i < len(by_uri); i += 1) {
-			free(by_uri[i].0);
-			// inner json::values are consumed by publish_diagnostics
-			// when we iterate below, but in the panic-bypass path
-			// we'd need to free them. The normal path zeroes the
-			// slice as we publish, so this loop only runs on early
-			// abort and is conservative.
-			for (let j = 0z; j < len(by_uri[i].1); j += 1) {
-				json::finish(by_uri[i].1[j]);
-			};
-			free(by_uri[i].1);
-		};
-		free(by_uri);
-	};
-
-	for (let i = 0z; i < len(build_diags); i += 1) {
-		const uri = path_to_uri(build_diags[i].path);
-		defer free(uri);
-		const idx = find_or_create_uri_bucket(&by_uri, uri);
-		append(by_uri[idx].1, build_diag_to_lsp(build_diags[i]))!;
-	};
+	let by_uri = group_build_diagnostics_by_uri(build_diags);
+	defer finish_uri_buckets(by_uri);
 
 	// Merge: doc.uri's build diagnostics get appended to its parse
 	// diagnostics. Other URIs publish their own list.
@@ -130,6 +108,43 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 	// published to but this pass didn't, then remember the new set.
 	clear_stale_build_uris(s, doc, current_uris);
 	doc.last_build_uris = current_uris;
+};
+
+// Buckets `build_diags` by file URI. The result is owned: caller must
+// pass it to [[finish_uri_buckets]] (or hand off each `.1` slice via
+// reassignment, leaving the bucket empty). String keys are owned;
+// inner slices contain LSP-shaped diagnostic JSON values.
+//
+// @returns: owned
+// @param build_diags: borrowed
+fn group_build_diagnostics_by_uri(
+	build_diags: []build_diagnostic,
+) [](str, []json::value) = {
+	let by_uri: [](str, []json::value) = [];
+	for (let i = 0z; i < len(build_diags); i += 1) {
+		const uri = path_to_uri(build_diags[i].path);
+		defer free(uri);
+		const idx = find_or_create_uri_bucket(&by_uri, uri);
+		append(by_uri[idx].1, build_diag_to_lsp(build_diags[i]))!;
+	};
+	return by_uri;
+};
+
+// Frees a bucket slice produced by [[group_build_diagnostics_by_uri]].
+// In the normal flow callers hand off each `.1` to publish_diagnostics
+// and overwrite the bucket with `[]` before this runs; this loop only
+// matters if the function aborts mid-publish.
+//
+// @param by_uri: owned
+fn finish_uri_buckets(by_uri: [](str, []json::value)) void = {
+	for (let i = 0z; i < len(by_uri); i += 1) {
+		free(by_uri[i].0);
+		for (let j = 0z; j < len(by_uri[i].1); j += 1) {
+			json::finish(by_uri[i].1[j]);
+		};
+		free(by_uri[i].1);
+	};
+	free(by_uri);
 };
 
 // For every URI in `doc.last_build_uris` not in `keep`, publishes an

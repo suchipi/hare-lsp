@@ -6,7 +6,7 @@
   "publisher": "local",
   "license": "MPL-2.0",
   "engines": {
-    "vscode": "^1.93.0"
+    "vscode": "^1.82.0"
   },
   "categories": [
     "Programming Languages",
@@ -15,7 +15,17 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onLanguage:hare"
+    "onLanguage:hare",
+    "onCommand:hare-lsp.restart",
+    "onCommand:hare-lsp.showMenu",
+    "onCommand:hare-lsp.openWebsite",
+    "onCommand:hare-lsp.openDocs",
+    "onCommand:hare-lsp.openTutorial",
+    "onCommand:hare-lsp.openSpecification",
+    "onCommand:hare-lsp.openStdlibDocs",
+    "onCommand:hare-lsp.openInstallGuide",
+    "onCommand:hare-lsp.openStdlibFolder",
+    "onCommand:hare-lsp.runTestsInFile"
   ],
   "contributes": {
     "commands": [
@@ -246,6 +256,12 @@
             "default": 1000000,
             "minimum": 1,
             "description": "Maximum workspace-index entries. Whatever you configure is what the server enforces; there is no additional non-configurable ceiling."
+          },
+          "hare.limits.maxPendingIndexJobs": {
+            "type": "number",
+            "default": 16,
+            "minimum": 1,
+            "description": "Maximum concurrent indexing jobs. Coalescing keeps this near 2 in practice (workspace + stdlib); the cap is a defensive ceiling."
           }
         }
       }
@@ -264,7 +280,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@types/vscode": "^1.93.0",
+    "@types/vscode": "^1.82.0",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
     "typescript": "^6.0.3",

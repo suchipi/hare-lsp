@@ -77,8 +77,19 @@ if not ok then
   return
 end
 
+-- Pin root_dir to the buffer's parent directory. The plugin's default
+-- walks up looking for .git / Makefile, which under make-test lands
+-- on the repo root and pulls every .ha file in the repo into the
+-- server's workspace scan. That scan races against the synchronous
+-- hover round-trip below, especially when the e2e suite's seven
+-- parallel shards have the machine under load. Pinning the root keeps
+-- this test independent of the surrounding repo's size.
 plugin.setup({
   cmd = { cwd .. "/hare-lsp" },
+  root_dir = function(bufnr)
+    local fname = vim.api.nvim_buf_get_name(bufnr)
+    return vim.fn.fnamemodify(fname, ":h")
+  end,
 })
 
 vim.api.nvim_create_autocmd("LspAttach", {
@@ -89,12 +100,16 @@ vim.api.nvim_create_autocmd("LspAttach", {
     -- Confirm the plugin can actually round-trip a request. Position
     -- 0:11 lands on "main" in the test buffer; the LSP server has to
     -- be alive and parsing the document for a non-error response.
+    -- The timeout is generous (15s) because the server may still be
+    -- draining its initial stdlib-indexing batches when the hover
+    -- arrives, and a tight 5s budget tripped under parallel-shard
+    -- load on CI.
     local params = {
       textDocument = { uri = vim.uri_from_bufnr(args.buf) },
       position = { line = 0, character = 11 },
     }
     local result, err = vim.lsp.buf_request_sync(
-      args.buf, "textDocument/hover", params, 5000)
+      args.buf, "textDocument/hover", params, 15000)
     if err or not result then
       write_sentinel("HOVER_FAILED:" .. name .. ":" .. tostring(err))
       vim.defer_fn(function() vim.cmd("qa!") end, 50)
@@ -118,10 +133,12 @@ vim.api.nvim_create_autocmd("LspAttach", {
   end,
 })
 
+-- Outer fallback. Must outlast the buf_request_sync timeout above so
+-- a slow hover lands as HOVER_FAILED rather than TIMEOUT.
 vim.defer_fn(function()
   write_sentinel("TIMEOUT")
   vim.cmd("qa!")
-end, 12000)
+end, 25000)
 `;
 
 // A trivially-parseable Hare buffer. The exact contents don't matter -
@@ -201,7 +218,10 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 	// nvim owns the slave now.
 	io::close(slave)!;
 
-	const sentinel = wait_for_sentinel(master, 20 * time::SECOND);
+	// Outer budget covers the lua fallback (25s) plus a small margin
+	// so we always observe a sentinel rather than killing nvim mid-
+	// write.
+	const sentinel = wait_for_sentinel(master, 30 * time::SECOND);
 
 	// Best-effort cleanup. nvim should have exited via `qa!`; if
 	// it hasn't, SIGTERM it.

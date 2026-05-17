@@ -449,14 +449,14 @@ export fn handle_prepare_rename(s: *server, r: lsp::request) void = {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
-		send_null_result_local(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_null_result_local(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -467,7 +467,7 @@ export fn handle_prepare_rename(s: *server, r: lsp::request) void = {
 	case let r: (size, size) =>
 		yield r;
 	case void =>
-		send_null_result_local(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const enc = position_encoding(s);
@@ -501,7 +501,7 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 	case let s: str =>
 		yield s;
 	case void =>
-		send_null_result_local(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	if (!is_valid_hare_ident(new_name)) {
@@ -514,14 +514,14 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
-		send_null_result_local(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_null_result_local(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -532,7 +532,7 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 	case let r: (size, size) =>
 		yield r;
 	case void =>
-		send_null_result_local(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const target = strings::fromutf8(data[ident_range.0..ident_range.1])!;
@@ -599,9 +599,29 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 
 	// Group by uri.
 	for (let i = 0z; i < len(locs); i += 1) {
-		const loc = locs[i] as json::object;
-		const u = *(json::get(&loc, "uri") as *json::value) as str;
-		const range = *(json::get(&loc, "range") as *json::value);
+		const loc = match (locs[i]) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			continue;
+		};
+		const u = match (json::get(&loc, "uri")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str =>
+				yield s;
+			case =>
+				continue;
+			};
+		case =>
+			continue;
+		};
+		const range = match (json::get(&loc, "range")) {
+		case let p: *json::value =>
+			yield *p;
+		case =>
+			continue;
+		};
 		// Build a TextEdit { range, newText }.
 		let edit = json::newobject();
 		match (json::dup(range)) {
@@ -811,16 +831,6 @@ fn send_empty_array_local(s: *server, id: lsp::id) void = {
 	const arr: []json::value = [];
 	const v: json::value = arr;
 	defer json::finish(v);
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
-	};
-};
-
-// @param s: borrowed
-// @param id: borrowed
-fn send_null_result_local(s: *server, id: lsp::id) void = {
-	const v: json::value = json::_null;
 	match (lsp::encode_response_result(s.out, id, v)) {
 	case size => void;
 	case => void;

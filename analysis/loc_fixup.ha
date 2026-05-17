@@ -437,6 +437,19 @@ fn translate_off(off: i64, r2b: []size, data_len: size) i64 = {
 	return r2b[u]: i64;
 };
 
+// Returns true if byte offset `off` lies inside `loc` using closed
+// (inclusive) interval semantics on both ends. Per `hare::lex::prevloc`,
+// `loc.end.off` is the byte offset of the start of the LAST RUNE of the
+// last token of the span, so the closed check includes a cursor sitting
+// on that last rune. Used by the "is the cursor inside this decl?" path
+// across symbol_at, type_of_expr_at, etc. Scope-graph membership uses a
+// distinct half-open convention; see `analysis/scope_graph.ha`.
+//
+// @param loc: borrowed
+export fn offset_in_span(off: size, loc: ast::location) bool = {
+	return off >= loc.start.off: size && off <= loc.end.off: size;
+};
+
 // Builds a slice mapping rune index -> byte offset. Length is
 // (rune count) + 1, so the past-the-end position translates too.
 //

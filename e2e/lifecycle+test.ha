@@ -174,3 +174,54 @@ fn smoke_notification(notif: str, probe_uri: str, ping_id: f64) void = {
 		`{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{"event":{"added":[{"uri":"file:///newfolder","name":"new"}],"removed":[]}}}`,
 		"file:///lc_folders.ha", 2609.0);
 };
+
+// `shutdown` must drain any debounced-but-not-yet-published diagnostics
+// before responding. Otherwise editors miss the final error state when
+// the user shuts the server down mid-edit. We push debounce out to one
+// minute so a normal didChange-driven flush cannot fire, then collect
+// every frame up to the shutdown response and assert a v=2 publish
+// landed before it.
+@test fn e2e_shutdown_drains_pending_diagnostics() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+	// Push the debounce window way out so the next didChange won't
+	// publish on its own; only the shutdown drain should.
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"hare":{"diagnostics":{"debounceMs":60000}}}}}`
+		));
+	open_doc(&s, "file:///shutdown_drain.ha", "export fn main() void = void;\n");
+
+	// Replace with a parse-broken body. Without the shutdown drain
+	// this didChange would only mark diagnostics_pending and the
+	// 60s debounce would swallow the publish.
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///shutdown_drain.ha","version":2},"contentChanges":[{"text":"export fn main() void = {\nlet x = 1;\n"}]}}`
+		));
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":2700,"method":"shutdown","params":null}`));
+
+	// Collect every frame up to and including the shutdown response,
+	// then assert a v=2 publishDiagnostics for our URI landed first.
+	let saw_v2_publish = false;
+	for (let i = 0z; i < 100z; i += 1) {
+		const body = recv(&s);
+		defer free(body);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, `"method":"textDocument/publishDiagnostics"`) &&
+				strings::contains(text, `file:///shutdown_drain.ha`) &&
+				strings::contains(text, `"version":2`)) {
+			saw_v2_publish = true;
+		};
+		if (strings::contains(text, `"id":2700`)) {
+			break;
+		};
+	};
+	assert(
+		saw_v2_publish,
+		"shutdown drain must publish v=2 diagnostics before responding"
+	);
+};

@@ -23,14 +23,14 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
-		send_null_sh(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_null_sh(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -41,7 +41,7 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	case let c: call_context =>
 		yield c;
 	case void =>
-		send_null_sh(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	defer free(ctx.callee_name);
@@ -125,7 +125,7 @@ fn send_workspace_signature(s: *server, id: lsp::id, ctx: call_context) void = {
 		};
 		return;
 	};
-	send_null_sh(s, id);
+	send_null_result(s, id);
 };
 
 type call_context = struct {
@@ -334,14 +334,4 @@ fn parse_pos_sh(p: (json::value | void)) ((str, lsp::position) | void) = {
 		return void;
 	};
 	return (uri, pos);
-};
-
-// @param s: borrowed
-// @param id: borrowed
-fn send_null_sh(s: *server, id: lsp::id) void = {
-	const v: json::value = json::_null;
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
-	};
 };

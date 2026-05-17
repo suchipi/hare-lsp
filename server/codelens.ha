@@ -23,14 +23,14 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 	case let s: str =>
 		yield s;
 	case void =>
-		send_array_cl(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_array_cl(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -54,9 +54,9 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 		// step can hand it to editor.action.showReferences — using the
 		// lens range start would land on the `export` keyword (or the
 		// type's `let`/`const`), making references match every keyword
-		// occurrence instead of the symbol. The analysis index's
-		// `name_span` is currently a stub (loc.start..loc.start), so we
-		// search the decl's source text for the identifier ourselves.
+		// occurrence instead of the symbol. The decl span doesn't carry
+		// the identifier's exact location, so we search the decl's
+		// source text for the identifier ourselves.
 		const ident_off = find_ident_within(data, sym.span.start.off: size,
 			sym.span.end.off: size, sym.short_name);
 		const name_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
@@ -117,7 +117,7 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 		append(arr, lens: json::value)!;
 	};
 
-	send_array_cl(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // @param s: borrowed
@@ -442,18 +442,6 @@ fn uri_from_cl(p: (json::value | void)) (str | void) = {
 fn params_obj_cl(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
-
-// @param s: borrowed
-// @param id: borrowed
-// @param arr: owned
-fn send_array_cl(s: *server, id: lsp::id, arr: []json::value) void = {
-	const v: json::value = arr;
-	defer json::finish(v);
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
-	};
-};
 
 // Returns the byte offset of `name` within data[span_start..span_end],
 // matched as a whole word. Falls back to `span_start` if not found (an

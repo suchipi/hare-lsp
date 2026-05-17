@@ -18,5 +18,6 @@ RUN apk add --no-cache \
     musl-dev \
     gcc \
     bash \
+    neovim \
     hare=0.26.0.1-r0 \
     hare-json=0.26.0.0-r0

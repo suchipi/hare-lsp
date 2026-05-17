@@ -25,14 +25,14 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
-		send_array_th(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_array_th(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -44,17 +44,17 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 	case let p: *analysis::symbol =>
 		yield p;
 	case void =>
-		send_array_th(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	if (sym.kind != analysis::symbol_kind::TYPE) {
-		send_array_th(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	let arr: []json::value = [];
 	append(arr, build_type_item(s, doc, uri, sym.short_name,
 		sym.span.start.off: size, sym.span.end.off: size))!;
-	send_array_th(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // Returns the typeHierarchy supertypes for the given item: every named
@@ -71,7 +71,7 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	case let v: type_item =>
 		yield v;
 	case void =>
-		send_array_th(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	defer free_type_item(item);
@@ -83,7 +83,7 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	case let su: *ast::subunit =>
 		yield su;
 	case void =>
-		send_array_th(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -92,14 +92,14 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 	case let d: *ast::decl =>
 		yield d;
 	case void =>
-		send_array_th(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const underlying = match (analysis::type_decl_underlying(decl)) {
 	case let t: *ast::_type =>
 		yield t;
 	case void =>
-		send_array_th(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -151,7 +151,7 @@ export fn handle_supertypes(s: *server, r: lsp::request) void = {
 			entry.short_name, entry.start_off: size, entry.end_off: size, text))!;
 		append(visited, (entry.uri, entry.short_name))!;
 	};
-	send_array_th(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // Returns a borrowed pointer to the subunit for a URI. Prefers the
@@ -190,7 +190,7 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 	case let v: type_item =>
 		yield v;
 	case void =>
-		send_array_th(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	defer free_type_item(item);
@@ -289,7 +289,7 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 			append(visited, (e.uri, short))!;
 		};
 	};
-	send_array_th(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // Returns the workspace_entry for the TYPE decl at (path, name), or
@@ -466,12 +466,21 @@ fn emit_workspace_type_items(
 	};
 };
 
+// Reports whether the (uri, name) pair has already been visited in this
+// traversal. Linear scan: type hierarchies in Hare are shallow (a
+// handful of levels at most), and each level adds one entry, so the
+// O(n) cost stays well below the per-entry work below. Iterates newest-
+// first because the dominant pattern is "revisit the previous frame
+// while unwinding a recursion", which short-circuits on the first
+// element.
+//
 // @param vis: borrowed
 // @param uri: borrowed
 // @param name: borrowed
 fn visited_pair_has(vis: [](str, str), uri: str, name: str) bool = {
-	for (let i = 0z; i < len(vis); i += 1) {
-		if (vis[i].0 == uri && vis[i].1 == name) return true;
+	for (let i = len(vis); i > 0; i -= 1) {
+		const v = vis[i - 1];
+		if (v.0 == uri && v.1 == name) return true;
 	};
 	return false;
 };
@@ -648,16 +657,4 @@ fn encode_range_th(
 	json::put(&r, "start", s_obj)!;
 	json::put(&r, "end", e_obj)!;
 	return r;
-};
-
-// @param s: borrowed
-// @param id: borrowed
-// @param arr: owned
-fn send_array_th(s: *server, id: lsp::id, arr: []json::value) void = {
-	const v: json::value = arr;
-	defer json::finish(v);
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
-	};
 };

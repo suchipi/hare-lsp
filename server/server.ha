@@ -430,6 +430,10 @@ export fn progress_is_cancelled(s: *server, token: str) bool = {
 // @param s: borrowed
 fn handle_request(s: *server, r: lsp::request) void = {
 	// Lifecycle gating. Most methods are only valid in the READY state.
+	// Between the `initialize` response and the `initialized` notification
+	// the client is not permitted to send other requests; reject them with
+	// the same error PRE_INIT uses so a misbehaving client gets a clear
+	// signal instead of racing against partially-built state.
 	switch (s.state) {
 	case server_state::PRE_INIT =>
 		if (r.method != "initialize") {
@@ -437,6 +441,10 @@ fn handle_request(s: *server, r: lsp::request) void = {
 				"server has not been initialized");
 			return;
 		};
+	case server_state::INITIALIZING =>
+		send_error(s, r.id, lsp::SERVER_NOT_INITIALIZED,
+			"server has not finished initializing");
+		return;
 	case server_state::SHUTTING_DOWN =>
 		send_error(s, r.id, lsp::INVALID_REQUEST, "server is shutting down");
 		return;
@@ -547,6 +555,22 @@ fn handle_request(s: *server, r: lsp::request) void = {
 
 // @param s: borrowed
 fn handle_notification(s: *server, n: lsp::notification) void = {
+	// Per LSP, notifications received before `initialize` (PRE_INIT) or
+	// between `initialize` and `initialized` (INITIALIZING) are dropped
+	// silently except for the lifecycle ones and the `$/`-prefixed
+	// utility namespace which is valid at any point.
+	switch (s.state) {
+	case server_state::PRE_INIT =>
+		if (n.method != "exit" && !strings::hasprefix(n.method, "$/")) {
+			return;
+		};
+	case server_state::INITIALIZING =>
+		if (n.method != "initialized" && n.method != "exit" &&
+				!strings::hasprefix(n.method, "$/")) {
+			return;
+		};
+	case => void;
+	};
 	switch (n.method) {
 	case "initialized" =>
 		if (s.state == server_state::INITIALIZING) {
@@ -753,82 +777,23 @@ fn build_initialize_result(s: *server) (json::value | nomem) = {
 	json::put(&caps, "signatureHelpProvider", sh_provider)?;
 	json::put(&caps, "documentFormattingProvider", true: json::value)?;
 	json::put(&caps, "documentRangeFormattingProvider", true: json::value)?;
-	let on_type_fmt = json::newobject();
-	json::set(&on_type_fmt, "firstTriggerCharacter", "}": json::value)?;
-	let on_type_more: []json::value = [];
-	append(on_type_more, strings::dup(";")?: json::value)?;
-	json::put(&on_type_fmt, "moreTriggerCharacter", on_type_more: json::value)?;
-	json::put(&caps, "documentOnTypeFormattingProvider", on_type_fmt)?;
-	let st_provider = json::newobject();
-	json::put(&st_provider, "legend", token_legend())?;
-	let full_caps = json::newobject();
-	json::put(&full_caps, "delta", true: json::value)?;
-	json::put(&st_provider, "full", full_caps)?;
-	json::put(&st_provider, "range", true: json::value)?;
-	json::put(&caps, "semanticTokensProvider", st_provider)?;
+	json::put(&caps, "documentOnTypeFormattingProvider",
+		make_on_type_formatting_options()?)?;
+	json::put(&caps, "semanticTokensProvider",
+		make_semantic_tokens_provider_options()?)?;
 	let ih_provider = json::newobject();
 	json::put(&ih_provider, "resolveProvider", true: json::value)?;
 	json::put(&caps, "inlayHintProvider", ih_provider)?;
 	let cl_provider = json::newobject();
 	json::put(&cl_provider, "resolveProvider", true: json::value)?;
 	json::put(&caps, "codeLensProvider", cl_provider)?;
-	let ca_provider = json::newobject();
-	let ca_kinds: []json::value = [];
-	append(ca_kinds, strings::dup("source.organizeImports")?: json::value)?;
-	append(ca_kinds, strings::dup("quickfix")?: json::value)?;
-	json::put(&ca_provider, "codeActionKinds", ca_kinds: json::value)?;
-	json::put(&ca_provider, "resolveProvider", true: json::value)?;
-	json::put(&caps, "codeActionProvider", ca_provider)?;
-	let xc_provider = json::newobject();
-	let xc_cmds: []json::value = [];
-	append(xc_cmds, strings::dup("hare-lsp.runTest")?: json::value)?;
-	append(xc_cmds, strings::dup("hare-lsp.runModule")?: json::value)?;
-	append(xc_cmds, strings::dup("hare-lsp.organizeImports")?: json::value)?;
-	append(xc_cmds, strings::dup("hare-lsp.applyAutoImport")?: json::value)?;
-	json::put(&xc_provider, "commands", xc_cmds: json::value)?;
-	json::put(&caps, "executeCommandProvider", xc_provider)?;
+	json::put(&caps, "codeActionProvider", make_code_action_provider_options()?)?;
+	json::put(&caps, "executeCommandProvider",
+		make_execute_command_provider_options()?)?;
 
-	// Workspace capabilities — we support workspace folders.
-	let ws = json::newobject();
-	let ws_ok = false;
-	defer if (!ws_ok) json::finish(ws);
-	let folders_caps = json::newobject();
-	json::put(&folders_caps, "supported", true: json::value)?;
-	json::put(&folders_caps, "changeNotifications", true: json::value)?;
-	json::put(&ws, "workspaceFolders", folders_caps)?;
-
-	// File operation support.
-	let file_ops = json::newobject();
-	let file_ops_filter = json::newobject();
-	let pattern = json::newobject();
-	json::set(&pattern, "glob", "**/*.ha": json::value)?;
-	json::put(&file_ops_filter, "pattern", pattern)?;
-	let filters: []json::value = [];
-	append(filters, file_ops_filter: json::value)?;
-	let create_caps = json::newobject();
-	json::put(&create_caps, "filters", filters: json::value)?;
-	json::put(&file_ops, "willCreate", create_caps)?;
-	let rename_filter = json::newobject();
-	let rename_pattern = json::newobject();
-	json::set(&rename_pattern, "glob", "**/*.ha": json::value)?;
-	json::put(&rename_filter, "pattern", rename_pattern)?;
-	let rename_filters: []json::value = [];
-	append(rename_filters, rename_filter: json::value)?;
-	let rename_caps = json::newobject();
-	json::put(&rename_caps, "filters", rename_filters: json::value)?;
-	json::put(&file_ops, "willRename", rename_caps)?;
-	let del_filter = json::newobject();
-	let del_pattern = json::newobject();
-	json::set(&del_pattern, "glob", "**/*.ha": json::value)?;
-	json::put(&del_filter, "pattern", del_pattern)?;
-	let del_filters: []json::value = [];
-	append(del_filters, del_filter: json::value)?;
-	let del_caps = json::newobject();
-	json::put(&del_caps, "filters", del_filters: json::value)?;
-	json::put(&file_ops, "willDelete", del_caps)?;
-	json::put(&ws, "fileOperations", file_ops)?;
-
-	ws_ok = true;
+	// Workspace capabilities — we support workspace folders and the
+	// will{Create,Rename,Delete}Files file-operation hooks for `*.ha`.
+	let ws = make_workspace_capabilities()?;
 	json::put(&caps, "workspace", ws)?;
 
 	caps_ok = true;
@@ -844,6 +809,94 @@ fn build_initialize_result(s: *server) (json::value | nomem) = {
 
 	ok = true;
 	return r;
+};
+
+// Builds the documentOnTypeFormattingProvider options: format on `}` and
+// continue to format additional triggers (currently just `;`).
+fn make_on_type_formatting_options() (json::value | nomem) = {
+	let on_type_fmt = json::newobject();
+	json::set(&on_type_fmt, "firstTriggerCharacter", "}": json::value)?;
+	let more: []json::value = [];
+	append(more, strings::dup(";")?: json::value)?;
+	json::put(&on_type_fmt, "moreTriggerCharacter", more: json::value)?;
+	return on_type_fmt;
+};
+
+// Builds the semanticTokensProvider options: legend + full (with deltas)
+// + range. `token_legend` is owned by the semtokens module.
+fn make_semantic_tokens_provider_options() (json::value | nomem) = {
+	let st = json::newobject();
+	json::put(&st, "legend", token_legend())?;
+	let full_caps = json::newobject();
+	json::put(&full_caps, "delta", true: json::value)?;
+	json::put(&st, "full", full_caps)?;
+	json::put(&st, "range", true: json::value)?;
+	return st;
+};
+
+// Builds the codeActionProvider options: the supported kinds plus
+// resolveProvider=true.
+fn make_code_action_provider_options() (json::value | nomem) = {
+	let p = json::newobject();
+	let kinds: []json::value = [];
+	append(kinds, strings::dup("source.organizeImports")?: json::value)?;
+	append(kinds, strings::dup("quickfix")?: json::value)?;
+	json::put(&p, "codeActionKinds", kinds: json::value)?;
+	json::put(&p, "resolveProvider", true: json::value)?;
+	return p;
+};
+
+// Builds the executeCommandProvider options: the command IDs the server
+// understands via workspace/executeCommand.
+fn make_execute_command_provider_options() (json::value | nomem) = {
+	let p = json::newobject();
+	let cmds: []json::value = [];
+	append(cmds, strings::dup("hare-lsp.runTest")?: json::value)?;
+	append(cmds, strings::dup("hare-lsp.runModule")?: json::value)?;
+	append(cmds, strings::dup("hare-lsp.organizeImports")?: json::value)?;
+	append(cmds, strings::dup("hare-lsp.applyAutoImport")?: json::value)?;
+	json::put(&p, "commands", cmds: json::value)?;
+	return p;
+};
+
+// Builds the `workspace` capability object: workspaceFolders + the file-
+// operation hooks (willCreate/willRename/willDelete), each scoped to a
+// `**/*.ha` glob. Extracted so build_initialize_result reads as a list
+// of provider knobs rather than a wall of nested json::put calls.
+fn make_workspace_capabilities() (json::value | nomem) = {
+	let ws = json::newobject();
+	let ws_ok = false;
+	defer if (!ws_ok) json::finish(ws);
+
+	let folders_caps = json::newobject();
+	json::put(&folders_caps, "supported", true: json::value)?;
+	json::put(&folders_caps, "changeNotifications", true: json::value)?;
+	json::put(&ws, "workspaceFolders", folders_caps)?;
+
+	let file_ops = json::newobject();
+	json::put(&file_ops, "willCreate", make_file_op_filter("**/*.ha")?)?;
+	json::put(&file_ops, "willRename", make_file_op_filter("**/*.ha")?)?;
+	json::put(&file_ops, "willDelete", make_file_op_filter("**/*.ha")?)?;
+	json::put(&ws, "fileOperations", file_ops)?;
+
+	ws_ok = true;
+	return ws;
+};
+
+// Builds a `{ "filters": [{ "pattern": { "glob": GLOB } }] }` object,
+// the shape required by each of will{Create,Rename,Delete}Files.
+//
+// @param glob: borrowed
+fn make_file_op_filter(glob: str) (json::value | nomem) = {
+	let pattern = json::newobject();
+	json::set(&pattern, "glob", glob: json::value)?;
+	let filter = json::newobject();
+	json::put(&filter, "pattern", pattern)?;
+	let filters: []json::value = [];
+	append(filters, filter: json::value)?;
+	let caps = json::newobject();
+	json::put(&caps, "filters", filters: json::value)?;
+	return caps;
 };
 
 // @param s: borrowed
@@ -987,10 +1040,19 @@ fn extract_init_param_position_encodings(s: *server, o: *json::object) void = {
 
 // @param s: borrowed
 fn handle_shutdown(s: *server, r: lsp::request) void = {
-	s.state = server_state::SHUTTING_DOWN;
+	// Drain any debounced-but-not-yet-published diagnostics so the client
+	// sees final state before we stop processing edits. Done first so that
+	// even if the response write fails the client has already received the
+	// last diagnostics notification.
+	drain_pending_diagnostics(s);
+	// Match handle_initialize's send-then-transition order: a half-written
+	// shutdown response shouldn't leave the state machine claiming we have
+	// shut down. The client will retry against the original state if the
+	// write fails, and `exit` still works regardless.
 	const result: json::value = json::_null;
 	match (lsp::encode_response_result(s.out, r.id, result)) {
-	case size => void;
+	case size =>
+		s.state = server_state::SHUTTING_DOWN;
 	case let e: io::error =>
 		log_stderr_strerror(s, "write shutdown response", io::strerror(e));
 	};

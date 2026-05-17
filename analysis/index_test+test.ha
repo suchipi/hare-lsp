@@ -70,6 +70,37 @@ export fn second() void = void;
 	assert(s.short_name == "first");
 };
 
+// Hare identifiers are ASCII-only, but source files routinely contain
+// multi-byte UTF-8 in comments above declarations. That offset shift
+// is what loc_fixup translates from rune indices to byte offsets;
+// symbol_at must work against the byte offsets it produces. This test
+// puts a multi-byte comment above the decls so each decl's start.off
+// differs between the rune and byte spaces.
+@test fn symbol_at_handles_multibyte_preceding_decls() void = {
+	const src =
+		`// αβγ multi-byte preamble
+export fn first() void = void;
+export fn second() void = void;
+`;
+	const data = strings::toutf8(src);
+	let r = parse_recover(data, "test.ha");
+	defer finish_parse_result(&r);
+	let idx = build_index(&r.subunit);
+	defer finish_index(&idx);
+	assert(len(idx.symbols) == 2);
+	assert(idx.symbols[0].short_name == "first");
+	// Cursor inside `first` should resolve to the first decl. We look
+	// up the byte offset via strings::index so we are immune to the
+	// rune-vs-byte shift in the comment.
+	const inside = strings::index(src, "first") as size + 1;
+	const s1 = symbol_at(&idx, inside) as *symbol;
+	assert(s1.short_name == "first");
+	// Cursor anywhere within the second decl should resolve to it.
+	const second_off = strings::index(src, "second") as size + 1;
+	const s2 = symbol_at(&idx, second_off) as *symbol;
+	assert(s2.short_name == "second");
+};
+
 @test fn symbol_at_offset_returns_void_for_whitespace() void = {
 	const src = `
 

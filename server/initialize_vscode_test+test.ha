@@ -325,3 +325,81 @@ const VSCODE_INITIALIZE_PARAMS: str =
 	);
 	assert(s.state == server_state::INITIALIZING);
 };
+
+// Between the `initialize` response and the `initialized` notification the
+// server is INITIALIZING. Per LSP spec the client must not send other
+// requests in that window; we should reject them with SERVER_NOT_INITIALIZED
+// so a racy client gets a clear error instead of partially-built state.
+@test fn rejects_request_during_initializing_state() void = {
+	let out = memio::dynamic();
+	defer io::close(&out)!;
+	let in_buf = alloc(memio::fixed([]))!;
+	defer free(in_buf);
+	let scan = alloc(bufio::newscanner(in_buf))!;
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
+	let s = new(scan, &out, void);
+	defer finish(&s);
+	// Force the state machine into INITIALIZING without going through
+	// handle_initialize so the test stays small.
+	s.state = server_state::INITIALIZING;
+
+	const r = lsp::request {
+		id = 7.0,
+		method = strings::dup("textDocument/hover")!,
+		params = void,
+	};
+	defer free(r.method);
+	handle_request(&s, r);
+
+	const text = strings::fromutf8(memio::buffer(&out))!;
+	assert(
+		strings::contains(text, `"id":7`),
+		"error response should echo request id"
+	);
+	assert(
+		strings::contains(text, `"code":-32002`),
+		"error code should be SERVER_NOT_INITIALIZED"
+	);
+	// State must not have advanced.
+	assert(s.state == server_state::INITIALIZING);
+};
+
+// Notifications received in PRE_INIT or INITIALIZING should be dropped
+// silently (per LSP spec) except for `initialized`, `exit`, and the `$/`
+// namespace. Verify a didOpen sent before initialize is ignored.
+@test fn drops_notification_in_pre_init_state() void = {
+	let out = memio::dynamic();
+	defer io::close(&out)!;
+	let in_buf = alloc(memio::fixed([]))!;
+	defer free(in_buf);
+	let scan = alloc(bufio::newscanner(in_buf))!;
+	defer {
+		bufio::finish(scan);
+		free(scan);
+	};
+	let s = new(scan, &out, void);
+	defer finish(&s);
+	assert(s.state == server_state::PRE_INIT);
+
+	let pv =
+		json::loadstr(
+			`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"export fn main() void = void;"}}`
+		)!;
+	const n = lsp::notification {
+		method = strings::dup("textDocument/didOpen")!,
+		params = pv,
+	};
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
+	handle_notification(&s, n);
+
+	assert(
+		len(s.documents) == 0,
+		"didOpen should have been dropped because server is in PRE_INIT"
+	);
+};

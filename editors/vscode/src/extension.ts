@@ -146,8 +146,11 @@ class HareLspErrorHandler implements ErrorHandler {
   }
 }
 
-export function activate(context: vscode.ExtensionContext): void {
-  const mkDecoration = (name: TestStatus, ruler: string) =>
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  // Use VSCode's semantic theme tokens for the overview-ruler colors so
+  // the gutter strip adapts to light/dark/high-contrast themes instead
+  // of locking us into one palette.
+  const mkDecoration = (name: TestStatus, ruler: vscode.ThemeColor) =>
     vscode.window.createTextEditorDecorationType({
       gutterIconPath: vscode.Uri.file(
         context.asAbsolutePath(`media/test-${name}.svg`),
@@ -156,9 +159,12 @@ export function activate(context: vscode.ExtensionContext): void {
       overviewRulerColor: ruler,
       overviewRulerLane: vscode.OverviewRulerLane.Left,
     });
-  passedDecoration = mkDecoration("passed", "#3fb950");
-  failedDecoration = mkDecoration("failed", "#f85149");
-  skippedDecoration = mkDecoration("skipped", "#d4a72c");
+  passedDecoration = mkDecoration("passed",
+    new vscode.ThemeColor("testing.iconPassed"));
+  failedDecoration = mkDecoration("failed",
+    new vscode.ThemeColor("testing.iconFailed"));
+  skippedDecoration = mkDecoration("skipped",
+    new vscode.ThemeColor("testing.iconSkipped"));
   failureDiagnostics = vscode.languages.createDiagnosticCollection("hare-test");
   context.subscriptions.push(
     passedDecoration,
@@ -167,18 +173,23 @@ export function activate(context: vscode.ExtensionContext): void {
     failureDiagnostics,
   );
 
-  const serverPath = vscode.workspace
-    .getConfiguration("hare-lsp")
-    .get<string>("path") ?? "hare-lsp";
+  // Read configuration values fresh from VSCode each time they're
+  // needed rather than caching at activation. The language client
+  // restart re-invokes serverOptions, so changes to `hare-lsp.path`
+  // take effect on `Restart Hare LSP`. Commands like "Run Tests in
+  // File" also pull from workspace.getConfiguration() at call time so
+  // a user toggling `hare.path` doesn't need to restart anything.
+  const getServerPath = () =>
+    vscode.workspace.getConfiguration("hare-lsp")
+      .get<string>("path") ?? "hare-lsp";
   const getTraceServer = () =>
-    vscode.workspace
-      .getConfiguration("hare-lsp")
+    vscode.workspace.getConfiguration("hare-lsp")
       .get<string>("trace.server") ?? "off";
 
   const traceOutputChannel = vscode.window.createOutputChannel("Hare LSP");
   context.subscriptions.push(traceOutputChannel);
   traceOutputChannel.appendLine(
-    `[hare-lsp] activate() — serverPath=${serverPath} traceServer=${getTraceServer()}`,
+    `[hare-lsp] activate() — serverPath=${getServerPath()} traceServer=${getTraceServer()}`,
   );
 
   // Spawn the server ourselves rather than letting vscode-languageclient do
@@ -192,6 +203,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // `hare-lsp.path` to locate the server binary itself.
   const serverOptions: ServerOptions = () =>
     new Promise((resolve, reject) => {
+      const serverPath = getServerPath();
       const child = spawn(serverPath, [], {
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -371,23 +383,24 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   traceOutputChannel.appendLine(`[hare-lsp] calling client.start()`);
-  client.start().then(
-    () => {
-      traceOutputChannel.appendLine(
-        `[hare-lsp] client.start() resolved (running=${client?.isRunning() ?? false})`,
-      );
-    },
-    (err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      const stack = err instanceof Error ? err.stack ?? "" : "";
-      traceOutputChannel.appendLine(
-        `[hare-lsp] client.start() failed: ${message}\n${stack}`,
-      );
-      void vscode.window.showErrorMessage(
-        `Hare LSP failed to start: ${message}`,
-      );
-    },
-  );
+  try {
+    await client.start();
+    traceOutputChannel.appendLine(
+      `[hare-lsp] client.start() resolved (running=${client.isRunning()})`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? (err.stack ?? "") : "";
+    traceOutputChannel.appendLine(
+      `[hare-lsp] client.start() failed: ${message}\n${stack}`,
+    );
+    void vscode.window.showErrorMessage(
+      `Hare LSP failed to start: ${message}`,
+    );
+    // Activation continues so the user can still see the output channel
+    // and use the `Restart Hare LSP` command, but the LSP-backed commands
+    // below will short-circuit on the !client.isRunning() check.
+  }
   void client.setTrace(Trace.fromString(getTraceServer()));
 
   context.subscriptions.push(
@@ -489,7 +502,7 @@ export function activate(context: vscode.ExtensionContext): void {
     md.appendMarkdown(
       `- Status: ${running ? "$(check) running" : "$(error) stopped"}\n`,
     );
-    md.appendMarkdown(`- Server binary: \`${serverPath}\`\n`);
+    md.appendMarkdown(`- Server binary: \`${getServerPath()}\`\n`);
     md.appendMarkdown(`- Hare binary: \`${harePath}\`\n`);
     md.appendMarkdown(`- Hare version: ${versionLine}\n\n`);
     md.appendMarkdown(`_Click for actions_`);
@@ -557,7 +570,7 @@ export function activate(context: vscode.ExtensionContext): void {
           kind: vscode.QuickPickItemKind.Separator,
         },
         {
-          label: `Server binary: ${serverPath}`,
+          label: `Server binary: ${getServerPath()}`,
           kind: vscode.QuickPickItemKind.Separator,
         },
         {
@@ -840,6 +853,20 @@ function recordTestResult(uri: string, name: string, line: number, status: TestS
   refreshDecorationsForUri(uri);
 }
 
+// Batches rebuilds of the failure diagnostic collection: callers
+// schedule, and the actual rebuild runs once on the next microtask.
+// A burst of recordTestFailure() invocations from parsing a single
+// test-output frame thus produces one rebuild instead of N.
+let rebuildPending = false;
+function scheduleRebuildFailureDiagnostics(): void {
+  if (rebuildPending) return;
+  rebuildPending = true;
+  queueMicrotask(() => {
+    rebuildPending = false;
+    rebuildFailureDiagnostics();
+  });
+}
+
 // Walks `testFailures`, groups failure locations by target uri, and
 // republishes the diagnostic collection. Cheap enough for the volume
 // of failures a single `hare test` run produces.
@@ -902,7 +929,7 @@ function recordTestFailure(
     perFile.set(testName, arr);
   }
   arr.push(loc);
-  rebuildFailureDiagnostics();
+  scheduleRebuildFailureDiagnostics();
 }
 
 // Clears failure entries for one test (when re-running just that test)
@@ -912,7 +939,7 @@ function clearFailuresFor(sourceUri: string, testName?: string): void {
   if (!perFile) return;
   if (testName === undefined) perFile.clear();
   else perFile.delete(testName);
-  rebuildFailureDiagnostics();
+  scheduleRebuildFailureDiagnostics();
 }
 
 // Backing session for the singleton "Hare" terminal. Created lazily on
@@ -945,6 +972,11 @@ class HareTerminalSession {
         this.currentChild?.kill("SIGTERM");
         if (activeHareSession === this) activeHareSession = undefined;
         this.closeEmitter.fire(0);
+        // VSCode owns the terminal handle after createTerminal; the
+        // emitters are ours and need explicit disposal so closing the
+        // PTY doesn't leak the underlying listener tracking.
+        this.writeEmitter.dispose();
+        this.closeEmitter.dispose();
       },
     };
     this.terminal = vscode.window.createTerminal({ name: "Hare", pty });
