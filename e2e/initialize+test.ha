@@ -19,7 +19,12 @@ def MINIMAL_INITIALIZE: str =
 	`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`;
 
 @test fn e2e_initialize_returns_response() void = {
-	let s = spawn_session();
+	// One of the four tests pinned to spawn_session_with_logs so the
+	// HARE_LSP_LOG_DIR codepath is exercised on every full test run.
+	// Logs land in .tmp/e2e-logs/logs-init/{in,out,err}.log; the label
+	// is unique among the opted-in tests so parallel shards don't
+	// collide. See e2e/README.md.
+	let s = spawn_session_with_logs("logs-init");
 	defer finish_session(&s);
 
 	send(&s, strings::toutf8(MINIMAL_INITIALIZE));

@@ -625,7 +625,9 @@ export fn main() void = {
 };
 
 @test fn e2e_hover_on_identifier() void = {
-	let s = spawn_session();
+	// Pinned to spawn_session_with_logs so the log-dir codepath is
+	// exercised on every test run. See e2e/README.md.
+	let s = spawn_session_with_logs("logs-hover");
 	defer finish_session(&s);
 
 	// Initialize. We need to be ready before opening docs.

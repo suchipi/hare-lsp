@@ -13,7 +13,9 @@ use encoding::json;
 use strings;
 
 @test fn e2e_did_change_full_replaces_document() void = {
-	let s = spawn_session();
+	// Pinned to spawn_session_with_logs so the log-dir codepath is
+	// exercised on every test run. See e2e/README.md.
+	let s = spawn_session_with_logs("logs-did-change");
 	defer finish_session(&s);
 	do_init(&s);
 

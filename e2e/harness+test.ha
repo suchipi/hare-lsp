@@ -62,6 +62,27 @@ fn spawn_session() session = {
 	return spawn_session_with_env([]);
 };
 
+// Spawns a session that always tees its wire traffic into
+// `.tmp/e2e-logs/<label>/` regardless of the `E2E_LOG_DIR` opt-in. A small
+// hand-picked set of tests use this so the logging codepath is exercised on
+// every `make test` run; the path is keyed on `label` (not a counter) so
+// parallel shards don't collide as long as no two opted-in tests reuse the
+// same label. Treat `label` like the `.tmp/` per-test naming rule in
+// `.claude/rules/test-fixtures-and-tmp-dir.md`.
+fn spawn_session_with_logs(label: str) session = {
+	const cwd = os::getcwd();
+	const dir = fmt::asprintf("{}/.tmp/e2e-logs/{}", cwd, label)!;
+	defer free(dir);
+	match (os::mkdirs(dir, 0o755: fs::mode)) {
+	case void => void;
+	case fs::error => void;
+	};
+	const env: [](str, str) = [
+		("HARE_LSP_LOG_DIR", dir),
+	];
+	return spawn_session_with_env(env);
+};
+
 fn spawn_session_with_env(env: [](str, str)) session = {
 	const path = bin_path();
 	if (!binary_exists(path)) {
@@ -317,8 +338,14 @@ fn parse_header(s: *session) ((size, size) | void) = {
 	let end: size = 0;
 	let found = false;
 	let start: size = 0;
+	// Resume from `len(needle) - 1` bytes before the previous high
+	// water mark so we still catch a needle that straddled the
+	// boundary between the bytes we saw last call and the bytes that
+	// just arrived. Parens matter: `len(needle) - 1` first, then
+	// subtract — otherwise size's unsigned arithmetic underflows to
+	// SIZE_MAX when `header_scan_pos == len(needle)` exactly.
 	if (s.header_scan_pos > len(needle) - 1) {
-		start = s.header_scan_pos - len(needle) - 1;
+		start = s.header_scan_pos - (len(needle) - 1);
 	};
 	for (let i = start; i + len(needle) <= len(s.read_buf); i += 1) {
 		if (s.read_buf[i] == needle[0] && s.read_buf[i + 1] == needle[1] &&
@@ -400,38 +427,17 @@ fn open_doc(s: *session, uri: str, body: str) void = {
 	send(s, strings::toutf8(msg));
 };
 
+// Builds a textDocument/didOpen notification body. Caller frees.
+//
+// `body` is JSON-encoded with `json::dumpstr`, so multi-byte runes and
+// any control characters round-trip correctly. The earlier hand-rolled
+// ASCII-only quoter would silently corrupt anything outside that subset.
 fn build_did_open(uri: str, body: str) str = {
-	const bytes = strings::toutf8(body);
-	let out: []u8 = [];
-	defer free(out);
-	append(out, '"': u8)!;
-	for (let i = 0z; i < len(bytes); i += 1) {
-		const b = bytes[i];
-		switch (b) {
-		case '"': u8 =>
-			append(out, '\\': u8)!;
-			append(out, '"': u8)!;
-		case '\\': u8 =>
-			append(out, '\\': u8)!;
-			append(out, '\\': u8)!;
-		case '\n': u8 =>
-			append(out, '\\': u8)!;
-			append(out, 'n': u8)!;
-		case '\r': u8 =>
-			append(out, '\\': u8)!;
-			append(out, 'r': u8)!;
-		case '\t': u8 =>
-			append(out, '\\': u8)!;
-			append(out, 't': u8)!;
-		case =>
-			append(out, b)!;
-		};
-	};
-	append(out, '"': u8)!;
-	const quoted = strings::fromutf8(out)!;
+	const text_json = json::dumpstr(body);
+	defer free(text_json);
 	return strings::concat(
 		`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"`,
-		uri, `","languageId":"hare","version":1,"text":`, quoted, `}}}`)!;
+		uri, `","languageId":"hare","version":1,"text":`, text_json, `}}}`)!;
 };
 
 fn wait_for_response(s: *session, id: f64) []u8 = {

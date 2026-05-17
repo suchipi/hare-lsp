@@ -61,11 +61,18 @@ a helper in more than one file, move it there rather than copying it locally.
 
 ### Session lifecycle
 
-- `spawn_session() session` — fresh server process with pipes wired up. Sets
-  `HARE_LSP_LOG_DIR` to `.tmp/e2e-logs/session-<n>/` so a failed test leaves
-  the server's wire-protocol logs behind for inspection.
+- `spawn_session() session` — fresh server process with pipes wired up. By
+  default no log dir is set; setting `E2E_LOG_DIR=<basedir>` in the test
+  runner's environment opts every session in to per-session log dirs under
+  `<basedir>/session-<n>/`.
 - `spawn_session_with_env([(key, value), ...]) session` — same, but with
   extra env vars applied to the child (e.g. `HARE_LSP_MAX_BODY_BYTES`).
+- `spawn_session_with_logs(label) session` — always tees this session's
+  wire traffic into `.tmp/e2e-logs/<label>/{in,out,err}.log`, regardless
+  of `E2E_LOG_DIR`. A small hand-picked set of tests use this so the
+  log-dir codepath is exercised on every `make test` run (see "Opted-in
+  log-capture tests" below). The `label` must be unique among the
+  opted-in set so parallel shards don't collide.
 - `finish_session(*session) void` — closes pipes, SIGTERM then SIGKILL the
   child if needed. Always `defer` this immediately after spawning.
 - `assert_clean_exit(*session, duration) void` — poll-waits for the child
@@ -112,8 +119,11 @@ a helper in more than one file, move it there rather than copying it locally.
   at that point.
 - `drain_until_indexed(*session) void` / `drain_until_indexed_ref(*session)
   void` — drain log messages until the server announces "indexed N file(s)".
-  The first variant fatals on timeout; the second tolerates silence (used
-  by tests that init without a workspace folder).
+  The first variant fatals on timeout; the second tolerates silence and
+  silently returns. Both are typically called after `do_init_with_workspace`;
+  pick the silent variant when the test is willing to proceed even if the
+  index never finishes within the recv budget (e.g. a small fixture where
+  the indexing notification might race with the first feature request).
 
 ### JSON inspection
 
@@ -166,17 +176,43 @@ a panicked test can hold a downstream pipe open and wedge the shell.
 
 ### Failure diagnostics
 
-A test that fails leaves a server log in `.tmp/e2e-logs/session-<n>/`:
+When `E2E_LOG_DIR=<basedir>` is set in the runner's environment, every
+session tees its wire traffic to `<basedir>/session-<n>/`:
 
 ```
-.tmp/e2e-logs/session-12/hare-lsp-in.log   # bytes the client sent
-.tmp/e2e-logs/session-12/hare-lsp-out.log  # bytes the server replied with
-.tmp/e2e-logs/session-12/hare-lsp-err.log  # server's stderr (slog_*)
+<basedir>/session-12/hare-lsp-in.log   # bytes the client sent
+<basedir>/session-12/hare-lsp-out.log  # bytes the server replied with
+<basedir>/session-12/hare-lsp-err.log  # server's stderr (slog_*)
 ```
 
-`make clean` clears them. The session number is per-shard process, not
-globally unique — if you need to correlate, the test name appears in the
-shard's log under `.tmp/test-shard-*.log`.
+The session counter is per-process; if your runner forks multiple test
+processes (e.g. the `make test` shard layout), pin each to its own
+`E2E_LOG_DIR` or accept that two shards will overwrite each other's
+`session-1/` etc. `make clean` clears `.tmp/`.
+
+For single-test debugging without setting `E2E_LOG_DIR`, edit the test
+to call `spawn_session_with_logs("debug-<your-label>")` temporarily.
+Revert before committing — only the hand-picked subset below should ship
+pinned to the log-dir helper.
+
+### Opted-in log-capture tests
+
+These tests always use `spawn_session_with_logs(label)` so the log-dir
+codepath is exercised on every full test run. Each label is unique to its
+test, so the directories don't collide even when shards run in parallel:
+
+| Test                                            | Label                  |
+|-------------------------------------------------|------------------------|
+| `e2e_codelens_references_anchored_at_name`      | `logs-codelens`        |
+| `e2e_did_change_full_replaces_document`         | `logs-did-change`      |
+| `e2e_hover_on_identifier`                       | `logs-hover`           |
+| `e2e_initialize_returns_response`               | `logs-init`            |
+| `e2e_references_finds_call_site_and_decl`       | `logs-refs`            |
+| `e2e_workspace_symbol_finds_open_decl`          | `logs-workspace-symbol`|
+
+One representative test per parallel shard (c, d, e-h, i-p, r-s, t-z) so
+each shard touches `HARE_LSP_LOG_DIR` at least once. If you add to the
+list, pick a unique `logs-<feature>` label and update this table.
 
 ### Byte / rune offsets
 

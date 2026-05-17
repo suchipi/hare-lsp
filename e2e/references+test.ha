@@ -8,7 +8,9 @@ use fmt;
 use strings;
 
 @test fn e2e_references_finds_call_site_and_decl() void = {
-	let s = spawn_session();
+	// Pinned to spawn_session_with_logs so the log-dir codepath is
+	// exercised on every test run. See e2e/README.md.
+	let s = spawn_session_with_logs("logs-refs");
 	defer finish_session(&s);
 	do_init(&s);
 
