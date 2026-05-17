@@ -66,8 +66,8 @@ use strings;
 	const cwd = os::getcwd();
 	const root = strings::concat(cwd, "/.tmp/e2e-inlay-alias-chain")!;
 	defer free(root);
-	cleanup_crossmod_workspace(root);
-	defer cleanup_crossmod_workspace(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
 	const mod_dir = strings::concat(root, "/m")!;
 	defer free(mod_dir);
 	match (os::mkdirs(mod_dir, 0o755: fs::mode)) {
@@ -82,7 +82,7 @@ use strings;
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 	drain_until_indexed_ref(&s);
 
 	// Open a caller file inside the same workspace. We use a

@@ -8,7 +8,6 @@
 
 use encoding::json;
 use fmt;
-use os::exec;
 use strings;
 use time;
 
@@ -181,93 +180,4 @@ def MINIMAL_INITIALIZE: str =
 	);
 
 	send(&s, strings::toutf8(`{"jsonrpc":"2.0","method":"exit"}`));
-};
-
-// Polls `exec::peek` until the child exits or `total` elapses. Fails the
-// test if the process is still running at the deadline or if it terminated
-// with a non-zero exit status (i.e. exit code != 0 or killed by signal).
-fn assert_clean_exit(s: *session, total: time::duration) void = {
-	const deadline = time::add(time::now(time::clock::MONOTONIC), total);
-	for (true) {
-		let st = exec::peek(&s.proc);
-		match (st) {
-		case let st: exec::status =>
-			match (exec::check(&st)) {
-			case void =>
-				return;
-			case !exec::exit_status =>
-				const summary = exec::exitstr(exec::exit(&st));
-				fmt::fatalf("e2e: server exited uncleanly after `exit`: {}", summary);
-			};
-		case void => void;
-		case exec::error => void;
-		// peek errored (e.g. ECHILD) — treat as still running.
-
-		};
-		if (time::compare(time::now(time::clock::MONOTONIC), deadline) >= 0) {
-			fmt::fatalf("e2e: server did not exit within {} ms of `exit`",
-				total / time::MILLISECOND);
-		};
-		time::sleep(20 * time::MILLISECOND);
-	};
-};
-
-// Reads frames until one with the given response id arrives, ignoring
-// server-initiated requests and notifications along the way. Returns the
-// raw bytes of the matched response; caller frees.
-fn wait_for_response(s: *session, id: f64) []u8 = {
-	for (true) {
-		const body = recv(s);
-		const text = strings::fromutf8(body)!;
-		let v = json::loadstr(text)!;
-		const matched = match (v) {
-		case let obj: json::object =>
-			// Server-initiated requests share the JSON-RPC `id` field
-			// with our client-side request ids but always carry a
-			// `method`. The id namespaces are independent per LSP, so
-			// gate on the *response* shape (no method, has result/error)
-			// to avoid accidentally matching a server request that
-			// happens to use the same numeric id.
-			yield match (json::get(&obj, "method")) {
-			case *json::value =>
-				yield false;
-			case void =>
-				yield match (json::get(&obj, "id")) {
-				case let p: *json::value =>
-					yield match (*p) {
-					case let n: f64 =>
-						yield n == id;
-					case =>
-						yield false;
-					};
-				case void =>
-					yield false;
-				};
-			};
-		case =>
-			yield false;
-		};
-		json::finish(v);
-		if (matched) return body;
-		free(body);
-	};
-};
-
-// Returns the value at `key` in `obj`, failing the test if absent.
-fn field(obj: *json::object, key: str) json::value = {
-	match (json::get(obj, key)) {
-	case let p: *json::value =>
-		return *p;
-	case void =>
-		fmt::fatalf("e2e: missing required field {}", key);
-	};
-};
-
-fn has_field(obj: *json::object, key: str) bool = {
-	match (json::get(obj, key)) {
-	case *json::value =>
-		return true;
-	case void =>
-		return false;
-	};
 };

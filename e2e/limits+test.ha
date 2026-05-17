@@ -8,16 +8,15 @@
 
 use encoding::json;
 use fmt;
-use io;
-use os;
-use os::exec;
 use strings;
 
 // A `HARE_LSP_MAX_BODY_BYTES` of 1024 must reject a request body
 // larger than that. The transport responds with a JSON-RPC error
 // (PARSE_ERROR / content-too-large) and the server exits.
 @test fn e2e_limits_body_size_env_var_enforced() void = {
-	let s = spawn_session_with_env("HARE_LSP_MAX_BODY_BYTES", "1024");
+	let s = spawn_session_with_env([
+			("HARE_LSP_MAX_BODY_BYTES", "1024"),
+		]);
 	defer finish_session(&s);
 
 	// Build a request body well over 1024 bytes (a giant document
@@ -198,43 +197,4 @@ use strings;
 		};
 	};
 	assert(saw_warning, "third didOpen with cap=2 must produce a refusal warning");
-};
-
-// Spawns a session with a single extra environment variable set on the
-// child process. Mirrors [[spawn_session]] but threads `key=value`
-// through `exec::setenv`.
-fn spawn_session_with_env(key: str, value: str) session = {
-	const (in_r, in_w) = exec::pipe();
-	const (out_r, out_w) = exec::pipe();
-
-	let cmd = match (exec::cmd("./hare-lsp")) {
-	case let c: exec::command =>
-		yield c;
-	case let e: exec::error =>
-		fmt::fatalf("e2e: cannot prepare ./hare-lsp: {}", exec::strerror(e));
-	case nomem => abort("e2e: out of memory");
-	};
-
-	match (exec::setenv(&cmd, key, value)) {
-	case void => void;
-	case =>
-		fmt::fatalf("e2e: setenv {}={} failed", key, value);
-	};
-	exec::addfile(&cmd, os::stdin_file, in_r)!;
-	exec::addfile(&cmd, os::stdout_file, out_w)!;
-
-	const proc = match (exec::start(&cmd)) {
-	case let p: exec::process =>
-		yield p;
-	case let e: exec::error =>
-		fmt::fatalf("e2e: cannot start: {}", exec::strerror(e));
-	};
-	io::close(in_r)!;
-	io::close(out_w)!;
-	return session {
-		proc = proc,
-		stdin = in_w,
-		stdout = out_r,
-		read_buf = [],
-	};
 };

@@ -565,16 +565,7 @@ export fn finish(b: *buffer) void = {
 
 	// rootUri matters: workspace indexing scans this folder so qualified
 	// lookups resolve.
-	const init_msg =
-		strings::concat(
-			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file://`,
-			os_repo_root(), `","workspaceFolders":[{"uri":"file://`, os_repo_root(),
-			`","name":"hare-lsp"}],"capabilities":{}}}`)!;
-	defer free(init_msg);
-	send(&s, strings::toutf8(init_msg));
-	free(wait_for_response(&s, 1.0));
-	send(&s,
-		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+	do_init_with_workspace(&s, os::getcwd());
 
 	// Open a small file that mirrors the user's actual main.ha shape.
 	const sample =
@@ -631,30 +622,6 @@ export fn main() void = {
 		strings::contains(md, "fn run(s: *server) int"),
 		"hover on `server::run` should render the function's signature"
 	);
-};
-
-// Waits for the "indexed N file(s)" log to arrive so the workspace index
-// is populated before the caller queries it. Fails loudly on timeout so
-// an indexing regression manifests as a clear error rather than a
-// downstream null-hover failure that's hard to attribute.
-fn drain_until_indexed(s: *session) void = {
-	for (let i = 0z; i < 20z; i += 1) {
-		const body = recv(s);
-		defer free(body);
-		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed") &&
-				strings::contains(text, "file(s)")) return;
-	};
-	fmt::fatalf(
-		"e2e: workspace indexing did not complete within 20 messages — `initialized` should trigger a scan and the server should log `indexed N file(s)`"
-	);
-};
-
-fn os_repo_root() str = {
-	// Tests run with cwd at the repo root (driven by the Makefile);
-	// take it from the live cwd so the test works on any checkout
-	// (CI, contributor machines, etc.) without hardcoding a path.
-	return os::getcwd();
 };
 
 @test fn e2e_hover_on_identifier() void = {
@@ -1006,47 +973,4 @@ export fn main() void = {
 		strings::contains(md, "doc comment"),
 		"source for strings::dup should be the doc-comment table"
 	);
-};
-
-fn build_did_open(uri: str, body: str) str = {
-	// JSON-encode the body. We do it the long way rather than json::dumpstr
-	// to keep this test light — the body has no embedded quotes or
-	// backslashes.
-	let result =
-		strings::concat(
-			`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"`,
-			uri, `","languageId":"hare","version":1,"text":`, json_string_quote(body),
-			`}}}`)!;
-	return result;
-};
-
-fn json_string_quote(s: str) str = {
-	// Minimal JSON string encoder for ASCII printable + common whitespace.
-	const bytes = strings::toutf8(s);
-	let out: []u8 = [];
-	append(out, '"': u8)!;
-	for (let i = 0z; i < len(bytes); i += 1) {
-		const b = bytes[i];
-		switch (b) {
-		case '"': u8 =>
-			append(out, '\\': u8)!;
-			append(out, '"': u8)!;
-		case '\\': u8 =>
-			append(out, '\\': u8)!;
-			append(out, '\\': u8)!;
-		case '\n': u8 =>
-			append(out, '\\': u8)!;
-			append(out, 'n': u8)!;
-		case '\r': u8 =>
-			append(out, '\\': u8)!;
-			append(out, 'r': u8)!;
-		case '\t': u8 =>
-			append(out, '\\': u8)!;
-			append(out, 't': u8)!;
-		case =>
-			append(out, b)!;
-		};
-	};
-	append(out, '"': u8)!;
-	return strings::fromutf8(out)!;
 };

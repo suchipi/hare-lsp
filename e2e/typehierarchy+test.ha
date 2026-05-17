@@ -4,9 +4,6 @@
 // e2e: type hierarchy. prepareTypeHierarchy + supertypes + subtypes.
 
 use encoding::json;
-use fmt;
-use fs;
-use os;
 use strings;
 
 @test fn e2e_prepare_type_hierarchy_returns_item_for_type() void = {
@@ -98,11 +95,11 @@ use strings;
 // supertype, not the unrelated same-named decl in mod_b.
 @test fn e2e_typehierarchy_distinguishes_same_name_across_modules() void = {
 	const root = setup_crossmod_typehier_workspace();
-	defer cleanup_crossmod_workspace(root);
+	defer cleanup_workspace(root);
 
 	let s = spawn_session();
 	defer finish_session(&s);
-	init_with_workspace_folder(&s, root);
+	do_init_with_workspace(&s, root);
 	drain_until_indexed_ref(&s);
 
 	const uri_a = strings::concat("file://", root, "/mod_a/types.ha")!;
@@ -188,30 +185,11 @@ use strings;
 // to X. mod_b also has `type X = ...; type U = X;` so naive short-name
 // matching would lump mod_b's X into mod_a's supertype set.
 fn setup_crossmod_typehier_workspace() str = {
-	const cwd = os::getcwd();
-	const root = strings::concat(cwd, "/.tmp/e2e-crossmod-typehier")!;
-	cleanup_crossmod_workspace(root);
-	const mod_a = strings::concat(root, "/mod_a")!;
-	defer free(mod_a);
-	const mod_b = strings::concat(root, "/mod_b")!;
-	defer free(mod_b);
-	match (os::mkdirs(mod_a, 0o755: fs::mode)) {
-	case void => void;
-	case let e: fs::error =>
-		fmt::fatalf("e2e: cannot mkdir {}: {}", mod_a, fs::strerror(e));
-	};
-	match (os::mkdirs(mod_b, 0o755: fs::mode)) {
-	case void => void;
-	case let e: fs::error =>
-		fmt::fatalf("e2e: cannot mkdir {}: {}", mod_b, fs::strerror(e));
-	};
-	const file_a = strings::concat(mod_a, "/types.ha")!;
-	defer free(file_a);
-	const file_b = strings::concat(mod_b, "/types.ha")!;
-	defer free(file_b);
-	write_test_file(file_a, "type T = X;\ntype X = int;\n");
-	write_test_file(file_b, "type U = X;\ntype X = str;\n");
-	return root;
+	const files: [](str, str) = [
+		("mod_a/types.ha", "type T = X;\ntype X = int;\n"),
+		("mod_b/types.ha", "type U = X;\ntype X = str;\n"),
+	];
+	return make_workspace("crossmod-typehier", files);
 };
 
 @test fn e2e_type_hierarchy_subtypes_returns_array() void = {
