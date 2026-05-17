@@ -367,10 +367,9 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		if (label != "parser_func") continue;
 		found = true;
 		match (json::get(&item, "additionalTextEdits")) {
-		case let p: *json::value =>
-			abort(
-				"workspace auto-import: nested import (use hare::parse;) must suppress redundant `use parse;` edit"
-			);
+		case let p: *json::value => abort(
+			"workspace auto-import: nested import (use hare::parse;) must suppress redundant `use parse;` edit"
+		);
 		case => void;
 		};
 		break;
@@ -1031,6 +1030,20 @@ fn free_labels(labels: []str) void = {
 	// Member completion is exclusive: keywords/locals must NOT appear.
 	assert(!labels_contains(labels, "let"));
 	assert(!labels_contains(labels, "main"));
+	// Each item must be Kind=Field, have a non-empty `name: type`
+	// detail, and sort above other completion sources.
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const kind = *(json::get(&it, "kind") as *json::value) as f64;
+		assert(kind == 5.0, "member completion items must have kind=Field(5)");
+		const detail = *(json::get(&it, "detail") as *json::value) as str;
+		assert(len(detail) > 0, "member completion items must populate detail");
+		const sort = *(json::get(&it, "sortText") as *json::value) as str;
+		assert(
+			strings::hasprefix(sort, "0-"),
+			"member completions must sort above all other sources"
+		);
+	};
 };
 
 @test fn completion_struct_field_via_pointer_alias() void = {
@@ -1047,6 +1060,19 @@ fn free_labels(labels: []str) void = {
 	defer free_labels(labels);
 	assert(labels_contains(labels, "data"));
 	assert(labels_contains(labels, "line_index"));
+	// Auto-deref still emits proper Field-kind items with detail + sort.
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const kind = *(json::get(&it, "kind") as *json::value) as f64;
+		assert(kind == 5.0, "auto-deref member items must have kind=Field(5)");
+		const detail = *(json::get(&it, "detail") as *json::value) as str;
+		assert(len(detail) > 0, "auto-deref member items must populate detail");
+		const sort = *(json::get(&it, "sortText") as *json::value) as str;
+		assert(
+			strings::hasprefix(sort, "0-"),
+			"auto-deref member items must sort above other sources"
+		);
+	};
 };
 
 @test fn completion_struct_field_filters_by_partial() void = {
@@ -1062,7 +1088,16 @@ fn free_labels(labels: []str) void = {
 	const labels = item_labels(items);
 	defer free_labels(labels);
 	assert(labels_contains(labels, "line_index"));
-	assert(!labels_contains(labels, "data"), "partial `li` must exclude `data`");
+	// Every returned label must satisfy the `li` prefix filter — not
+	// just that one matching label is present and one excluded label
+	// is absent.
+	assert(len(labels) > 0, "filter must still return at least one match");
+	for (let i = 0z; i < len(labels); i += 1) {
+		assert(
+			strings::hasprefix(labels[i], "li"),
+			"every item under partial `li` must start with `li`"
+		);
+	};
 };
 
 @test fn completion_struct_field_after_call_return() void = {
@@ -1086,17 +1121,18 @@ fn free_labels(labels: []str) void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
 	// `outer.inner.` should resolve `outer.inner`'s type and emit its
-	// fields.
+	// fields. Inner field names are multi-rune so any loc.end-style
+	// offset bug surfaces here (single-char names mask it).
 	comp_open(&s, "file:///m6.ha",
-		`type inner = struct { x: int, y: int };\ntype outer = struct { inner: inner, name: str };\nfn main(o: outer) void = {\n\to.inner.\n};\n`
+		`type inner = struct { posx: int, posy: int };\ntype outer = struct { inner: inner, name: str };\nfn main(o: outer) void = {\n\to.inner.\n};\n`
 	);
 
 	const items = run_completion(&s, out, "file:///m6.ha", 3, 9, 1005.0);
 	defer finish_items(items);
 	const labels = item_labels(items);
 	defer free_labels(labels);
-	assert(labels_contains(labels, "x"));
-	assert(labels_contains(labels, "y"));
+	assert(labels_contains(labels, "posx"));
+	assert(labels_contains(labels, "posy"));
 	assert(!labels_contains(labels, "inner"), "must not show outer's fields");
 	assert(!labels_contains(labels, "name"));
 };
@@ -1128,34 +1164,47 @@ fn free_labels(labels: []str) void = {
 
 	const items = run_completion(&s, out, "file:///m8.ha", 1, 15, 1007.0);
 	defer finish_items(items);
-	// We don't assert specifics, only that the request didn't crash and
-	// returned without producing member-style items keyed off the dot.
+	// `..` must not flip into member mode. The fallback is PLAIN
+	// completion, so we expect Field-kind items to be absent AND at
+	// least one keyword (PLAIN-mode signal) to be present — `[]` would
+	// satisfy the kind-check alone but would silently regress to an
+	// always-empty completion.
+	let saw_keyword = false;
+	const labels = item_labels(items);
+	defer free_labels(labels);
 	for (let i = 0z; i < len(items); i += 1) {
 		const it = items[i] as json::object;
 		match (json::get(&it, "kind")) {
 		case let p: *json::value =>
 			const kind = *p as f64;
 			assert(kind != 5.0, "`..` must not produce Field-kind completion items");
+			if (kind == 14.0) saw_keyword = true;
 		case void => void;
 		};
 	};
+	assert(
+		saw_keyword || labels_contains(labels, "let") ||
+		labels_contains(labels, "return"),
+		"`..` must fall back to PLAIN completion (at least one keyword expected)"
+	);
 };
 
 @test fn completion_struct_field_via_embedded_struct() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
 	// An embedded `struct { ... }` inlines its fields into the outer
-	// struct; completion should surface them transparently.
+	// struct; completion should surface them transparently. Inner
+	// field names are multi-rune so offset-end bugs aren't masked.
 	comp_open(&s, "file:///m9.ha",
-		`type outer = struct { struct { x: int, y: int }, label: str };\nfn main(o: outer) void = {\n\to.\n};\n`
+		`type outer = struct { struct { posx: int, posy: int }, label: str };\nfn main(o: outer) void = {\n\to.\n};\n`
 	);
 
 	const items = run_completion(&s, out, "file:///m9.ha", 2, 3, 1008.0);
 	defer finish_items(items);
 	const labels = item_labels(items);
 	defer free_labels(labels);
-	assert(labels_contains(labels, "x"));
-	assert(labels_contains(labels, "y"));
+	assert(labels_contains(labels, "posx"));
+	assert(labels_contains(labels, "posy"));
 	assert(labels_contains(labels, "label"));
 };
 
@@ -1163,17 +1212,18 @@ fn free_labels(labels: []str) void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
 	// `point` is referenced by name (not `struct { ... }`); it's an
-	// embedded type alias and its fields should be reachable.
+	// embedded type alias and its fields should be reachable. Inner
+	// field names are multi-rune so offset-end bugs aren't masked.
 	comp_open(&s, "file:///m10.ha",
-		`type point = struct { x: int, y: int };\ntype labeled = struct { point, label: str };\nfn main(p: labeled) void = {\n\tp.\n};\n`
+		`type point = struct { posx: int, posy: int };\ntype labeled = struct { point, label: str };\nfn main(p: labeled) void = {\n\tp.\n};\n`
 	);
 
 	const items = run_completion(&s, out, "file:///m10.ha", 3, 3, 1009.0);
 	defer finish_items(items);
 	const labels = item_labels(items);
 	defer free_labels(labels);
-	assert(labels_contains(labels, "x"));
-	assert(labels_contains(labels, "y"));
+	assert(labels_contains(labels, "posx"));
+	assert(labels_contains(labels, "posy"));
 	assert(labels_contains(labels, "label"));
 };
 

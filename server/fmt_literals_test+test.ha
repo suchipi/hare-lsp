@@ -326,6 +326,52 @@ fn fmt_literals_roundtrip(src: str) str = {
 	);
 };
 
+@test fn fmt_array_literal_preserves_inline_trailing_comments() void = {
+	// Inline `// note` after an array item must stay attached to its
+	// item. Earlier, the formatter dropped them past the closing `]`
+	// because build_array_literal didn't flush trailing comments.
+	const src =
+		"def xs = [\n"
+		"\t\"a\", // first\n"
+		"\t\"b\", // second\n"
+		"\t\"c\", // third\n"
+		"];\n";
+	const out = fmt_literals_roundtrip(src);
+	defer free(out);
+	assert(
+		strings::contains(out, "\"a\", // first"),
+		"inline trailing comment on first array item must stay attached"
+	);
+	assert(
+		strings::contains(out, "\"b\", // second"),
+		"inline trailing comment on middle array item must stay attached"
+	);
+	assert(
+		strings::contains(out, "\"c\", // third"),
+		"inline trailing comment on last array item must stay attached"
+	);
+	// The hoisted-out failure mode would put bare `// first` lines
+	// after the closing `]`. Make sure that didn't happen.
+	assert(
+		!strings::contains(out, "];\n// first"),
+		"trailing comment must NOT leak past the closing `]`"
+	);
+};
+
+@test fn fmt_tuple_literal_preserves_inline_trailing_comments() void = {
+	const src =
+		"def xs: (int, int, int) = (\n"
+		"\t1, // alpha\n"
+		"\t2, // beta\n"
+		"\t3, // gamma\n"
+		");\n";
+	const out = fmt_literals_roundtrip(src);
+	defer free(out);
+	assert(strings::contains(out, "1, // alpha"));
+	assert(strings::contains(out, "2, // beta"));
+	assert(strings::contains(out, "3, // gamma"));
+};
+
 @test fn fmt_call_fits_inline() void = {
 	const src =
 		"export fn f() void = { g(1, 2, 3); };\n"

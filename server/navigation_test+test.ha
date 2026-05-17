@@ -93,11 +93,13 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn hover_returns_signature_for_function() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
-	nav_open(&s, "file:///x.ha", "export fn target() void = void;\\n");
+	const src = "export fn target() void = void;\\n";
+	nav_open(&s, "file:///x.ha", src);
 
-	// Position is on "target" — line 0, char ~12.
-	const params =
-		`{"textDocument":{"uri":"file:///x.ha"},"position":{"line":0,"character":12}}`;
+	// Position lands on `target`; col is looked up at runtime so
+	// edits to `src` don't silently desync the assertion.
+	const params = pos_params("file:///x.ha", 0, find_col(src, "target"));
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -122,12 +124,12 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn hover_on_builtin_returns_docs() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
-	nav_open(&s, "file:///b.ha",
-		`export fn f() void = { let x: size = len(\"hi\"); };`);
+	const src = `export fn f() void = { let x: size = len(\"hi\"); };`;
+	nav_open(&s, "file:///b.ha", src);
 
-	// Position is on "len" — character 38.
-	const params =
-		`{"textDocument":{"uri":"file:///b.ha"},"position":{"line":0,"character":38}}`;
+	// Position lands on `len`.
+	const params = pos_params("file:///b.ha", 0, find_col(src, "len"));
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -1873,12 +1875,13 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	analysis::index_file(&s.workspace_index, path_b, strings::toutf8(text));
 
 	// caller.ha imports lspmoda only.
-	nav_open(&s, "file:///caller.ha",
-		"use lspmoda;\\n\\nfn caller() void = init();\\n");
+	const src = "use lspmoda;\\n\\nfn caller() void = init();\\n";
+	nav_open(&s, "file:///caller.ha", src);
 
-	// Position on `init` in caller.ha.
-	const params =
-		`{"textDocument":{"uri":"file:///caller.ha"},"position":{"line":2,"character":21}}`;
+	// Position on `init` in caller.ha — line/col looked up at runtime.
+	const (line, col) = find_pos(src, "init()");
+	const params = pos_params("file:///caller.ha", line, col);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -1960,10 +1963,12 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		"// One diagnostic emitted by the compiler.\\nexport type build_diagnostic = struct { x: int };\\nfn f(d: build_diagnostic) void = void;\\n";
 	nav_open(&s, "file:///bd.ha", src);
 
-	// Line 2 is `fn f(d: build_diagnostic) void = void;`. The token
-	// `build_diagnostic` starts at column 8.
-	const params =
-		`{"textDocument":{"uri":"file:///bd.ha"},"position":{"line":2,"character":12}}`;
+	// Line 2 references `build_diagnostic` after `d: `. Needle is
+	// unique to the usage site, so find_pos lands on the right
+	// occurrence even when other lines mention the type.
+	const (line, col) = find_pos(src, "d: build_diagnostic");
+	const params = pos_params("file:///bd.ha", line, col + 3);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -1996,8 +2001,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		"// See [[helper]] for the implementation.\\nexport fn target() void = void;\\nexport fn helper() void = void;\\n";
 	nav_open(&s, "file:///r.ha", src);
 
-	const params =
-		`{"textDocument":{"uri":"file:///r.ha"},"position":{"line":1,"character":12}}`;
+	// Cursor on `target` (the decl whose doc comment we render).
+	const (line, col) = find_pos(src, "fn target");
+	const params = pos_params("file:///r.ha", line, col + 3);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -2030,8 +2037,9 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		"// See [[nowhere]] for details.\\nexport fn target() void = void;\\n";
 	nav_open(&s, "file:///u.ha", src);
 
-	const params =
-		`{"textDocument":{"uri":"file:///u.ha"},"position":{"line":1,"character":12}}`;
+	const (line, col) = find_pos(src, "fn target");
+	const params = pos_params("file:///u.ha", line, col + 3);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -2211,9 +2219,10 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		"type ssize = i64;\\nfn f(new_text: []u8, old_len: size) void = { const delta = len(new_text): ssize - old_len: ssize; };\\n";
 	nav_open(&s, "file:///cst.ha", src);
 
-	// Position on `delta` (line 1, char 53).
-	const params =
-		`{"textDocument":{"uri":"file:///cst.ha"},"position":{"line":1,"character":53}}`;
+	// Position on `delta` — looked up at runtime.
+	const (line, col) = find_pos(src, "delta = ");
+	const params = pos_params("file:///cst.ha", line, col);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -2371,14 +2380,14 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 	// In `bufio::newscanner(...)`, hovering on `bufio` should show the
 	// bufio README, not fall through to a (missing) decl lookup.
-	nav_open(&s, "file:///mb3.ha",
-		"use bufio;\\nfn f() void = { bufio::newscanner(0); };\\n");
+	const src = "use bufio;\\nfn f() void = { bufio::newscanner(0); };\\n";
+	nav_open(&s, "file:///mb3.ha", src);
 
-	// Position on the second `bufio` (in the body, line 1).
-	// Source: "fn f() void = { bufio::newscanner(0); };"
-	//                          ^ char ~16
-	const params =
-		`{"textDocument":{"uri":"file:///mb3.ha"},"position":{"line":1,"character":18}}`;
+	// Position on the second `bufio` (in the body) — the needle
+	// `bufio::` is unique to the call site, so find_pos lands there.
+	const (line, col) = find_pos(src, "bufio::");
+	const params = pos_params("file:///mb3.ha", line, col);
+	defer free(params);
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const r = lsp::request {
@@ -2398,6 +2407,99 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(strings::contains(value, "module bufio"));
 	assert(strings::contains(value, "buffered I/O"));
+};
+
+// --- runtime position helpers ---
+//
+// Tests construct LSP-position params from inline source strings.
+// Hardcoding `"character":N` couples the test to exact column
+// counting and silently breaks on any edit to the source. The
+// helpers below let tests look up the cursor column at runtime
+// from the source text and a needle substring.
+
+// Decodes the JSON-escape sequences (`\n`, `\t`, `\\`, `\"`, `\r`)
+// commonly used in test-source strings so the byte offset of a
+// needle matches what the LSP sees after json-decoding the
+// request body. Unknown escapes pass through unchanged.
+//
+// @returns: owned
+fn decode_test_src(src: str) []u8 = {
+	const bytes = strings::toutf8(src);
+	let out: []u8 = [];
+	let i = 0z;
+	for (i < len(bytes)) {
+		if (bytes[i] == '\\' && i + 1 < len(bytes)) {
+			switch (bytes[i + 1]) {
+			case 'n' =>
+				append(out, '\n': u8)!;
+				i += 2;
+				continue;
+			case 't' =>
+				append(out, '\t': u8)!;
+				i += 2;
+				continue;
+			case '\\' =>
+				append(out, '\\': u8)!;
+				i += 2;
+				continue;
+			case '"' =>
+				append(out, '"': u8)!;
+				i += 2;
+				continue;
+			case 'r' =>
+				append(out, '\r': u8)!;
+				i += 2;
+				continue;
+			case => void;
+			};
+		};
+		append(out, bytes[i])!;
+		i += 1;
+	};
+	return out;
+};
+
+// Returns the LSP (line, character) of the first occurrence of
+// `needle` within the JSON-escaped test source string `src`.
+// Aborts if not found. Assumes ASCII source within the cursor's
+// line (UTF-8 byte == LSP character under UTF-8/UTF-16 for ASCII).
+fn find_pos(src: str, needle: str) (u32, u32) = {
+	const decoded = decode_test_src(src);
+	defer free(decoded);
+	const needle_bytes = strings::toutf8(needle);
+	const off = match (bytes::index(decoded, needle_bytes)) {
+	case let i: size =>
+		yield i;
+	case void => abort("find_pos: needle not found in src");
+	};
+	let line = 0u32;
+	let line_start = 0z;
+	for (let i = 0z; i < off; i += 1) {
+		if (decoded[i] == '\n') {
+			line += 1;
+			line_start = i + 1;
+		};
+	};
+	return (line, (off - line_start): u32);
+};
+
+// Returns the LSP character column of the first occurrence of
+// `needle` in `src`, asserting the match lives on line 0. Use this
+// for single-line tests; reach for [[find_pos]] when the source
+// spans multiple lines.
+fn find_col(src: str, needle: str) u32 = {
+	const (line, col) = find_pos(src, needle);
+	assert(line == 0u32, "find_col: needle is not on line 0");
+	return col;
+};
+
+// Builds a `textDocument/<method>`-shaped position params JSON
+// string. The result is owned by the caller; pair with `defer free`.
+//
+// @returns: owned
+fn pos_params(uri: str, line: u32, ch: u32) str = {
+	return strings::concat(`{"textDocument":{"uri":"`, uri,
+		`"},"position":{"line":`, fmt_u32(line), `,"character":`, fmt_u32(ch), `}}`)!;
 };
 
 // --- fixture helpers ---
