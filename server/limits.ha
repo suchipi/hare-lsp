@@ -44,6 +44,13 @@ export type limits = struct {
 	// several hundred thousand-file repositories and well short of
 	// memory pressure.
 	max_workspace_index_entries: size,
+	// Maximum concurrent indexing jobs in `pending_index_jobs`. New jobs
+	// targeting an already-queued index are coalesced into the existing
+	// entry (see [[start_index_job]]), so in practice this only bounds
+	// the number of distinct target indexes (workspace + stdlib = 2).
+	// The cap is a belt-and-suspenders against future targets being
+	// added without re-auditing the queue semantics.
+	max_pending_index_jobs: size,
 };
 
 // Returns a limits struct with the conservative defaults.
@@ -54,4 +61,5 @@ export fn default_limits() limits = limits {
 	max_cancelled_ids = 256,
 	max_diagnostics_per_file = 1000,
 	max_workspace_index_entries = 1_000_000,
+	max_pending_index_jobs = 16,
 };

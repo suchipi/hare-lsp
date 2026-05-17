@@ -333,19 +333,22 @@ export fn read_and_index_file(idx: *workspace_index, path: str) bool = {
 	return true;
 };
 
-// Looks up entries by short name. Returns a borrowed slice; callers must
-// not mutate the index while holding it.
+// Looks up entries by short name. The returned slice is owned by the
+// caller (must be freed); each pointer borrows from `idx` and stays
+// valid only as long as the index isn't mutated. Matches the borrowed-
+// pointer shape used by [[find_first_by_short_name]] and friends.
 //
+// @returns: owned slice of borrowed pointers
 // @param idx: borrowed
 // @param name: borrowed
 export fn lookup_by_short_name(
 	idx: *workspace_index,
 	name: str,
-) []workspace_entry = {
-	let out: []workspace_entry = [];
+) []*workspace_entry = {
+	let out: []*workspace_entry = [];
 	for (let i = 0z; i < len(idx.entries); i += 1) {
 		if (idx.entries[i].short_name == name) {
-			append(out, idx.entries[i])!;
+			append(out, &idx.entries[i])!;
 		};
 	};
 	return out;

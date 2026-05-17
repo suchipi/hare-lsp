@@ -367,10 +367,9 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		if (label != "parser_func") continue;
 		found = true;
 		match (json::get(&item, "additionalTextEdits")) {
-		case let p: *json::value =>
-			abort(
-				"workspace auto-import: nested import (use hare::parse;) must suppress redundant `use parse;` edit"
-			);
+		case let p: *json::value => abort(
+			"workspace auto-import: nested import (use hare::parse;) must suppress redundant `use parse;` edit"
+		);
 		case => void;
 		};
 		break;

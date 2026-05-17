@@ -21,7 +21,7 @@ export fn handle_execute_command(s: *server, r: lsp::request) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		send_null_xc(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const command = match (json::get(&obj, "command")) {
@@ -30,11 +30,11 @@ export fn handle_execute_command(s: *server, r: lsp::request) void = {
 		case let s: str =>
 			yield s;
 		case =>
-			send_null_xc(s, r.id);
+			send_null_result(s, r.id);
 			return;
 		};
 	case =>
-		send_null_xc(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const args = match (json::get(&obj, "arguments")) {
@@ -55,9 +55,9 @@ export fn handle_execute_command(s: *server, r: lsp::request) void = {
 	case "hare-lsp.runModule" =>
 		execute_run_module(s, r, args);
 	case "hare-lsp.organizeImports" =>
-		send_null_xc(s, r.id);
+		send_null_result(s, r.id);
 	case "hare-lsp.applyAutoImport" =>
-		send_null_xc(s, r.id);
+		send_null_result(s, r.id);
 	case =>
 		send_error(s, r.id, lsp::METHOD_NOT_FOUND, "unknown command");
 	};
@@ -70,7 +70,7 @@ fn execute_run_test(s: *server, r: lsp::request, args: []json::value) void = {
 	case let s: str =>
 		yield s;
 	case void =>
-		send_null_xc(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const path = uri_to_path_xc(uri);
@@ -94,7 +94,7 @@ fn execute_run_test(s: *server, r: lsp::request, args: []json::value) void = {
 		};
 	};
 	run_hare_command(s, "test", cwd, extra);
-	send_null_xc(s, r.id);
+	send_null_result(s, r.id);
 };
 
 // @param s: borrowed
@@ -104,7 +104,7 @@ fn execute_run_module(s: *server, r: lsp::request, args: []json::value) void = {
 	case let s: str =>
 		yield s;
 	case void =>
-		send_null_xc(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const path = uri_to_path_xc(uri);
@@ -116,7 +116,7 @@ fn execute_run_module(s: *server, r: lsp::request, args: []json::value) void = {
 	defer free(extra);
 	append(extra, dir)!;
 	run_hare_command(s, "run", cwd, extra);
-	send_null_xc(s, r.id);
+	send_null_result(s, r.id);
 };
 
 // Runs `<config.hare_path> <subcmd> [args...]` in the given directory and
@@ -277,13 +277,3 @@ fn dirname_xc(path: str) str = {
 fn params_obj_xc(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
-
-// @param s: borrowed
-// @param id: borrowed
-fn send_null_xc(s: *server, id: lsp::id) void = {
-	const v: json::value = json::_null;
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
-	};
-};

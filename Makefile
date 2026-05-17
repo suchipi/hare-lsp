@@ -94,6 +94,18 @@ test: hare-lsp harefmt .tmp/all-tests
 		cat .tmp/test-shard-*.log; \
 		exit $$fail
 
+# Serial counterpart to `test`. Runs every test in one .tmp/all-tests
+# process, end to end, with no backgrounded shards. Slower wall-clock
+# (no parallelism) but gives a reliable pass/fail signal when the
+# machine is under load - the parallel shards in `make test` share
+# the same `e2e: recv timed out after 5000 ms` budget and start
+# flaking once seven concurrent ./hare-lsp processes contend for
+# CPU/IO. Use this when you need to know whether something is actually
+# broken vs. just flaky.
+test-serial: hare-lsp harefmt .tmp/all-tests
+	@mkdir -p .cache .tmp
+	.tmp/all-tests
+
 clean:
 	rm -rf hare-lsp harefmt .cache
 	rm -rf editors/vscode/dist editors/vscode/node_modules editors/vscode/*.vsix
@@ -159,4 +171,4 @@ vscode-install: vscode-extension
 vscode-uninstall:
 	code --uninstall-extension local.hare-lsp
 
-.PHONY: all check-deps test clean unstuck install uninstall vscode-extension vscode-test vscode-install vscode-uninstall
+.PHONY: all check-deps test test-serial clean unstuck install uninstall vscode-extension vscode-test vscode-install vscode-uninstall

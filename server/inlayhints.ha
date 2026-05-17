@@ -20,21 +20,21 @@ use strings;
 export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
 	if (!s.config.inlay_hints_parameter_names &&
 			!s.config.inlay_hints_inferred_types) {
-		send_array_ih(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const uri = match (uri_from_ih(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
-		send_array_ih(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_array_ih(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -48,7 +48,7 @@ export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
 		emit_inferred_type_hints(s, doc, &cache.pr.subunit, &arr);
 	};
 
-	send_array_ih(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // Emits ":<type>" hints right after `let x` / `const x` bindings whose
@@ -387,17 +387,5 @@ fn uri_from_ih(p: (json::value | void)) (str | void) = {
 		};
 	case =>
 		return void;
-	};
-};
-
-// @param s: borrowed
-// @param id: borrowed
-// @param arr: owned
-fn send_array_ih(s: *server, id: lsp::id, arr: []json::value) void = {
-	const v: json::value = arr;
-	defer json::finish(v);
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
 	};
 };

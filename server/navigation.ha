@@ -24,7 +24,7 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 
@@ -32,7 +32,7 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 
@@ -77,7 +77,7 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 			if (try_send_operator_hover(s, r, doc, data, off)) {
 				return;
 			};
-			send_null(s, r.id);
+			send_null_result(s, r.id);
 			return;
 		};
 	};
@@ -151,7 +151,7 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 				analysis::finish_ownership_fact(&fact);
 				fact = r.2;
 			case void =>
-				send_null(s, r.id);
+				send_null_result(s, r.id);
 				return;
 			};
 		};
@@ -275,14 +275,14 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const off = analysis::position_to_byte(analysis::bytes(&doc.buf),
@@ -293,7 +293,7 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	case let r: (size, size) =>
 		yield r;
 	case void =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
@@ -304,7 +304,7 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
 		case let p: *analysis::symbol =>
 			if (p.kind != analysis::symbol_kind::TYPE) {
-				send_null(s, r.id);
+				send_null_result(s, r.id);
 				return;
 			};
 			send_location(s, r.id, uri, p.span, doc);
@@ -316,12 +316,12 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	match (workspace_lookup_aware(s, doc, data, ident_range.0, ident_str)) {
 	case let e: *analysis::workspace_entry =>
 		if (e.kind != analysis::symbol_kind::TYPE) {
-			send_null(s, r.id);
+			send_null_result(s, r.id);
 			return;
 		};
 		send_location_for_entry(s, r.id, e);
 	case void =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 	};
 };
 
@@ -331,14 +331,14 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const off = analysis::position_to_byte(analysis::bytes(&doc.buf),
@@ -350,7 +350,7 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 	case let r: (size, size) =>
 		yield r;
 	case void =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 		return;
 	};
 	const ident_str = strings::fromutf8(data[ident_range.0..ident_range.1])!;
@@ -373,7 +373,7 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 	case let e: *analysis::workspace_entry =>
 		send_location_for_entry(s, r.id, e);
 	case void =>
-		send_null(s, r.id);
+		send_null_result(s, r.id);
 	};
 };
 
@@ -393,7 +393,7 @@ fn send_location_for_entry(
 	case let p: *file_parse_entry =>
 		yield p;
 	case null =>
-		send_null(s, id);
+		send_null_result(s, id);
 		return;
 	};
 	const text = fpe.text;
@@ -892,16 +892,6 @@ fn workspace_lookup_aware(
 	case void => void;
 	};
 	return analysis::find_first_by_short_name(&s.stdlib_index, ident_str);
-};
-
-// @param s: borrowed
-// @param id: borrowed
-fn send_null(s: *server, id: lsp::id) void = {
-	const r: json::value = json::_null;
-	match (lsp::encode_response_result(s.out, id, r)) {
-	case size => void;
-	case => void;
-	};
 };
 
 // @param s: borrowed

@@ -34,8 +34,6 @@ export type symbol = struct {
 	kind: symbol_kind,
 	// Span of the entire decl (for hover preview).
 	span: ast::location,
-	// Span of just the identifier (for prepareRename / definition target).
-	name_span: ast::location,
 	// Doc comment captured by the lexer if any. Empty string if absent.
 	// @owned
 	docs: str,
@@ -164,17 +162,11 @@ fn add_symbol(
 	const joined = ident_join(id);
 	const short = if (len(id) > 0) strings::dup(id[len(id) - 1])!
 		else strings::dup("")!;
-	// For now the name span is approximated as the loc's start..start+len(short).
-	const name_span = ast::location {
-		start = loc.start,
-		end = loc.start,
-	};
 	append(idx.symbols, symbol {
 		name = joined,
 		short_name = short,
 		kind = kind,
 		span = loc,
-		name_span = name_span,
 		docs = docs,
 		exported = exported,
 		param_names = param_names,
@@ -207,9 +199,7 @@ fn ident_join(id: ast::ident) str = {
 export fn symbol_at(idx: *file_index, off: size) (*symbol | void) = {
 	for (let i = 0z; i < len(idx.symbols); i += 1) {
 		const s = &idx.symbols[i];
-		const start = s.span.start.off: size;
-		const end = s.span.end.off: size;
-		if (off >= start && off <= end) return s;
+		if (offset_in_span(off, s.span)) return s;
 	};
 	return void;
 };

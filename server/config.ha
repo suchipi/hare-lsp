@@ -503,6 +503,8 @@ export fn apply_settings(s: *server, v: json::value) void = {
 				&s.config.limits.max_diagnostics_per_file);
 			apply_limit_u64(&lobj, "maxWorkspaceIndexEntries",
 				&s.config.limits.max_workspace_index_entries);
+			apply_limit_u64(&lobj, "maxPendingIndexJobs",
+				&s.config.limits.max_pending_index_jobs);
 		case => void;
 		};
 	case => void;

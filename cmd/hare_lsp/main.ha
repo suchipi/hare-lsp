@@ -17,6 +17,9 @@ def VERSION: str = "0.0.1";
 export fn main() void = {
 	// Handle one-shot CLI subcommands before doing any LSP setup.
 	// `os::args[0]` is the binary name; anything from index 1 is a flag.
+	// These exits MUST stay above the log-file setup below; any open
+	// file added before this block would leak via os::exit (defers do
+	// not run on direct exit).
 	if (len(os::args) >= 2) {
 		const arg = os::args[1];
 		if (arg == "--doctor") {
@@ -60,17 +63,17 @@ export fn main() void = {
 	const err_log = open_log_in_dir(log_dir, "hare-lsp-err.log");
 	defer match (in_log) {
 	case let f: io::file =>
-		io::close(f)!;
+		close_quietly(f);
 	case void => void;
 	};
 	defer match (out_log) {
 	case let f: io::file =>
-		io::close(f)!;
+		close_quietly(f);
 	case void => void;
 	};
 	defer match (err_log) {
 	case let f: io::file =>
-		io::close(f)!;
+		close_quietly(f);
 	case void => void;
 	};
 
@@ -158,7 +161,9 @@ fn print_usage() void = {
 };
 
 // Reads HARE_LSP_MAX_BODY_BYTES if set. Returns void when unset or
-// invalid; the server then falls back to the default body cap.
+// invalid; the server then falls back to the default body cap. An
+// invalid value is logged to stderr so typos surface immediately
+// instead of silently producing the default.
 fn read_max_body_env() (size | void) = {
 	const raw = match (os::getenv("HARE_LSP_MAX_BODY_BYTES")) {
 	case let s: str =>
@@ -171,7 +176,20 @@ fn read_max_body_env() (size | void) = {
 	case let n: size =>
 		return n;
 	case =>
+		fmt::fprintfln(os::stderr,
+			"hare-lsp: ignoring invalid HARE_LSP_MAX_BODY_BYTES={}; "
+			"using default", raw)!;
 		return void;
+	};
+};
+
+// Closes a file at shutdown, ignoring any error. These handles are
+// best-effort diagnostic logs; a close failure here should not crash
+// the server during teardown.
+fn close_quietly(f: io::file) void = {
+	match (io::close(f)) {
+	case void => void;
+	case io::error => void;
 	};
 };
 

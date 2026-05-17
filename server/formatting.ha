@@ -103,14 +103,14 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	case let s: str =>
 		yield s;
 	case void =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -120,7 +120,7 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	// If parse had errors, we don't attempt formatting; better to leave
 	// the user's source alone than emit a broken rewrite.
 	if (len(pr.errors) > 0) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -138,7 +138,7 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	match (pretty(&buf, &d, 80, 0)) {
 	case size => void;
 	case =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	// Re-run the formatter on its own output to converge any
@@ -164,7 +164,7 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 
 	// If the formatted output equals the input, no edits needed.
 	if (bytes_equal(formatted, data)) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -188,7 +188,7 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 
 	let arr: []json::value = [];
 	append(arr, edit: json::value)!;
-	send_array_fmt(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // @param s: borrowed
@@ -197,42 +197,42 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const uri = match (uri_from_request(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const range_v = match (json::get(&obj, "range")) {
 	case let p: *json::value =>
 		yield *p;
 	case =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const range = match (lsp::decode_range(range_v)) {
 	case let r: lsp::range =>
 		yield r;
 	case lsp::bad_message =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
 	const cache = parse_of(doc);
 	const pr = &cache.pr;
 	if (len(pr.errors) > 0) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -251,7 +251,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 	// Empty range — nothing to format.
 	if (range_start >= range_end) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	// Pick all top-level decls that overlap [range_start, range_end).
@@ -267,7 +267,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 		last_idx = i: int;
 	};
 	if (first_idx < 0) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -292,7 +292,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	match (pretty(&buf, &d, 80, 0)) {
 	case size => void;
 	case =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const formatted_str = memio::string(&buf)!;
@@ -324,7 +324,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 	let arr: []json::value = [];
 	append(arr, edit: json::value)!;
-	send_array_fmt(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // @param s: borrowed
@@ -333,14 +333,14 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const uri = match (uri_from_request(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const ch = match (json::get(&obj, "ch")) {
@@ -349,37 +349,37 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 		case let s: str =>
 			yield s;
 		case =>
-			send_array_fmt(s, r.id, []);
+			send_array_result(s, r.id, []);
 			return;
 		};
 	case =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	// Only `}` triggers reindent; `;` doesn't change indent in Hare.
 	if (ch != "}") {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const pos_v = match (json::get(&obj, "position")) {
 	case let p: *json::value =>
 		yield *p;
 	case =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const pos = match (lsp::decode_position(pos_v)) {
 	case let p: lsp::position =>
 		yield p;
 	case lsp::bad_message =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -387,14 +387,14 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	const cursor_off = analysis::position_to_byte(data, doc.buf.line_index, enc,
 		analysis::position { line = pos.line, character = pos.character });
 	if (cursor_off == 0 || cursor_off > len(data)) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
 	// The character that triggered us is at cursor_off - 1.
 	const close_at = cursor_off - 1;
 	if (close_at >= len(data) || data[close_at] != '}': u8) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -413,7 +413,7 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	// or other characters; we still reindent the leading whitespace if
 	// the `}` is the first non-whitespace character on the line).
 	if (cur_ws_end != close_at) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -424,7 +424,7 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	// inside the block).
 	const depth = brace_depth_before(data, close_at);
 	if (depth == 0) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const expected_depth = depth - 1;
@@ -447,7 +447,7 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	// Compare with the current indent; if equal, no edit needed.
 	const cur_ws = data[line_start..cur_ws_end];
 	if (slices_equal(cur_ws, new_indent)) {
-		send_array_fmt(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -472,7 +472,7 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	json::set(&edit, "newText", new_text: json::value)!;
 	let arr: []json::value = [];
 	append(arr, edit: json::value)!;
-	send_array_fmt(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // Returns the brace nesting depth at byte offset `off`. Manual scan that
@@ -559,18 +559,6 @@ fn uri_from_request(p: (json::value | void)) (str | void) = {
 		};
 	case =>
 		return void;
-	};
-};
-
-// @param s: borrowed
-// @param id: borrowed
-// @param arr: owned
-fn send_array_fmt(s: *server, id: lsp::id, arr: []json::value) void = {
-	const v: json::value = arr;
-	defer json::finish(v);
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
 	};
 };
 

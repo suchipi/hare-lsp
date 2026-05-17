@@ -21,8 +21,11 @@ async function main() {
     // src/ is excluded from the VSIX via .vscodeignore.
     sourcesContent: true,
     platform: "node",
-    // engines.vscode is ^1.75.0, which ships Electron 19 / Node 16.14.
-    // Bumping this requires bumping engines.vscode in package.json.
+    // engines.vscode is ^1.82.0 (required by vscode-languageclient ^9).
+    // VSCode 1.82 ships Electron 25 / Node 18; we keep targeting node16.14
+    // because all language features we use are present there and a lower
+    // floor lets the bundle run unchanged on older 1.82+ Electron builds.
+    // Bumping the target requires bumping engines.vscode in package.json.
     target: "node16.14",
     outfile: "dist/extension.js",
     external: ["vscode"],

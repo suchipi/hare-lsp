@@ -103,8 +103,8 @@ fn stdlib_module_test_cleanup(
 
 	// File under /foo-bar: must NOT match /foo (no '/' boundary at
 	// position 4 of the path). Must fall through to /foo-bar.
-	const under_foo_bar =
-		stdlib_qualified_module(&s, "/foo-bar/encoding/json/loader.ha");
+	const under_foo_bar = stdlib_qualified_module(&s,
+		"/foo-bar/encoding/json/loader.ha");
 	defer free(under_foo_bar);
 	assert(
 		under_foo_bar == "encoding::json",

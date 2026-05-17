@@ -353,26 +353,29 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 	};
 	doc.last_edit_at = time::now(time::clock::MONOTONIC);
 	doc.diagnostics_pending = true;
-	maybe_flush_diagnostics(s, doc);
+	maybe_flush_diagnostics(s, doc, false);
 };
 
 // Publishes diagnostics for `doc` if the configured debounce window since
 // the last publish has elapsed. Otherwise leaves diagnostics_pending true
-// so a subsequent message will flush.
+// so a subsequent message will flush. `force` bypasses the debounce check
+// (used by the shutdown path so the client receives final state).
 //
 // @param s: borrowed
 // @param doc: borrowed
-fn maybe_flush_diagnostics(s: *server, doc: *document) void = {
+fn maybe_flush_diagnostics(s: *server, doc: *document, force: bool) void = {
 	if (!doc.diagnostics_pending) return;
-	const debounce_ms = s.config.diagnostics_debounce_ms: i64;
-	const now = time::now(time::clock::MONOTONIC);
-	const since_publish_ns = time::diff(doc.last_publish_at, now);
-	const debounce_ns = debounce_ms * time::MILLISECOND;
-	if (since_publish_ns < debounce_ns) {
-		return;
+	if (!force) {
+		const debounce_ms = s.config.diagnostics_debounce_ms: i64;
+		const now = time::now(time::clock::MONOTONIC);
+		const since_publish_ns = time::diff(doc.last_publish_at, now);
+		const debounce_ns = debounce_ms * time::MILLISECOND;
+		if (since_publish_ns < debounce_ns) {
+			return;
+		};
 	};
 	refresh_diagnostics(s, doc);
-	doc.last_publish_at = now;
+	doc.last_publish_at = time::now(time::clock::MONOTONIC);
 	doc.diagnostics_pending = false;
 };
 
@@ -384,7 +387,19 @@ fn maybe_flush_diagnostics(s: *server, doc: *document) void = {
 // @param s: borrowed
 export fn flush_pending_diagnostics(s: *server) void = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
-		maybe_flush_diagnostics(s, &s.documents[i]);
+		maybe_flush_diagnostics(s, &s.documents[i], false);
+	};
+};
+
+// Like [[flush_pending_diagnostics]] but bypasses the debounce window so
+// the client receives the final diagnostic state. Called from the shutdown
+// path before the response is written so editors don't display stale
+// errors after the server has gone away.
+//
+// @param s: borrowed
+export fn drain_pending_diagnostics(s: *server) void = {
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		maybe_flush_diagnostics(s, &s.documents[i], true);
 	};
 };
 

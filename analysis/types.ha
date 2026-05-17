@@ -29,7 +29,7 @@ export fn type_of_expr_at(
 ) (str | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
-		if (off < d.loc.start.off: size || off > d.loc.end.off: size) continue;
+		if (!offset_in_span(off, d.loc)) continue;
 		match (d.decl) {
 		case let g: ast::decl_global =>
 			match (g._type) {

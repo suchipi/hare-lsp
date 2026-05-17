@@ -150,6 +150,12 @@
           "minimum": 1,
           "default": 1000000,
           "description": "Maximum number of workspace-index entries. Whatever you configure is what the server enforces; there is no additional non-configurable ceiling."
+        },
+        "maxPendingIndexJobs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 16,
+          "description": "Maximum concurrent indexing jobs. Coalescing keeps this near 2 in practice (workspace + stdlib); the cap is a defensive ceiling against future targets growing the queue."
         }
       }
     }

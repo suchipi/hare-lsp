@@ -30,21 +30,21 @@ export fn handle_code_action(s: *server, r: lsp::request) void = {
 	case let o: json::object =>
 		yield o;
 	case void =>
-		send_array_ca(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const uri = match (object_string_ca(&obj, "textDocument", "uri")) {
 	case let s: str =>
 		yield s;
 	case void =>
-		send_array_ca(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_array_ca(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 
@@ -59,7 +59,7 @@ export fn handle_code_action(s: *server, r: lsp::request) void = {
 	defer free(covered);
 	add_diagnostic_quickfixes(s, doc, uri, &obj, &arr, &covered);
 	add_unused_import_actions(s, doc, uri, &obj, &arr, covered);
-	send_array_ca(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // @param s: borrowed
@@ -244,18 +244,6 @@ fn object_string_ca(o: *json::object, key1: str, key2: str) (str | void) = {
 		return void;
 	};
 	return lsp::json_str(&sub, key2);
-};
-
-// @param s: borrowed
-// @param id: borrowed
-// @param arr: owned
-fn send_array_ca(s: *server, id: lsp::id, arr: []json::value) void = {
-	const v: json::value = arr;
-	defer json::finish(v);
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
-	};
 };
 
 // Per-import quickfixes for unused imports whose source range overlaps

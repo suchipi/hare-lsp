@@ -24,14 +24,14 @@ export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
-		send_array_local(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const doc = match (find_document(s, uri)) {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_array_local(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -43,16 +43,16 @@ export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
 	case let p: *analysis::symbol =>
 		yield p;
 	case void =>
-		send_array_local(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	if (sym.kind != analysis::symbol_kind::FUNCTION) {
-		send_array_local(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	let arr: []json::value = [];
 	append(arr, build_call_hierarchy_item(s, sym, uri, doc))!;
-	send_array_local(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // Handles callHierarchy/incomingCalls. Returns the call sites where the
@@ -64,7 +64,7 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 	case let v: (str, str) =>
 		yield v;
 	case void =>
-		send_array_local(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	defer free(item_name);
@@ -107,8 +107,26 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 		free(grouped);
 	};
 	for (let i = 0z; i < len(calls); i += 1) {
-		const o = calls[i] as json::object;
-		const u = *(json::get(&o, "uri") as *json::value) as str;
+		const o = match (calls[i]) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			json::finish(calls[i]);
+			continue;
+		};
+		const u = match (json::get(&o, "uri")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str =>
+				yield s;
+			case =>
+				json::finish(calls[i]);
+				continue;
+			};
+		case =>
+			json::finish(calls[i]);
+			continue;
+		};
 		const idx = group_index(&grouped, u);
 		grouped[idx].1 = append_value(grouped[idx].1, calls[i]);
 	};
@@ -129,8 +147,19 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 
 		let from_ranges: []json::value = [];
 		for (let j = 0z; j < len(grouped[i].1); j += 1) {
-			const o = grouped[i].1[j] as json::object;
-			let r = match (json::dup(*(json::get(&o, "range") as *json::value))) {
+			const o = match (grouped[i].1[j]) {
+			case let o: json::object =>
+				yield o;
+			case =>
+				continue;
+			};
+			const range_v = match (json::get(&o, "range")) {
+			case let p: *json::value =>
+				yield *p;
+			case =>
+				continue;
+			};
+			let r = match (json::dup(range_v)) {
 			case let v: json::value =>
 				yield v;
 			case nomem =>
@@ -144,7 +173,7 @@ export fn handle_incoming_calls(s: *server, r: lsp::request) void = {
 		json::put(&entry, "fromRanges", from_ranges: json::value)!;
 		append(arr, entry: json::value)!;
 	};
-	send_array_local(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // Handles callHierarchy/outgoingCalls. For each function in the workspace
@@ -161,7 +190,7 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	case let v: (str, str) =>
 		yield v;
 	case void =>
-		send_array_local(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	defer free(item_name);
@@ -172,7 +201,7 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_array_local(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -181,13 +210,13 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 	case let p: *analysis::symbol =>
 		yield p;
 	case void =>
-		send_array_local(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const start = src_sym.span.start.off: size;
 	const end = src_sym.span.end.off: size;
 	if (start >= end || end > len(data)) {
-		send_array_local(s, r.id, []);
+		send_array_result(s, r.id, []);
 		return;
 	};
 	const body = data[start..end];
@@ -264,7 +293,7 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 		append(arr, outgoing: json::value)!;
 		append(visited, (cand_uri, short_name))!;
 	};
-	send_array_local(s, r.id, arr);
+	send_array_result(s, r.id, arr);
 };
 
 // @param vis: borrowed
@@ -655,16 +684,4 @@ fn parse_pos_local(p: (json::value | void)) ((str, lsp::position) | void) = {
 		return void;
 	};
 	return (uri, pos);
-};
-
-// @param s: borrowed
-// @param id: borrowed
-// @param arr: owned
-fn send_array_local(s: *server, id: lsp::id, arr: []json::value) void = {
-	const v: json::value = arr;
-	defer json::finish(v);
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
-	};
 };
