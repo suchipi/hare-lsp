@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 //
-// Diagnostics: push and (later) pull. This step wires the recovering parser
-// into the document lifecycle and emits textDocument/publishDiagnostics.
+// Diagnostics: both push (textDocument/publishDiagnostics) and pull
+// (textDocument/diagnostic, advertised via diagnosticProvider). Wires the
+// recovering parser into the document lifecycle and, when enabled, layers
+// `hare build` diagnostics on top of parse diagnostics. Push notifications
+// are debounced by hare.diagnostics.debounceMs and flushed by the dispatch
+// loop after every message.
 
 use analysis;
 use encoding::json;
