@@ -80,6 +80,127 @@ export def MY_CONST: int = 7;
 	assert(const_line == 3.0, "MY_CONST decl is on line 3");
 };
 
+// When the client advertises hierarchicalDocumentSymbolSupport, the
+// server returns DocumentSymbol[] with struct fields nested under the
+// struct decl and enum variants nested under the enum decl. Editors
+// that render an outline tree show an expandable parent rather than a
+// flat list of opaque type names.
+//
+// The fixture deliberately includes a multi-byte rune (the `é` in
+// `café_size`) above the struct so the field-name byte offsets exercise
+// rune-vs-byte translation. ASCII-only fixtures hide the regression
+// where loc offsets get reported in runes instead of bytes.
+@test fn e2e_document_symbol_returns_hierarchical_shape() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	// Custom initialize: advertise hierarchical DocumentSymbol support
+	// (do_init sends an empty capabilities object).
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{"textDocument":{"documentSymbol":{"hierarchicalDocumentSymbolSupport":true}}}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample =
+		`// café — a multi-byte rune above the struct so that field-name
+// byte offsets in the response have to be byte offsets, not rune
+// offsets. ASCII-only fixtures hide that regression.
+const cup_count: int = 12;
+type point = struct {
+	x: int,
+	y: int,
+};
+type direction = enum {
+	NORTH,
+	SOUTH,
+	EAST,
+	WEST,
+};
+`;
+	open_doc(&s, "file:///docsym-tree.ha", sample);
+
+	const req =
+		`{"jsonrpc":"2.0","id":1300,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///docsym-tree.ha"}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1300.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
+	// Three top-level decls: the const and the two types.
+	assert(len(arr) == 3, "expected exactly three top-level document symbols");
+
+	// Locate the struct and the enum and verify each has the expected
+	// children. The const decl is a leaf and must NOT have children;
+	// asserting that catches a regression where every decl gets an
+	// empty `children: []` injected.
+	let saw_struct = false, saw_enum = false, saw_const = false;
+	for (let i = 0z; i < len(arr); i += 1) {
+		const sym = arr[i] as json::object;
+		const name = *(json::get(&sym, "name") as *json::value) as str;
+		// Every hierarchical entry must carry a selectionRange; without
+		// it editors can't anchor the rename caret on the name.
+		assert(
+			json::get(&sym, "selectionRange") is *json::value,
+			"hierarchical document symbol must carry selectionRange"
+		);
+		if (name == "point") {
+			saw_struct = true;
+			const children =
+				*(json::get(&sym, "children") as *json::value) as []json::value;
+			assert(len(children) == 2, "struct point must have two field children");
+			const x = children[0] as json::object;
+			const x_name = *(json::get(&x, "name") as *json::value) as str;
+			assert(x_name == "x", "first struct child must be field x");
+			const y = children[1] as json::object;
+			const y_name = *(json::get(&y, "name") as *json::value) as str;
+			assert(y_name == "y", "second struct child must be field y");
+		};
+		if (name == "direction") {
+			saw_enum = true;
+			const children =
+				*(json::get(&sym, "children") as *json::value) as []json::value;
+			assert(len(children) == 4, "enum direction must have four variant children");
+			// Spot-check a single variant's range — selectionRange must
+			// match the variant name length and lie on the right line.
+			// EAST is on the line that immediately follows SOUTH; if the
+			// AST's rune-vs-byte fixup is wrong, the multi-byte rune
+			// above shifts every offset by one and the assertion fires.
+			const east = children[2] as json::object;
+			const east_name = *(json::get(&east, "name") as *json::value) as str;
+			assert(east_name == "EAST", "third enum child must be EAST");
+			const sel =
+				*(json::get(&east, "selectionRange") as *json::value) as json::object;
+			const start = *(json::get(&sel, "start") as *json::value) as json::object;
+			const end_o = *(json::get(&sel, "end") as *json::value) as json::object;
+			const start_line = *(json::get(&start, "line") as *json::value) as f64;
+			const start_ch = *(json::get(&start, "character") as *json::value) as f64;
+			const end_ch = *(json::get(&end_o, "character") as *json::value) as f64;
+			// EAST sits on line 11 (0-based) indented by one tab.
+			assert(start_line == 11.0, "EAST must report line 11");
+			assert(
+				end_ch - start_ch == 4.0,
+				"EAST selectionRange must span the 4-byte name"
+			);
+		};
+		if (name == "cup_count") {
+			saw_const = true;
+			assert(
+				json::get(&sym, "children") is void,
+				"const decl must not carry a children array"
+			);
+		};
+	};
+	assert(saw_struct, "response must include the struct decl");
+	assert(saw_enum, "response must include the enum decl");
+	assert(saw_const, "response must include the const decl");
+};
+
 @test fn e2e_document_highlight_returns_array() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
