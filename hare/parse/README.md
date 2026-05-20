@@ -1,58 +1,68 @@
 # hare/parse
 
-Vendored overlay of the stdlib `hare::parse` module. Upstream source:
-`/usr/local/src/hare/stdlib/hare/parse/` (Hare v0.26.0).
+Build-time overlay of the stdlib `hare::parse` module.
 
-## Why we vendored it
+The Makefile's `hare/parse/.stamp` target copies `$(STDLIB)/hare/parse/*.ha`
+into this directory, then applies `parse.ha.patch` and `import.ha.patch`
+on top. Only the patches and this README are tracked in git; the
+materialized `.ha` files are ignored via the top-level `.gitignore`.
+`harefmt` walks the tree under the same `.gitignore`, so the generated
+files are also exempt from formatting.
 
-The stdlib `hare::parse::want()` calls `mkloc(lexer)` while building the
-"Unexpected X, was expecting Y" error message. `mkloc` does a `lex + unlex`
-cycle internally, which leaves a token in the lexer's single-slot unlex
-buffer. `want` then calls `lex::unlex(lexer, tok)` to put back the failing
-token, and the lexer aborts the whole process with:
+`HAREPATH` has `$(PWD)` before `$(STDLIB)`, so `use hare::parse;` resolves
+to this directory and uses our patched copy.
+
+## What we patch
+
+### `parse.ha`'s `want()`
+
+Stdlib uses `mkloc(lexer)` while building the "Unexpected X, was
+expecting Y" error message. `mkloc` does an internal `lex + unlex`
+cycle, leaving a token in the lexer's single-slot unlex buffer. The
+`lex::unlex(lexer, tok)` call further down then aborts with:
 
     attempted to unlex more than one token
 
-That assertion fires routinely on intermediate editing states (e.g. the user
-has typed `let x =` and is still typing the right-hand side), so any LSP that
-embeds the unmodified stdlib parser crashes whenever the user pauses mid-edit
-on certain inputs. We need the parser to return an `error` here, not abort.
+That assertion fires routinely on intermediate editing states (e.g. the
+user has just typed `let x =` and is still typing the right-hand side),
+so an unmodified stdlib parser crashes the LSP. The patch substitutes
+`tok.2` (the failing token's own location). `lex::tokstr` ignores the
+location field for the keyword/symbol tokens used in `want`'s
+alternatives, so the rendered error is identical.
 
-We tried to fix this in stdlib but it would have been a larger change with
-upstream coordination cost, so we vendor instead. `HAREPATH` puts the repo
-root first, so `use hare::parse;` resolves to this copy.
+### `import.ha`'s `imports()` `loc.end`
 
-## What we changed
+Stdlib sets each import's `loc.end` via `mkloc(lexer)` after the parse
+finishes, which returns the position of the lexer's NEXT real token.
+The LSP parses without `COMMENTS` mode, so "next token" can be code
+several lines down, across blank lines and `//` comments. The patch
+captures the closing `;` token's own location while parsing and uses
+that. Without the fix, `textDocument/documentLink` and folding ranges
+extend past the `use` statement into the following comment, which VS
+Code renders as a cmd-clickable underline navigating into the imported
+module.
 
-Only `parse.ha`'s `want()` function. The two `mkloc(lexer)` calls used to
-build the error message are replaced with `tok.2` (the failing token's own
-location). This keeps the unlex slot clean and yields the same rendered
-error text, because `lex::tokstr` ignores the location field for the
-keyword/symbol tokens used in `want`'s alternatives.
+See `parse.ha.patch` and `import.ha.patch` for the patches themselves;
+the headers at the top of each file document the change in detail.
 
-The header comment in `parse.ha` and the inline comment above the changed
-block document the fix in-tree.
+## Refreshing for a new Hare release
 
-All other files in this directory are identical to stdlib in behavior. Some
-have whitespace differences from running `harefmt` over the tree; those are
-not intentional changes and can be re-synced from upstream at any time.
+Most of the time, just `make clean && make`. If upstream has touched
+either of the patched functions, the offending patch will fail to apply
+and you'll need to regenerate it:
 
-## Keeping this in sync with upstream
+1. Copy the new upstream file (`$(STDLIB)/hare/parse/<name>.ha`) into a
+   scratch dir.
+2. Re-apply the fix and the comments described above.
+3. `diff -u --label a/<name>.ha --label b/<name>.ha orig new > <name>.ha.patch`.
+4. Restore the human-readable header at the top of the patch
+   (everything before the first `---` line is documentation and is
+   ignored by `patch`).
+5. `make clean && make test` to confirm the fix still works end-to-end;
+   the e2e suite exercises the original abort path for `want()` and the
+   documentLink-overrun path for `imports()`.
 
-When updating to a new Hare release:
-
-1. Diff each file in this directory against
-   `/usr/local/src/hare/stdlib/hare/parse/` for the target version.
-2. Re-apply the `want()` fix in `parse.ha` (replace `mkloc(lexer)` with
-   `tok.2` in the two spots inside `want`, and keep the explanatory
-   comments).
-3. Run `make test` to confirm the parser still recovers cleanly on
-   intermediate editing states. The e2e suite exercises this path.
-
-If a future stdlib version returns an error from `want` instead of aborting,
-delete this overlay and drop the `use hare::parse;` shadowing.
-
-## Related
-
-See [.claude/CLAUDE.md](../../.claude/CLAUDE.md) under "Architecture →
-`hare/parse/`" for the short version.
+If a future stdlib release fixes either bug upstream, delete the
+corresponding patch (and tighten this README accordingly). If both bugs
+are gone, delete this directory's contents and the Makefile bits that
+materialize it.

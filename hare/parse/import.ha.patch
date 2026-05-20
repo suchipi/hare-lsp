@@ -1,0 +1,84 @@
+hare-lsp's overlay patch for stdlib hare::parse::import.ha.
+
+Sibling of parse.ha.patch; applied by the Makefile's hare/parse/.stamp
+target on top of a fresh copy of $(STDLIB)/hare/parse/import.ha.
+
+What it changes:
+  In imports(), record the location of the closing `;` token while
+  parsing each import and assign that to `import.loc.end` instead of
+  the post-parse mkloc(lexer).
+
+Why:
+  Stdlib sets `loc.end` via mkloc(lexer) after the `use` statement
+  finishes parsing. mkloc returns the position of the lexer's NEXT
+  real token, and the LSP parses without COMMENTS mode, so "next
+  token" can be code several lines below the import, across blank
+  lines and intervening `//` comments. That makes loc.end extend over
+  those comments. Downstream, textDocument/documentLink emits one
+  link per import using `imp.loc.end.off`, so the link's range covers
+  the import AND every comment until the next decl - VS Code then
+  renders the entire first comment after each `use` block as a
+  cmd+clickable underline that navigates into the imported module.
+  Folding-range and a few related features have the same problem.
+
+  Capturing the closing `;` token's own location avoids the lookahead.
+
+To refresh for a new Hare release: same procedure as parse.ha.patch;
+see hare/parse/README.md.
+
+Apply with: `patch -p1 -d hare/parse < hare/parse/import.ha.patch`
+
+--- a/import.ha
++++ b/import.ha
+@@ -40,16 +40,29 @@
+ 		import.loc.start = mkloc(lexer);
+ 		let (name, trailing) = ident_trailing(lexer)?;
+ 		import.ident = name;
+-		switch (want(lexer, ltok::SEMICOLON, ltok::LBRACE,
+-			ltok::EQUAL, ltok::TIMES)?.0) {
++		// hare-lsp patch: capture the location of the closing `;`
++		// so loc.end can be set to it. Stdlib uses mkloc(lexer)
++		// after the parse finishes, but mkloc returns the position
++		// of the lexer's NEXT token. The LSP parses without
++		// COMMENTS mode, so the next token is whatever real code
++		// comes after the `use`, possibly several lines later -
++		// loc.end then extends across blank lines and intervening
++		// comments, which makes textDocument/documentLink emit a
++		// link covering the next comment, underlining it as
++		// cmd+clickable in VS Code.
++		let semi_loc: lex::location = lex::location { ... };
++		const next_tok = want(lexer, ltok::SEMICOLON, ltok::LBRACE,
++			ltok::EQUAL, ltok::TIMES)?;
++		switch (next_tok.0) {
+ 		case ltok::SEMICOLON =>
+ 			synassert(mkloc(lexer), !trailing,
+ 				"Unexpected trailing :: in ident")?;
++			semi_loc = next_tok.2;
+ 		case ltok::LBRACE =>
+ 			synassert(mkloc(lexer), trailing,
+ 				"Expected trailing :: in ident")?;
+ 			import.bindings = name_list(lexer)?;
+-			want(lexer, ltok::SEMICOLON)?;
++			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
+ 		case ltok::EQUAL =>
+ 			synassert(mkloc(lexer),
+ 				len(name) == 1 && !trailing,
+@@ -57,15 +70,15 @@
+ 			import.bindings = name[0];
+ 			free(name);
+ 			import.ident = ident(lexer)?;
+-			want(lexer, ltok::SEMICOLON)?;
++			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
+ 		case ltok::TIMES =>
+ 			synassert(mkloc(lexer), trailing,
+ 				"Expected trailing :: in ident")?;
+ 			import.bindings = ast::import_wildcard;
+-			want(lexer, ltok::SEMICOLON)?;
++			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
+ 		case => abort(); // Unreachable
+ 		};
+-		import.loc.end = mkloc(lexer);
++		import.loc.end = semi_loc;
+ 	};
+ 	return imports;
+ };

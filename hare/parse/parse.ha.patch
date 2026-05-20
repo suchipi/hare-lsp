@@ -1,0 +1,72 @@
+hare-lsp's overlay of stdlib hare::parse.
+
+This patch is applied to a fresh copy of $(STDLIB)/hare/parse/parse.ha at
+build time (see the Makefile's hare/parse/.stamp target). The materialized
+copy is gitignored; only this patch and the README are tracked.
+
+What it changes:
+  - Adds a top-of-file comment marking the file as the hare-lsp overlay.
+  - In want(), replaces the two mkloc(lexer) calls with tok.2 (the failing
+    token's own location).
+
+Why:
+  mkloc(lexer) does a lex+unlex cycle, which leaves a token in the lexer's
+  single-slot unlex buffer. The lex::unlex(lexer, tok) call further down
+  then trips the "attempted to unlex more than one token" assertion and
+  aborts the process. That assertion fires routinely on intermediate
+  editing states (e.g. the user has just typed `let x =` and is still
+  typing the right-hand side), so an unmodified stdlib parser crashes the
+  LSP. Substituting tok.2 keeps the unlex slot clean, and because tokstr
+  ignores the location field for the keyword/symbol tokens used here, the
+  rendered error message is identical.
+
+To refresh for a new Hare release:
+  1. make clean && make
+     If the patch still applies cleanly, you are done.
+  2. Otherwise, copy $(STDLIB)/hare/parse/parse.ha into a scratch dir,
+     re-apply the fix and the comments by hand, run
+     `diff -u --label a/parse.ha --label b/parse.ha orig new > parse.ha.patch`,
+     and commit the new patch.
+
+Apply with: `patch -p1 -d hare/parse < hare/parse/parse.ha.patch`
+
+--- a/parse.ha
++++ b/parse.ha
+@@ -1,5 +1,10 @@
+ // SPDX-License-Identifier: MPL-2.0
+ // (c) Hare authors <https://harelang.org>
++//
++// hare-lsp overlay. This file is the stdlib hare::parse::parse.ha with the
++// `want()` fix applied; see hare/parse/parse.ha.patch for the canonical
++// source of the change. The rest of the directory is materialized from the
++// system stdlib at build time and is not tracked in git.
+
+ use fmt;
+ use hare::lex;
+@@ -40,16 +45,25 @@
+
+ 	let buf = memio::dynamic();
+ 	defer io::close(&buf)!;
++	// hare-lsp patch: stdlib uses mkloc(lexer) for the per-alternative
++	// location and for syntaxerr below. mkloc does a lex+unlex cycle,
++	// which leaves a token in the unlex slot - so the lex::unlex(lexer,
++	// tok) below would then assert with "attempted to unlex more than
++	// one token", aborting the process on intermediate editing states.
++	// We use tok.2 (the failing token's location) instead. tokstr
++	// ignores the location field for the keyword/symbol tokens used
++	// here, so the rendered error is identical, and the unlex slot
++	// stays clean.
+ 	for (let i = 0z; i < len(want); i += 1) {
+ 		const tstr = if (want[i] == ltok::NAME) "name"
+-			else lex::tokstr((want[i], void, mkloc(lexer)));
++			else lex::tokstr((want[i], void, tok.2));
+ 		fmt::fprintf(&buf, "'{}'", tstr)!;
+ 		if (i + 1 < len(want)) {
+ 			fmt::fprint(&buf, ", ")!;
+ 		};
+ 	};
+ 	lex::unlex(lexer, tok);
+-	return syntaxerr(mkloc(lexer), "Unexpected '{}', was expecting {}",
++	return syntaxerr(tok.2, "Unexpected '{}', was expecting {}",
+ 		lex::tokstr(tok), memio::string(&buf)!);
+ };
