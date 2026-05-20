@@ -265,8 +265,9 @@ export fn handle_implementation(s: *server, r: lsp::request) void = {
 };
 
 // typeDefinition: resolves the *type* of an expression at the cursor.
-// Without full type inference we approximate: if the cursor is on a name
-// whose decl is a type, jump there; otherwise null. Falls back to the
+// If the cursor is on a name whose decl is a type, jump there. Otherwise
+// walk from the binding (variable, parameter, global, const) to its
+// declared type and jump to the type's declaration. Falls back to the
 // workspace index for types defined in other files.
 //
 // @param s: borrowed
@@ -303,16 +304,37 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	if (len(qualifier_peek) == 0) {
 		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
 		case let p: *analysis::symbol =>
-			if (p.kind != analysis::symbol_kind::TYPE) {
-				send_null_result(s, r.id);
+			if (p.kind == analysis::symbol_kind::TYPE) {
+				// Cursor on a TYPE name declared locally.
+				send_location(s, r.id, uri, p.span, doc);
 				return;
 			};
-			send_location(s, r.id, uri, p.span, doc);
+			// Non-TYPE local symbol (global, const, function). The
+			// binding walk might still find a named alias for a
+			// global/const declared type. If it doesn't, we return
+			// null directly — falling through to the workspace
+			// lookup would let a same-named TYPE in another file
+			// hijack the response, which is the wrong target for a
+			// locally-bound symbol.
+			if (try_send_type_def_via_binding(s, r, doc, &cache.pr.subunit, ident_str,
+						off)) {
+				return;
+			};
+			send_null_result(s, r.id);
 			return;
 		case void => void;
 		};
+		// Not in the local top-level index. Could still be a function
+		// parameter or a let/const binding — find_local_binding_type
+		// (inside try_send_type_def_via_binding) knows about those.
+		if (try_send_type_def_via_binding(s, r, doc, &cache.pr.subunit, ident_str,
+					off)) {
+			return;
+		};
 	};
-	// Module-aware workspace fallback (TYPE only).
+	// Module-aware workspace fallback (TYPE only). Reached for qualified
+	// references (`foo::Bar`) or bare names that aren't bound anywhere in
+	// the open file.
 	match (workspace_lookup_aware(s, doc, data, ident_range.0, ident_str)) {
 	case let e: *analysis::workspace_entry =>
 		if (e.kind != analysis::symbol_kind::TYPE) {
@@ -323,6 +345,92 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	case void =>
 		send_null_result(s, r.id);
 	};
+};
+
+// Resolves a bare identifier at `off` to its declared type and emits a
+// Location pointing at that type's declaration. Returns true if a Location
+// was sent. Returns false — with no response written — when the binding
+// can't be located, its declared type isn't a named alias, or the alias's
+// decl can't be resolved; the caller decides whether to fall through to a
+// workspace lookup or send null. Only named aliases are followed;
+// pointers, slices, tagged unions, and other compound types are not
+// chased.
+//
+// @param s: borrowed
+// @param r: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param name: borrowed
+fn try_send_type_def_via_binding(
+	s: *server,
+	r: lsp::request,
+	doc: *document,
+	su: *ast::subunit,
+	name: str,
+	off: size,
+) bool = {
+	let id_arr: [1]str = [name];
+	const id: ast::ident = id_arr[..];
+	const lt = match (type_of_identifier(s, doc, su, id, off, 0)) {
+	case let lt: located_type =>
+		yield lt;
+	case void =>
+		return false;
+	};
+	const alias = match (lt.t.repr) {
+	case let a: ast::alias_type =>
+		yield a;
+	case =>
+		return false;
+	};
+	const lookup_doc = find_doc_for_uri(s, lt.uri);
+	const d = match (resolve_alias_decl(s, lookup_doc, alias)) {
+	case let d: *ast::decl =>
+		yield d;
+	case void =>
+		return false;
+	};
+	const (text, decl_uri) = locate_decl_anywhere(s, d, lt);
+	send_location_in_file(s, r.id, decl_uri, text, d.loc);
+	return true;
+};
+
+// Emits a Location response for an arbitrary decl span in any file.
+// Builds the file's line index on demand so this works for decls in the
+// open doc, in another open doc, or in a file_parse_cache entry.
+//
+// @param s: borrowed
+// @param id: borrowed
+// @param uri: borrowed
+// @param text: borrowed
+fn send_location_in_file(
+	s: *server,
+	id: lsp::id,
+	uri: str,
+	text: []u8,
+	loc: ast::location,
+) void = {
+	const line_index = analysis::build_line_index(text);
+	defer free(line_index);
+	const enc = position_encoding(s);
+	const start_pos = analysis::byte_to_position(text, line_index, enc,
+		loc.start.off: size);
+	const end_pos = analysis::byte_to_position(text, line_index, enc,
+		loc.end.off: size);
+
+	let result = json::newobject();
+	json::set(&result, "uri", uri: json::value)!;
+	let range = json::newobject();
+	let s_obj = json::newobject();
+	json::put(&s_obj, "line", start_pos.line: f64)!;
+	json::put(&s_obj, "character", start_pos.character: f64)!;
+	let e_obj = json::newobject();
+	json::put(&e_obj, "line", end_pos.line: f64)!;
+	json::put(&e_obj, "character", end_pos.character: f64)!;
+	json::put(&range, "start", s_obj)!;
+	json::put(&range, "end", e_obj)!;
+	json::put(&result, "range", range)!;
+	send_with_finish(s, id, result: json::value);
 };
 
 // @param s: borrowed
