@@ -31,6 +31,8 @@ known limitations - see [docs/features.md](docs/features.md).
   sudo make -C "/tmp/hare-json" install
   ```
 
+  - At time of writing, the latest commit for hare-json was [`fad5934`](https://git.sr.ht/~sircmpwn/hare-json/commit/fad5934767276768ad08de44ee265f513ee44961), and hare-lsp compiles correctly with this commit. However, unless hare-json introduces breaking changes, hare-lsp should continue to compile against any version of hare-json.
+
 ### Build
 
 ```sh
