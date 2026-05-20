@@ -579,8 +579,10 @@ export fn main(b: buffer) void = {
 	defer finish_session(&s);
 	do_init(&s);
 
-	// Resolve is largely a passthrough -- feed a synthetic item and
-	// confirm we get a non-error response.
+	// Synthetic CompletionItem with no `data` field: the resolve
+	// handler can't look anything up, so it must echo the input
+	// verbatim. Without this echo behavior, editors that don't drive
+	// the lazy-resolve flow would lose their popup contents.
 	const req =
 		`{"jsonrpc":"2.0","id":1802,"method":"completionItem/resolve","params":{"label":"foo","kind":3}}`;
 	send(&s, strings::toutf8(req));
@@ -595,13 +597,109 @@ export fn main(b: buffer) void = {
 		json::get(&obj, "error") is void,
 		"completionItem/resolve must not error on a well-formed item"
 	);
-	// Resolve is a passthrough today: the server should echo the input
-	// item's `label` and `kind` so the editor's lazy-resolve flow keeps
-	// working. A regression to `result: null` or `result: {}` (which
-	// drops the popup contents) must fail this test.
 	const result = *(json::get(&obj, "result") as *json::value) as json::object;
 	const label = *(json::get(&result, "label") as *json::value) as str;
 	assert(label == "foo", "completionItem/resolve must echo the input label");
 	const kind = *(json::get(&result, "kind") as *json::value) as f64;
 	assert(kind == 3.0, "completionItem/resolve must echo the input kind");
+};
+
+// Exercises the resolve enrichment over the wire: open a real file
+// with a documented function, request completion, grab the `data`
+// field the server stashed on the matching item, then send a
+// completionItem/resolve carrying that data and assert the response
+// carries a populated `detail` and a markdown `documentation`. This
+// is the regression guard the plan calls out at
+// .tmp/audit-followups/02-completionitem-resolve.md — without the
+// e2e check, a regression in the resolve dispatch path could land
+// without a unit test catching it. Uses a multi-character identifier
+// (Hare's lexer disallows non-ASCII identifier runes).
+@test fn e2e_completion_resolve_populates_detail_and_documentation() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	const sample =
+		`// Returns an empty label for the widget.
+export fn frobnicate_widget(arg: int) str = "";
+
+export fn main() void = {
+	frob
+};
+`;
+	open_doc(&s, "file:///res_e2e.ha", sample);
+
+	// Step 1: trigger the initial completion. Cursor sits right after
+	// `frob` on line 4, character 5 (\t = char 0, then `f`,`r`,`o`,`b`).
+	const req =
+		`{"jsonrpc":"2.0","id":1850,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///res_e2e.ha"},"position":{"line":4,"character":5}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1850.0);
+	defer free(body);
+	let v = json::loadstr(strings::fromutf8(body)!)!;
+	defer json::finish(v);
+	const result_obj =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items =
+		*(json::get(&result_obj, "items") as *json::value) as []json::value;
+
+	let data_text: str = "";
+	let owned_data = false;
+	defer if (owned_data) free(data_text);
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const lbl = *(json::get(&it, "label") as *json::value) as str;
+		if (lbl != "frobnicate_widget") continue;
+		const dp = json::get(&it, "data") as *json::value;
+		data_text = json::dumpstr(*dp);
+		owned_data = true;
+		break;
+	};
+	assert(
+		owned_data,
+		"initial completion must attach `data` to the frobnicate_widget item"
+	);
+
+	// Step 2: re-serialize the data into a resolve request and dispatch.
+	const resolve_req =
+		strings::concat(
+			`{"jsonrpc":"2.0","id":1851,"method":"completionItem/resolve","params":{"label":"frobnicate_widget","kind":3,"data":`,
+			data_text, `}}`)!;
+	defer free(resolve_req);
+	send(&s, strings::toutf8(resolve_req));
+
+	const body2 = wait_for_response(&s, 1851.0);
+	defer free(body2);
+	let v2 = json::loadstr(strings::fromutf8(body2)!)!;
+	defer json::finish(v2);
+	const r2 = v2 as json::object;
+	assert(
+		json::get(&r2, "error") is void,
+		"completionItem/resolve must not error on a well-formed item"
+	);
+	const enriched = *(json::get(&r2, "result") as *json::value) as json::object;
+
+	// detail must now carry the rendered signature, not the raw label.
+	const detail = *(json::get(&enriched, "detail") as *json::value) as str;
+	assert(
+		strings::contains(detail, "frobnicate_widget"),
+		"resolved detail must include the symbol name"
+	);
+	assert(
+		strings::contains(detail, "fn"),
+		"resolved detail must show the function signature"
+	);
+
+	// documentation must be MarkupContent(kind=markdown) with the
+	// cleaned doc-comment body.
+	const doc_obj =
+		*(json::get(&enriched, "documentation") as *json::value) as json::object;
+	const dkind = *(json::get(&doc_obj, "kind") as *json::value) as str;
+	assert(dkind == "markdown", "documentation must be markdown");
+	const dvalue = *(json::get(&doc_obj, "value") as *json::value) as str;
+	assert(
+		strings::contains(dvalue, "Returns an empty label for the widget"),
+		"documentation must include the doc-comment text"
+	);
 };

@@ -16,8 +16,12 @@
 // enumerating the struct/union members of that type (chasing pointer,
 // alias, embedded, and embedded-alias wrappers).
 //
-// completionItem/resolve fills in the documentation field for a selected
-// item — kept lazy so the initial list stays small.
+// completionItem/resolve enriches a selected item with the full
+// signature (`detail`) and cleaned doc-comment markdown
+// (`documentation`). The initial completion list ships only the
+// lightweight fields (label/kind/full-name); the heavier signature
+// rendering happens here so the client pays for it once per highlight
+// rather than once per matched item.
 
 use analysis;
 use encoding::json;
@@ -124,6 +128,17 @@ def CIK_MODULE: f64 = 9.0;
 //
 // @borrowed
 def COMPLETION_SENTINEL: str = "__halsp_completion_marker__";
+
+// Tags for the `data.source` field stashed on each resolvable completion
+// item. They tell `handle_completion_resolve` which index to consult
+// when looking up the symbol to enrich. Items emitted for keywords,
+// struct fields, or bare module names omit the data field entirely.
+//
+// @borrowed
+def RESOLVE_SRC_FILE: str = "file";
+
+// @borrowed
+def RESOLVE_SRC_WORKSPACE: str = "workspace";
 
 // @param s: borrowed
 export fn handle_completion(s: *server, r: lsp::request) void = {
@@ -382,6 +397,7 @@ fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 		if (sym.kind == analysis::symbol_kind::FUNCTION) {
 			attach_function_snippet(&item, sym.short_name, sym.param_names);
 		};
+		attach_resolve_data(&item, RESOLVE_SRC_FILE, doc.uri, sym.short_name);
 		append(a, item: json::value)!;
 	};
 	*arr = a;
@@ -425,6 +441,7 @@ fn add_workspace_symbols(
 			attach_function_snippet(&item, e.short_name, e.param_names);
 		};
 		attach_auto_import(s, doc, &item, e.module, imported);
+		attach_resolve_data(&item, RESOLVE_SRC_WORKSPACE, e.uri, e.short_name);
 		append(a, item: json::value)!;
 		added += 1;
 	};
@@ -487,6 +504,7 @@ fn add_stdlib_symbols(
 			attach_function_snippet(&item, e.short_name, e.param_names);
 		};
 		attach_auto_import(s, doc, &item, qualified, imported);
+		attach_resolve_data(&item, RESOLVE_SRC_WORKSPACE, e.uri, e.short_name);
 		append(a, item: json::value)!;
 		added += 1;
 	};
@@ -765,6 +783,7 @@ fn emit_module_members_from(
 		if (e.kind == analysis::symbol_kind::FUNCTION) {
 			attach_function_snippet(&item, e.short_name, e.param_names);
 		};
+		attach_resolve_data(&item, RESOLVE_SRC_WORKSPACE, e.uri, e.short_name);
 		append(a, item: json::value)!;
 	};
 	*arr = a;
@@ -1487,28 +1506,262 @@ fn symbol_kind_to_completion(k: analysis::symbol_kind) f64 = {
 	};
 };
 
-// completionItem/resolve: just echo the input for now. Future revisions
-// will fetch the long doc here.
+// Stashes the lookup key under `data` so completionItem/resolve can
+// recover the source symbol later. The shape is `{source, uri, name}`
+// where `source` is one of [[RESOLVE_SRC_FILE]] or [[RESOLVE_SRC_WORKSPACE]]:
+// callers select which index to consult, the URI pins the file, and the
+// short name disambiguates within that file. Caller is responsible for
+// only attaching this to items whose source has a fetchable decl —
+// keywords, raw module names, and struct fields don't.
+//
+// @param item: borrowed
+// @param source: borrowed
+// @param uri: borrowed
+// @param name: borrowed
+fn attach_resolve_data(
+	item: *json::object,
+	source: str,
+	uri: str,
+	name: str,
+) void = {
+	let data = json::newobject();
+	json::set(&data, "source", source: json::value)!;
+	json::set(&data, "uri", uri: json::value)!;
+	json::set(&data, "name", name: json::value)!;
+	json::put(item, "data", data)!;
+};
+
+// completionItem/resolve: when the client highlights an item, look up
+// the underlying symbol via the `data` field we stashed during the
+// initial response and enrich the item with a full signature (`detail`)
+// and cleaned doc-comment markdown (`documentation`). Items emitted
+// without a `data` field — keywords, struct fields, module names — and
+// items whose lookup fails are echoed back unchanged so the client's
+// own popup contents survive a stale handle.
 //
 // @param s: borrowed
 export fn handle_completion_resolve(s: *server, r: lsp::request) void = {
-	const v: json::value = match (r.params) {
+	const params_v = match (r.params) {
 	case let v: json::value =>
-		yield match (json::dup(v)) {
-		case let copy: json::value =>
-			yield copy;
-		case nomem =>
-			send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+		yield v;
+	case void =>
+		const v: json::value = json::_null;
+		send_resolve_response(s, r.id, v);
+		return;
+	};
+	let item = match (json::dup(params_v)) {
+	case let v: json::value =>
+		yield match (v) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			send_resolve_response(s, r.id, v);
 			return;
 		};
-	case void =>
-		yield json::_null: json::value;
+	case nomem =>
+		send_error(s, r.id, lsp::INTERNAL_ERROR, "out of memory");
+		return;
 	};
+	let owned_item = true;
+	defer if (owned_item) json::finish(item: json::value);
+
+	try_enrich_resolve_item(s, &item);
+
+	owned_item = false;
+	send_resolve_response(s, r.id, item: json::value);
+};
+
+// Sends the response and finishes the (owned) value. Splitting this out
+// of [[handle_completion_resolve]] keeps the error/passthrough branches
+// from each having to repeat the encode call.
+//
+// @param s: borrowed
+// @param id: borrowed
+// @param v: owned
+fn send_resolve_response(s: *server, id: lsp::id, v: json::value) void = {
 	defer json::finish(v);
-	match (lsp::encode_response_result(s.out, r.id, v)) {
+	match (lsp::encode_response_result(s.out, id, v)) {
 	case size => void;
 	case => void;
 	};
+};
+
+// Reads the lookup key out of `item.data`, fetches the matching symbol
+// from the appropriate index, and overwrites `item.detail` and
+// `item.documentation` with the enriched values. No-op when the data
+// field is missing, malformed, or the lookup misses.
+//
+// @param s: borrowed
+// @param item: borrowed
+fn try_enrich_resolve_item(s: *server, item: *json::object) void = {
+	const data = match (json::get(item, "data")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			return;
+		};
+	case =>
+		return;
+	};
+	const source = match (json::get(&data, "source")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let s: str =>
+			yield s;
+		case =>
+			return;
+		};
+	case =>
+		return;
+	};
+	const uri = match (json::get(&data, "uri")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let s: str =>
+			yield s;
+		case =>
+			return;
+		};
+	case =>
+		return;
+	};
+	const name = match (json::get(&data, "name")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let s: str =>
+			yield s;
+		case =>
+			return;
+		};
+	case =>
+		return;
+	};
+
+	const found = if (source == RESOLVE_SRC_FILE) {
+		yield resolve_file_local(s, uri, name);
+	} else if (source == RESOLVE_SRC_WORKSPACE) {
+		yield resolve_workspace_entry(s, uri, name);
+	} else {
+		return;
+	};
+	const (sig, docs) = match (found) {
+	case let r: (str, str) =>
+		yield r;
+	case void =>
+		return;
+	};
+	defer free(sig);
+	defer free(docs);
+
+	json::set(item, "detail", sig: json::value)!;
+	const cleaned = clean_doc_comment(docs);
+	defer free(cleaned);
+	if (len(cleaned) > 0) {
+		let doc_md = json::newobject();
+		json::set(&doc_md, "kind", "markdown": json::value)!;
+		json::set(&doc_md, "value", cleaned: json::value)!;
+		json::put(item, "documentation", doc_md)!;
+	};
+};
+
+// Looks up `name` in the file-local index of the open document at
+// `uri`. Returns (signature, raw_docs) where signature is the AST decl
+// rendered without its body and docs is the symbol's raw doc-comment.
+// Caller owns both strings.
+//
+// @param s: borrowed
+// @param uri: borrowed
+// @param name: borrowed
+// @returns: owned
+fn resolve_file_local(s: *server, uri: str, name: str) ((str, str) | void) = {
+	const doc = match (find_document(s, uri)) {
+	case let d: *document =>
+		yield d;
+	case null =>
+		return void;
+	};
+	const cache = parse_of(doc);
+	match (analysis::find_by_short_name(&cache.idx, name)) {
+	case let sym: *analysis::symbol =>
+		const decl_idx = match (find_decl_by_name(&cache.pr.subunit, name)) {
+		case let i: size =>
+			yield i;
+		case void =>
+			return void;
+		};
+		const sig = render_decl_signature(&cache.pr.subunit.decls[decl_idx]);
+		const docs = strings::dup(sym.docs)!;
+		return (sig, docs);
+	case void =>
+		return void;
+	};
+};
+
+// Looks up `name` in the workspace index (preferring an entry whose URI
+// matches `uri` so duplicate short names across modules don't collide),
+// then re-parses the owning file via the shared file-parse cache and
+// returns its decl's signature plus raw doc comment. Falls back to the
+// stdlib index when the workspace lookup misses. Caller owns both
+// strings.
+//
+// @param s: borrowed
+// @param uri: borrowed
+// @param name: borrowed
+// @returns: owned
+fn resolve_workspace_entry(
+	s: *server,
+	uri: str,
+	name: str,
+) ((str, str) | void) = {
+	const entry = match (find_entry_for_resolve(&s.workspace_index, uri, name)) {
+	case let e: *analysis::workspace_entry =>
+		yield e;
+	case void =>
+		yield match (find_entry_for_resolve(&s.stdlib_index, uri, name)) {
+		case let e: *analysis::workspace_entry =>
+			yield e;
+		case void =>
+			return void;
+		};
+	};
+	const fpe = match (cached_parse_or_drop_stale(s, entry.path)) {
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
+	};
+	const decl_idx = match (find_decl_by_name(&fpe.pr.subunit, name)) {
+	case let i: size =>
+		yield i;
+	case void =>
+		return void;
+	};
+	const sig = render_decl_signature(&fpe.pr.subunit.decls[decl_idx]);
+	const docs = strings::dup(entry.docs)!;
+	return (sig, docs);
+};
+
+// Linear scan for the workspace entry that owns `name` in the file at
+// `uri`. Two short names can resolve to different decls across files
+// (e.g. a private `helper` per module), so we pin the URI rather than
+// taking the first matching short name.
+//
+// @returns: borrowed from idx
+// @param idx: borrowed
+// @param uri: borrowed
+// @param name: borrowed
+fn find_entry_for_resolve(
+	idx: *analysis::workspace_index,
+	uri: str,
+	name: str,
+) (*analysis::workspace_entry | void) = {
+	for (let i = 0z; i < len(idx.entries); i += 1) {
+		const e = &idx.entries[i];
+		if (e.uri == uri && e.short_name == name) return e;
+	};
+	return void;
 };
 
 // @param p: borrowed

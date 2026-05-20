@@ -1422,3 +1422,169 @@ fn free_labels(labels: []str) void = {
 	};
 	assert(saw_let);
 };
+
+// Exercises the resolve enrichment path end-to-end: the initial
+// completion call must stash a `data` field on each resolvable item,
+// and completionItem/resolve must look that data up to populate
+// `detail` (the rendered signature) and `documentation` (the cleaned
+// doc-comment markdown). Uses a multi-character identifier so a
+// regression that compared only the first byte of `name` would still
+// fail. Hare's lexer disallows non-ASCII identifier runes, so the
+// CLAUDE.md "multi-byte rune" guidance can't apply to identifiers.
+@test fn completion_resolve_enriches_detail_and_documentation() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	// Inline doc comment hugs the decl so the parser captures it as
+	// the decl's `docs`. The literal `\"` sequences round-trip through
+	// JSON to `"` in the document text.
+	comp_open(&s, "file:///resv.ha",
+		`// Returns an empty label for the widget.\nexport fn frobnicate_widget(arg: int) str = \"\";\nfn main() void = frob\n`
+	);
+
+	// Step 1: drive the initial completion and pull the `data` field
+	// off the frobnicate_widget item. Cursor sits right after `frob`
+	// on line 2; `fn main() void = frob` is 21 characters.
+	const params =
+		`{"textDocument":{"uri":"file:///resv.ha"},"position":{"line":2,"character":21}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 600.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 600.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+
+	let data_dup: json::value = json::_null;
+	let owned_data = false;
+	defer if (owned_data) json::finish(data_dup);
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		if (label != "frobnicate_widget") continue;
+		const dp = json::get(&it, "data") as *json::value;
+		data_dup = json::dup(*dp)!;
+		owned_data = true;
+		break;
+	};
+	assert(
+		owned_data,
+		"frobnicate_widget completion item must carry a `data` field"
+	);
+
+	// Step 2: build a CompletionItem mirroring what the editor would
+	// send back (carrying just label/kind/data) and dispatch resolve.
+	let resolve_item = json::newobject();
+	json::set(&resolve_item, "label", "frobnicate_widget": json::value)!;
+	json::put(&resolve_item, "kind", 3.0: f64)!;
+	json::put(&resolve_item, "data", data_dup)!;
+	owned_data = false;
+	const resolve_v: json::value = resolve_item;
+	defer json::finish(resolve_v);
+	const r2 = lsp::request {
+		id = 601.0,
+		method = strings::dup("completionItem/resolve")!,
+		params = resolve_v,
+	};
+	defer free(r2.method);
+	handle_completion_resolve(&s, r2);
+
+	const v2 = comp_skip_to_response(out, 601.0);
+	defer json::finish(v2);
+	const result2 =
+		*(json::get(&(v2 as json::object), "result") as *json::value) as json::object;
+
+	// detail must contain the rendered signature: starts with `fn`
+	// and includes the full identifier as written.
+	const detail = *(json::get(&result2, "detail") as *json::value) as str;
+	assert(
+		strings::contains(detail, "frobnicate_widget"),
+		"resolve must replace detail with a signature containing the identifier"
+	);
+	assert(
+		strings::contains(detail, "fn"),
+		"resolve must replace detail with the function signature, not the full name"
+	);
+
+	// documentation must be MarkupContent(kind=markdown) carrying the
+	// cleaned doc-comment body (no leading-space-per-line residue).
+	const doc_obj =
+		*(json::get(&result2, "documentation") as *json::value) as json::object;
+	const dkind = *(json::get(&doc_obj, "kind") as *json::value) as str;
+	assert(
+		dkind == "markdown",
+		"resolve must return documentation as MarkupContent(kind=markdown)"
+	);
+	const dvalue = *(json::get(&doc_obj, "value") as *json::value) as str;
+	assert(
+		strings::contains(dvalue, "Returns an empty label for the widget"),
+		"resolve documentation must include the cleaned doc comment"
+	);
+};
+
+// Resolve must echo the input verbatim when no `data` field is set:
+// editors that don't drive the lazy-resolve path (or any future
+// caller that hands us a synthetic item) shouldn't see their popup
+// contents disappear. Mirrors the e2e passthrough test at the unit
+// level so a regression surfaces before the binary is even built.
+@test fn completion_resolve_passthrough_without_data() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	const params_str = `{"label":"foo","kind":3}`;
+	let pv = json::loadstr(params_str)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 610.0,
+		method = strings::dup("completionItem/resolve")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion_resolve(&s, r);
+
+	const v = comp_skip_to_response(out, 610.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const label = *(json::get(&result, "label") as *json::value) as str;
+	assert(label == "foo");
+	const kind = *(json::get(&result, "kind") as *json::value) as f64;
+	assert(kind == 3.0);
+};
+
+// When the data field references a file we no longer have open, the
+// handler must echo the input rather than erroring out.
+@test fn completion_resolve_missing_document_echoes_input() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	const params_str =
+		`{"label":"foo","kind":3,"detail":"orig","data":{"source":"file","uri":"file:///nonexistent.ha","name":"foo"}}`;
+	let pv = json::loadstr(params_str)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 611.0,
+		method = strings::dup("completionItem/resolve")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion_resolve(&s, r);
+
+	const v = comp_skip_to_response(out, 611.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const detail = *(json::get(&result, "detail") as *json::value) as str;
+	assert(
+		detail == "orig",
+		"resolve must echo the original detail when the document is missing"
+	);
+};
