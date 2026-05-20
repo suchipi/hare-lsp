@@ -738,23 +738,13 @@ fn warn_unknown_uri(s: *server, method: str, uri: str) void = {
 };
 
 // Returns true when the server can accept a new (or refreshing) document.
-// Enforces [[MAX_OPEN_DOCUMENTS]] and [[MAX_TOTAL_BUFFER_BYTES]]. On
-// rejection, warns via window/logMessage and leaves the document store
-// untouched.
+// Enforces the total-buffer-bytes cap. On rejection, warns via
+// window/logMessage and leaves the document store untouched.
 //
 // @param s: borrowed
 // @param uri: borrowed
 fn check_open_capacity(s: *server, uri: str, incoming_bytes: size) bool = {
 	const replacing = has_document(s, uri);
-	if (!replacing && len(s.documents) >= s.config.limits.max_open_documents) {
-		const msg =
-			fmt::asprintf(
-				"textDocument/didOpen: refusing to open {} (already {} documents open; cap {})",
-				uri, len(s.documents), s.config.limits.max_open_documents)!;
-		defer free(msg);
-		log_warning(s, msg);
-		return false;
-	};
 	let total: size = incoming_bytes;
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		if (replacing && s.documents[i].uri == uri) continue;

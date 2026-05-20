@@ -183,12 +183,8 @@ Highlights:
 | `hare.inlayHints.parameterNames` | `true` | Param-name hints at call sites. |
 | `hare.inlayHints.inferredTypes` | `true` | Inferred-type hints on `let` / `const`. |
 | `hare.inlayHints.inferredTypesMaxDepth` | `10` | Max recursion depth for inferred-type hints; follows call return types and type aliases. Cycles are guarded by a visited set, so larger values are safe. |
-| `hare.limits.maxOpenDocuments` | `1024` | Cap on open documents. |
 | `hare.limits.maxTotalBufferBytes` | `268435456` | Cap on summed open-buffer bytes (256 MiB). |
-| `hare.limits.maxPendingRequests` | `4096` | Cap on in-flight server-initiated requests. |
-| `hare.limits.maxCancelledIds` | `256` | Cap on cancelled request ids retained. |
 | `hare.limits.maxDiagnosticsPerFile` | `1000` | Cap on diagnostics published per file. |
-| `hare.limits.maxWorkspaceIndexEntries` | `1000000` | Cap on workspace-index entries. Raise it if your workspace has more than ~1M decls. |
 
 ## Environment
 
@@ -254,10 +250,12 @@ Highlights:
   environment variable when the client sends very large workspace
   edits. The cap must be set before `initialize` arrives, which is
   why it's an env var rather than a setting.
-- **Resource caps are configurable.** All caps (open documents, total
-  buffer bytes, in-flight requests, cancelled ids, diagnostics per
-  file, workspace-index entries) are tunable via `hare.limits.*` with
-  no additional non-configurable ceiling - raise a limit if your
+- **Resource caps are configurable.** Both caps (total buffer bytes
+  and diagnostics per file) are tunable via `hare.limits.*` with no
+  additional non-configurable ceiling - raise a limit if your
   workload needs it. Lowering a cap below current usage applies
-  prospectively; the server does not proactively evict. Hitting any
-  cap is logged via `window/logMessage`.
+  prospectively; the server does not proactively evict. The
+  buffer-bytes cap rejects the offending didOpen/didChange and warns
+  via `window/logMessage`; the diagnostics-per-file cap truncates
+  silently and appends a synthesised `diagnostics-truncated`
+  diagnostic at EOF so the client knows there are more.
