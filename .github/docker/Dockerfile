@@ -19,5 +19,6 @@ RUN apk add --no-cache \
     gcc \
     bash \
     neovim \
+    patch \
     hare=0.26.0.1-r0 \
     hare-json=0.26.0.0-r0

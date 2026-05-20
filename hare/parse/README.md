@@ -12,6 +12,10 @@ files are also exempt from formatting.
 `HAREPATH` has `$(PWD)` before `$(STDLIB)`, so `use hare::parse;` resolves
 to this directory and uses our patched copy.
 
+The bootstrap shells out to the standard `patch` utility, so building
+this repo requires `patch` on `$PATH` (Alpine: `apk add patch`; Debian
+ships it in `patch`; macOS bundles it in the Command Line Tools).
+
 ## What we patch
 
 ### `parse.ha`'s `want()`
