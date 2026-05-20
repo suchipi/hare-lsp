@@ -71,22 +71,16 @@ export fn ask() int = answer();
 	check_decl_location(result, text, "file:///impl.ha", "implementation");
 };
 
-// FIXME: textDocument/typeDefinition on a *variable* (e.g. cursor on `v`
-// in `let _ = v;`) should resolve to the declaration of `v`'s type. The
-// current handler in server/navigation.ha only resolves the cursor when
-// it lands directly on a type name (see [[e2e_type_definition_on_type_use_resolves]]);
-// it does not yet walk from a local binding to its declared type. Until
-// that handler gap is closed, this test pins the current null behavior
-// precisely so any change (positive or negative) surfaces. When the
-// handler is fixed, update this test to assert the resulting Location.
-@test fn e2e_type_definition_on_variable_returns_null_pending_handler_fix(
-
-) void = {
+// typeDefinition on a local variable should walk from the binding to its
+// declared type and return the type decl's Location. Mirror of the
+// type-name path in [[e2e_type_definition_on_type_use_resolves]], but
+// exercising the binding-walk fall-through in handle_type_definition.
+@test fn e2e_type_definition_on_variable_resolves_to_type_decl() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
 	do_init(&s);
 
-	// `let v: my_int = 0;` -- ideally typeDefinition on `v` lands on the
+	// `let v: my_int = 0;` -- typeDefinition on `v` lands on the
 	// declaration of `my_int` (line 0).
 	const sample =
 		`type my_int = int;
@@ -110,14 +104,82 @@ export fn main() void = {
 	defer json::finish(v);
 	const obj = v as json::object;
 	const result = *(json::get(&obj, "result") as *json::value);
-	// Tight assertion: current behavior is null. When the handler is
-	// fixed to resolve through variable bindings, this assertion will
-	// fail and the test must be updated to assert a Location pointing
-	// at `my_int` on line 0.
-	assert(
-		result is json::_null,
-		"typeDefinition on a variable currently returns null; if the handler now resolves through the binding, update this test"
-	);
+	check_decl_location(result, text, "file:///td.ha", "typeDefinition");
+};
+
+// Multi-byte coverage required by CLAUDE.md's "Byte / rune offsets"
+// section: the cursor line contains a `"日本語"` string literal before
+// the identifier, so a buggy UTF-16-vs-byte conversion would land on
+// the middle of a multibyte rune instead of `user_id`. The identifier
+// names themselves are multi-character (not single-letter `v`), the
+// other guard CLAUDE.md asks for: single-char names mask the
+// `loc.end.off = start of last rune` semantic. (Block comments `/* */`
+// are avoided here because the upstream Hare lexer aborts when
+// unreading a multi-byte rune past the comment's terminator.)
+@test fn e2e_type_definition_on_variable_handles_multibyte_offsets() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	// On the cursor's line `\tlet label = "日本語"; let _ = user_id;`,
+	// bytes 14-22 hold the 9-byte `日本語` block (3 bytes per rune)
+	// while UTF-16 columns 14-16 hold the same three BMP runes (each
+	// 1 unit). So UTF-16 column 30 lands on `e` in `user_id` (byte 36)
+	// — column 30 read as bytes would fall mid-rune in `語`.
+	const sample =
+		`type customer_id = u64;
+
+export fn main() void = {
+	let user_id: customer_id = 0;
+	let label = "日本語"; let _ = user_id;
+};
+`;
+	open_doc(&s, "file:///td_mb.ha", sample);
+
+	const req =
+		`{"jsonrpc":"2.0","id":1104,"method":"textDocument/typeDefinition","params":{"textDocument":{"uri":"file:///td_mb.ha"},"position":{"line":4,"character":30}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1104.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value);
+	check_decl_location(result, text, "file:///td_mb.ha", "typeDefinition");
+};
+
+// typeDefinition on a function parameter should resolve through the
+// parameter's declared type the same way it does for `let` bindings.
+@test fn e2e_type_definition_on_parameter_resolves() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	const sample =
+		`type my_int = int;
+
+export fn check(value: my_int) void = {
+	let _ = value;
+};
+`;
+	open_doc(&s, "file:///td_param.ha", sample);
+
+	// `let _ = value;` on line 3, leading tab + `let _ = ` = 8 cols,
+	// `value` starts at column 9, so cursor at column 11 lands on `l`.
+	const req =
+		`{"jsonrpc":"2.0","id":1105,"method":"textDocument/typeDefinition","params":{"textDocument":{"uri":"file:///td_param.ha"},"position":{"line":3,"character":11}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1105.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value);
+	check_decl_location(result, text, "file:///td_param.ha", "typeDefinition");
 };
 
 // Positive coverage for the working path: cursor on a *type name* (the
