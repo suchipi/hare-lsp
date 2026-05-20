@@ -433,14 +433,9 @@ fn client_supports_hierarchical_doc_symbol(s: *server) bool = {
 	case void =>
 		return false;
 	};
-	return match (json::get(&ds, "hierarchicalDocumentSymbolSupport")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let b: bool =>
-			yield b;
-		case =>
-			yield false;
-		};
+	return match (lsp::json_bool(&ds, "hierarchicalDocumentSymbolSupport")) {
+	case let b: bool =>
+		yield b;
 	case void =>
 		yield false;
 	};

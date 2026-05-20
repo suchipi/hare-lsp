@@ -78,6 +78,25 @@ export fn json_obj(o: *json::object, key: str) (json::object | void) = {
 	};
 };
 
+// Returns the value at obj[key] as a bool, or void.
+//
+// @param o: borrowed
+// @param key: borrowed
+export fn json_bool(o: *json::object, key: str) (bool | void) = {
+	const p = match (json::get(o, key)) {
+	case let p: *json::value =>
+		yield p;
+	case void =>
+		return void;
+	};
+	return match (*p) {
+	case let b: bool =>
+		yield b;
+	case =>
+		yield void;
+	};
+};
+
 // Unwraps `(json::value | void)` (the typical type of a request's
 // `params`) into a json::object, or returns void if it's not an object.
 //
