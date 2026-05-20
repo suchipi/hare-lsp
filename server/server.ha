@@ -398,17 +398,9 @@ fn pending_index(s: *server, id: i64) int = {
 // whenever encode_request succeeds. The method string is duplicated so the
 // caller need not retain it.
 //
-// Bounded by [[MAX_PENDING_REQUESTS]]: when full, the oldest pending entry
-// is dropped. A client that never replies to outgoing requests otherwise
-// grows this slice without bound.
-//
 // @param s: borrowed
 // @param method: borrowed
 export fn pending_remember(s: *server, id: i64, method: str) void = {
-	if (len(s.pending_requests) >= s.config.limits.max_pending_requests) {
-		free(s.pending_requests[0].method);
-		delete(s.pending_requests[0]);
-	};
 	append(s.pending_requests, pending_request {
 		id = id,
 		method = strings::dup(method)!,

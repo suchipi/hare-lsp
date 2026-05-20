@@ -115,47 +115,17 @@
       "additionalProperties": false,
       "description": "Configurable resource caps. Defaults are conservative; lowering applies prospectively (no proactive eviction). The body-size cap is separate: set the HARE_LSP_MAX_BODY_BYTES environment variable before launching the server because the transport must be configured before `initialize` arrives.",
       "properties": {
-        "maxOpenDocuments": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 1024,
-          "description": "Maximum number of documents the server will keep open at once."
-        },
         "maxTotalBufferBytes": {
           "type": "integer",
           "minimum": 1,
           "default": 268435456,
           "description": "Maximum total bytes summed across all open document buffers (default 256 MiB)."
         },
-        "maxPendingRequests": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 4096,
-          "description": "Maximum number of in-flight server-initiated requests awaiting a response."
-        },
-        "maxCancelledIds": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 256,
-          "description": "Maximum number of cancelled-but-not-yet-cleared request ids."
-        },
         "maxDiagnosticsPerFile": {
           "type": "integer",
           "minimum": 1,
           "default": 1000,
           "description": "Maximum diagnostics published per file (excess collapsed into a single trailing diagnostic)."
-        },
-        "maxWorkspaceIndexEntries": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 1000000,
-          "description": "Maximum number of workspace-index entries. Whatever you configure is what the server enforces; there is no additional non-configurable ceiling."
-        },
-        "maxPendingIndexJobs": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 16,
-          "description": "Maximum concurrent indexing jobs. Coalescing keeps this near 2 in practice (workspace + stdlib); the cap is a defensive ceiling against future targets growing the queue."
         }
       }
     }

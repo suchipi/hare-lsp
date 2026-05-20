@@ -92,9 +92,7 @@ export fn check_cancel(s: *server, id: lsp::id) bool = {
 	return true;
 };
 
-// Records a client-requested cancellation. Bounded by [[MAX_CANCELLED_IDS]]:
-// when full, the oldest entry is dropped so a client that cancels phantom
-// ids cannot grow the slice without bound.
+// Records a client-requested cancellation.
 //
 // @param s: borrowed
 // @param id: owned
@@ -110,14 +108,6 @@ export fn record_cancellation(s: *server, id: lsp::id) void = {
 			};
 			return;
 		};
-	};
-	if (len(s.cancelled_ids) >= s.config.limits.max_cancelled_ids) {
-		match (s.cancelled_ids[0]) {
-		case let str_id: str =>
-			free(str_id);
-		case f64 => void;
-		};
-		delete(s.cancelled_ids[0]);
 	};
 	append(s.cancelled_ids, id)!;
 };

@@ -48,13 +48,6 @@ export type workspace_entry = struct {
 	param_names: []str,
 };
 
-// Default cap on the total number of entries the workspace index will
-// hold when no `hare.limits.maxWorkspaceIndexEntries` is configured.
-// Once `max_entries` is exceeded, [[index_file]] refuses to add new
-// entries for new files (existing files can still be re-indexed).
-// Matches `server/limits.ha:default_limits().max_workspace_index_entries`.
-export def DEFAULT_MAX_INDEX_ENTRIES: size = 1_000_000;
-
 // The workspace index.
 export type workspace_index = struct {
 	// @owned
@@ -62,26 +55,12 @@ export type workspace_index = struct {
 	// File paths whose directories were scanned. Used to avoid re-indexing.
 	// @owned
 	indexed_files: []str,
-	// Runtime cap. Settable via [[set_max_entries]]; defaults to
-	// [[DEFAULT_MAX_INDEX_ENTRIES]]. Whatever value the user configures
-	// is used verbatim — there is no additional non-configurable ceiling.
-	max_entries: size,
 };
 
 // Returns an empty index.
 export fn new_workspace_index() workspace_index = workspace_index {
 	entries = [],
 	indexed_files = [],
-	max_entries = DEFAULT_MAX_INDEX_ENTRIES,
-};
-
-// Sets the runtime cap on entries. The value is stored verbatim; there
-// is no additional hard ceiling. No-op if `n` is zero.
-//
-// @param idx: borrowed
-export fn set_max_entries(idx: *workspace_index, n: size) void = {
-	if (n == 0) return;
-	idx.max_entries = n;
 };
 
 // Releases owned memory.
@@ -138,18 +117,11 @@ export fn drop_file(idx: *workspace_index, path_str: str) void = {
 
 // Adds entries for a single file. text is the file contents.
 //
-// Refuses to add new entries (silently) once the index has grown past
-// `max_entries`. drop_file always runs first so re-indexing an
-// already-tracked file still works.
-//
 // @param idx: borrowed
 // @param file_path: borrowed
 // @param text: borrowed
 export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 	drop_file(idx, file_path);
-	if (len(idx.entries) >= idx.max_entries) {
-		return;
-	};
 	let pr = parse_recover(text, file_path);
 	defer finish_parse_result(&pr);
 	let fi = build_index(&pr.subunit);

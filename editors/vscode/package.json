@@ -221,47 +221,17 @@
             "minimum": 0,
             "description": "Maximum recursion depth for inferred-type hints. 0 disables inference beyond declared types + literals; higher values follow function-call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe."
           },
-          "hare.limits.maxOpenDocuments": {
-            "type": "number",
-            "default": 1024,
-            "minimum": 1,
-            "description": "Maximum number of documents the server will keep open at once."
-          },
           "hare.limits.maxTotalBufferBytes": {
             "type": "number",
             "default": 268435456,
             "minimum": 1,
             "description": "Maximum total bytes summed across all open document buffers (default 256 MiB)."
           },
-          "hare.limits.maxPendingRequests": {
-            "type": "number",
-            "default": 4096,
-            "minimum": 1,
-            "description": "Maximum in-flight server-initiated requests awaiting a response."
-          },
-          "hare.limits.maxCancelledIds": {
-            "type": "number",
-            "default": 256,
-            "minimum": 1,
-            "description": "Maximum number of cancelled-but-not-yet-cleared request ids."
-          },
           "hare.limits.maxDiagnosticsPerFile": {
             "type": "number",
             "default": 1000,
             "minimum": 1,
             "description": "Maximum diagnostics published per file."
-          },
-          "hare.limits.maxWorkspaceIndexEntries": {
-            "type": "number",
-            "default": 1000000,
-            "minimum": 1,
-            "description": "Maximum workspace-index entries. Whatever you configure is what the server enforces; there is no additional non-configurable ceiling."
-          },
-          "hare.limits.maxPendingIndexJobs": {
-            "type": "number",
-            "default": 16,
-            "minimum": 1,
-            "description": "Maximum concurrent indexing jobs. Coalescing keeps this near 2 in practice (workspace + stdlib); the cap is a defensive ceiling."
           }
         }
       }
