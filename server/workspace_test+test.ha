@@ -459,6 +459,8 @@ fn wsfx_rm(path: str) void = {
 			exported = true,
 			module = strings::dup("")!,
 			param_names = [],
+			signature = strings::dup("")!,
+			param_labels = [],
 		})!;
 	};
 

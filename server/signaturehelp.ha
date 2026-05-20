@@ -12,9 +12,7 @@
 use analysis;
 use encoding::json;
 use hare::ast;
-use hare::unparse;
 use lsp;
-use memio;
 use strings;
 
 // @param s: borrowed
@@ -74,8 +72,9 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	// figures out which range to highlight for the active parameter.
 	// The previous label `"param N"` had no relationship to the
 	// signature text and so prevented any highlight from rendering.
-	let param_labels = collect_param_labels(&cache.pr.subunit.decls[decl_idx]);
-	defer free_param_labels(param_labels);
+	let param_labels = analysis::collect_param_labels(
+		&cache.pr.subunit.decls[decl_idx]);
+	defer analysis::free_param_labels(param_labels);
 	let params_arr: []json::value = [];
 	for (let i = 0z; i < len(param_labels); i += 1) {
 		let p = json::newobject();
@@ -102,21 +101,33 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 // @param s: borrowed
 // @param id: borrowed
 fn send_workspace_signature(s: *server, id: lsp::id, ctx: call_context) void = {
+	// Indexing renders the signature label and per-parameter labels at
+	// index time and caches them on the workspace_entry. That keeps the
+	// cross-file popup in lockstep with the in-open-document popup so
+	// LSP clients can match each parameter label as a substring of the
+	// signature label and highlight the active argument.
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const e = &s.workspace_index.entries[i];
 		if (e.kind != analysis::symbol_kind::FUNCTION) continue;
 		if (e.short_name != ctx.callee_name) continue;
-		// We don't have the AST for workspace files cached, so render
-		// the bare name as the label. A future revision will cache
-		// signatures alongside the index.
+		const label = if (len(e.signature) > 0) e.signature else e.full_name;
 		let info = json::newobject();
-		json::set(&info, "label", e.full_name: json::value)!;
+		json::set(&info, "label", label: json::value)!;
+		let params_arr: []json::value = [];
+		for (let j = 0z; j < len(e.param_labels); j += 1) {
+			let p = json::newobject();
+			json::set(&p, "label", e.param_labels[j]: json::value)!;
+			append(params_arr, p: json::value)!;
+		};
+		json::put(&info, "parameters", params_arr: json::value)!;
 		let signatures: []json::value = [];
 		append(signatures, info: json::value)!;
 		let result = json::newobject();
 		json::put(&result, "signatures", signatures: json::value)!;
 		json::put(&result, "activeSignature", 0: f64)!;
-		json::put(&result, "activeParameter", 0: f64)!;
+		const active = if (ctx.active_param < len(e.param_labels)) ctx.active_param
+			else 0z;
+		json::put(&result, "activeParameter", active: u64: f64)!;
 		const v: json::value = result;
 		defer json::finish(v);
 		match (lsp::encode_response_result(s.out, id, v)) {
@@ -230,59 +241,6 @@ fn decl_ident_sh(d: *ast::decl) ast::ident = {
 	case ast::assert_expr =>
 		return [];
 	};
-};
-
-// Renders each function parameter as `"<name>: <type>"` so the label is
-// guaranteed to be a substring of the parent signature label (the LSP
-// spec requires that for the editor to find the active-parameter range
-// to highlight). Caller frees the slice with [[free_param_labels]].
-//
-// @param d: borrowed
-// @returns: owned
-fn collect_param_labels(d: *ast::decl) []str = {
-	let out: []str = [];
-	const f = match (d.decl) {
-	case let f: ast::decl_func =>
-		yield f;
-	case =>
-		return out;
-	};
-	const proto = match (f.prototype.repr) {
-	case let proto: ast::func_type =>
-		yield proto;
-	case =>
-		return out;
-	};
-	for (let i = 0z; i < len(proto.params); i += 1) {
-		append(out, render_param_label(&proto.params[i]))!;
-	};
-	return out;
-};
-
-// @param p: borrowed
-// @returns: owned
-fn render_param_label(p: *ast::func_param) str = {
-	let buf = memio::dynamic();
-	defer lsp::safe_close(&buf);
-	const name = if (len(p.name) > 0) p.name else "_";
-	match (memio::concat(&buf, name, ": ")) {
-	case size => void;
-	case =>
-		return strings::dup(name)!;
-	};
-	match (unparse::_type(&buf, &unparse::syn_nowrap, p._type)) {
-	case size => void;
-	case => void;
-	};
-	return strings::dup(memio::string(&buf)!)!;
-};
-
-// @param labels: owned
-fn free_param_labels(labels: []str) void = {
-	for (let i = 0z; i < len(labels); i += 1) {
-		free(labels[i]);
-	};
-	free(labels);
 };
 
 // @param p: borrowed
