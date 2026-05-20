@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 
+use analysis;
+use encoding::json;
+use lsp;
 use strings;
 
 @test fn sig_help_counts_args_in_simple_call() void = {
@@ -99,4 +102,82 @@ use strings;
 	case call_context => abort("expected void");
 	case void => void;
 	};
+};
+
+// Cross-file: the called function lives in a workspace file that isn't
+// open. handle_signature_help should fall back to the workspace_index,
+// where index_file has cached the rendered signature label and the
+// per-parameter labels, and emit a fully populated SignatureInformation
+// with an activeParameter computed from the cursor's argument position.
+@test fn sig_help_workspace_fallback_uses_cached_signature() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// Pretend `compute_total` lives in another file in the workspace.
+	// Indexing renders + caches its signature; the in-open-doc lookup
+	// will miss, exercising the workspace fallback.
+	analysis::index_file(&s.workspace_index, "/repo/util.ha",
+		strings::toutf8(
+			"export fn compute_total(name: str, count: int) int = count;\n"));
+
+	// Caller file: a single line that calls compute_total with the
+	// cursor between the comma and the closing paren.
+	const src = `export fn main() void = { let _ = compute_total(\"x\", ); };`;
+	nav_open(&s, "file:///caller.ha", src);
+
+	// Position the cursor right after the comma + space inside the call.
+	// `compute_total("x", ` is the substring; the cursor lands on the
+	// character just past it. find_col handles single-line sources.
+	const col =
+		find_col(src, `compute_total("x", `) + len(`compute_total("x", `): u32;
+	const params = pos_params("file:///caller.ha", 0, col);
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 1900.0,
+		method = strings::dup("textDocument/signatureHelp")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_signature_help(&s, r);
+
+	const v = skip_to_response(out, 1900.0);
+	defer json::finish(v);
+	const o = v as json::object;
+	const result_obj = *(json::get(&o, "result") as *json::value) as json::object;
+	const sigs =
+		*(json::get(&result_obj, "signatures") as *json::value) as []json::value;
+	assert(
+		len(sigs) == 1,
+		"workspace fallback should return exactly one SignatureInformation"
+	);
+	const sig = sigs[0] as json::object;
+	const label = *(json::get(&sig, "label") as *json::value) as str;
+	assert(
+		strings::contains(label, "fn compute_total(name: str, count: int) int"),
+		"workspace fallback should render the full cached signature label, not just the bare name"
+	);
+	assert(
+		!strings::contains(label, "= count"),
+		"workspace fallback must strip the function body from the label"
+	);
+	const ps = *(json::get(&sig, "parameters") as *json::value) as []json::value;
+	assert(len(ps) == 2, "workspace fallback should carry both parameter labels");
+	const p0 = ps[0] as json::object;
+	assert(
+		*(json::get(&p0, "label") as *json::value) as str == "name: str",
+		"parameter[0] label should be `name: str`"
+	);
+	const p1 = ps[1] as json::object;
+	assert(
+		*(json::get(&p1, "label") as *json::value) as str == "count: int",
+		"parameter[1] label should be `count: int`"
+	);
+	const active =
+		*(json::get(&result_obj, "activeParameter") as *json::value) as f64;
+	assert(
+		active == 1.0,
+		"activeParameter should be 1 when the cursor is past the first comma"
+	);
 };

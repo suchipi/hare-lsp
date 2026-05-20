@@ -11,6 +11,7 @@
 // driver lives in `server/workspace_index_job.ha`.
 
 use fs;
+use hare::ast;
 use io;
 use os;
 use strings;
@@ -46,6 +47,18 @@ export type workspace_entry = struct {
 	// Used to build snippet placeholders in completion.
 	// @owned
 	param_names: []str,
+	// For FUNCTION-kind entries: the body-stripped signature label
+	// (e.g. "export fn add(a: int, b: int) int"). Empty for non-functions.
+	// Used by cross-file signatureHelp so the client can render a full
+	// SignatureInformation without re-parsing the defining file.
+	// @owned
+	signature: str,
+	// For FUNCTION-kind entries: one "<name>: <type>" label per parameter,
+	// in declaration order. Each entry is a substring of `signature`
+	// (required by the LSP spec for ParameterInformation.label). Empty
+	// for non-functions.
+	// @owned
+	param_labels: []str,
 };
 
 // Default cap on the total number of entries the workspace index will
@@ -110,6 +123,8 @@ fn free_workspace_entry(e: *workspace_entry) void = {
 		free(e.param_names[j]);
 	};
 	free(e.param_names);
+	free(e.signature);
+	free_param_labels(e.param_labels);
 };
 
 // Drops all entries originating from `path`. Used when a file is renamed,
@@ -157,11 +172,41 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 
 	const uri = strings::concat("file://", file_path)!;
 	const module = module_from_path(file_path);
-	for (let i = 0z; i < len(fi.symbols); i += 1) {
-		const sym = &fi.symbols[i];
+	// Walk the parsed decls and the per-file symbols in lockstep. The
+	// symbol list mirrors the decl list with `static assert(...)` decls
+	// skipped (see analysis::index_decl), so we apply the same skip here
+	// to keep the AST decl pointer aligned with `fi.symbols[sym_idx]`.
+	// We need the AST decl so we can render the signature label for
+	// FUNCTION-kind entries at index time, which is what cross-file
+	// signatureHelp consumes.
+	let sym_idx = 0z;
+	for (let i = 0z; i < len(pr.subunit.decls); i += 1) {
+		const d = &pr.subunit.decls[i];
+		let skip = false;
+		match (d.decl) {
+		case ast::assert_expr =>
+			skip = true;
+		case => void;
+		};
+		if (skip) continue;
+		if (sym_idx >= len(fi.symbols)) break;
+		const sym = &fi.symbols[sym_idx];
+		sym_idx += 1;
+
 		let pn: []str = [];
 		for (let j = 0z; j < len(sym.param_names); j += 1) {
 			append(pn, strings::dup(sym.param_names[j])!)!;
+		};
+		let signature = strings::dup("")!;
+		let param_labels: []str = [];
+		if (sym.kind == symbol_kind::FUNCTION) {
+			match (render_function_signature(d)) {
+			case let rendered: str =>
+				free(signature);
+				signature = rendered;
+			case void => void;
+			};
+			param_labels = collect_param_labels(d);
 		};
 		append(idx.entries, workspace_entry {
 			uri = strings::dup(uri)!,
@@ -175,6 +220,8 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 			exported = sym.exported,
 			module = strings::dup(module)!,
 			param_names = pn,
+			signature = signature,
+			param_labels = param_labels,
 		})!;
 	};
 	free(uri);
