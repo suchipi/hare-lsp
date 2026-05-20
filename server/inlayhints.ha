@@ -142,28 +142,36 @@ fn emit_param_hints(
 	arr: *[]json::value,
 ) void = {
 	const data = analysis::bytes(&doc.buf);
+	const limit = len(data);
 	let i = 0z;
-	for (i < len(data); i += 1) {
-		// Look for an identifier followed by '(' at top level. The
-		// 'top level' check is approximated by skipping comments and
-		// strings, which we can't easily do without a token stream;
-		// the hare::lex pass would be more robust. For now use a
-		// simple state machine.
-		const b = data[i];
-		if (!is_word_byte_ih(b)) continue;
-		// Find end of identifier.
+	for (i < limit) {
+		// Skip over regions that aren't real code: line and block
+		// comments, double-quoted strings, char literals, and raw
+		// strings. Without this an identifier-shaped substring inside
+		// text would be treated as a call site (e.g. a function name
+		// mentioned in a doc comment or string literal).
+		const after = analysis::token_skip_noncode(data, i, limit);
+		if (after > i) {
+			i = after;
+			continue;
+		};
+		if (!is_word_byte_ih(data[i])) {
+			i += 1;
+			continue;
+		};
+		// Identifier start. Find end.
 		let j = i;
-		for (j < len(data) && is_word_byte_ih(data[j]); j += 1) void;
+		for (j < limit && is_word_byte_ih(data[j]); j += 1) void;
 		// Must be followed by '('.
-		if (j >= len(data) || data[j] != '(': u8) {
-			i = j - 1;
+		if (j >= limit || data[j] != '(': u8) {
+			i = j;
 			continue;
 		};
 		// Skip function declarations themselves — the `fn name(` form
 		// is not a call site. Without this we'd render parameter hints
 		// on top of the parameter declarations.
 		if (preceded_by_fn(data, i)) {
-			i = j - 1;
+			i = j;
 			continue;
 		};
 		const name = strings::fromutf8(data[i..j])!;
@@ -172,11 +180,11 @@ fn emit_param_hints(
 		case let p: *analysis::symbol =>
 			yield p;
 		case void =>
-			i = j - 1;
+			i = j;
 			continue;
 		};
 		if (sym.kind != analysis::symbol_kind::FUNCTION) {
-			i = j - 1;
+			i = j;
 			continue;
 		};
 		// Find the decl.
@@ -184,7 +192,7 @@ fn emit_param_hints(
 		case let n: size =>
 			yield n;
 		case void =>
-			i = j - 1;
+			i = j;
 			continue;
 		};
 		const params = decl_param_names(&su.decls[decl_idx]);
@@ -193,12 +201,12 @@ fn emit_param_hints(
 		let arg_starts = walk_arg_starts(data, j);
 		defer free(arg_starts);
 		const enc = position_encoding(s);
-		const limit = if (len(arg_starts) < len(params)) {
+		const count = if (len(arg_starts) < len(params)) {
 			yield len(arg_starts);
 		} else {
 			yield len(params);
 		};
-		for (let k = 0z; k < limit; k += 1) {
+		for (let k = 0z; k < count; k += 1) {
 			if (len(params[k]) == 0) continue;
 			const off = arg_starts[k];
 			const pos = analysis::byte_to_position(data, doc.buf.line_index, enc, off);
@@ -290,19 +298,28 @@ fn decl_param_names(d: *ast::decl) []str = {
 };
 
 // Returns the byte offsets of each argument's start within `data`, given
-// `paren_at` is the index of the '(' after the callee.
+// `paren_at` is the index of the '(' after the callee. Strings, char
+// literals, raw strings, and comments are skipped so that punctuation
+// inside them (`,` `(` `)` `[` `]` `{` `}`) doesn't get treated as
+// call-syntax structure.
 //
 // @param data: borrowed
 // @returns: owned
 fn walk_arg_starts(data: []u8, paren_at: size) []size = {
 	let out: []size = [];
-	let i = paren_at + 1;
-	let depth: int = 0;
-	// Skip whitespace before first arg.
-	for (i < len(data) && is_ws(data[i]); i += 1) void;
-	if (i >= len(data) || data[i] == ')': u8) return out;
+	const limit = len(data);
+	// The arg start itself can be any token (including a string or
+	// char literal), so only ws + comments are skipped here.
+	let i = skip_ws_and_comments(data, paren_at + 1, limit);
+	if (i >= limit || data[i] == ')': u8) return out;
 	append(out, i)!;
-	for (i < len(data); i += 1) {
+	let depth: int = 0;
+	for (i < limit) {
+		const after = analysis::token_skip_noncode(data, i, limit);
+		if (after > i) {
+			i = after;
+			continue;
+		};
 		const b = data[i];
 		switch (b) {
 		case '(': u8, '[': u8, '{': u8 =>
@@ -314,16 +331,40 @@ fn walk_arg_starts(data: []u8, paren_at: size) []size = {
 			depth -= 1;
 		case ',': u8 =>
 			if (depth == 0) {
-				let k = i + 1;
-				for (k < len(data) && is_ws(data[k]); k += 1) void;
-				if (k < len(data)) {
+				const k = skip_ws_and_comments(data, i + 1, limit);
+				if (k < limit && data[k] != ')': u8) {
 					append(out, k)!;
 				};
 			};
 		case => void;
 		};
+		i += 1;
 	};
 	return out;
+};
+
+// Returns the index of the next byte at or after `i` that isn't
+// whitespace or a comment. Strings, char literals, and raw strings are
+// NOT skipped — those are valid token starts and may be the start of an
+// argument expression. Bounded by `limit`.
+//
+// @param data: borrowed
+fn skip_ws_and_comments(data: []u8, i: size, limit: size) size = {
+	let j = i;
+	for (j < limit) {
+		if (is_ws(data[j])) {
+			j += 1;
+			continue;
+		};
+		if (data[j] == '/': u8 && j + 1 < limit &&
+				(data[j + 1] == '/': u8 ||
+				data[j + 1] == '*': u8)) {
+			j = analysis::token_skip_noncode(data, j, limit);
+			continue;
+		};
+		break;
+	};
+	return j;
 };
 
 fn is_ws(b: u8) bool = {

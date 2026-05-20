@@ -171,3 +171,58 @@ use strings;
 	const ch = *(json::get(&pos, "character") as *json::value) as f64;
 	assert(line == 0.0 && ch == 0.0, "passthrough must preserve position");
 };
+
+// e2e: parameter-name hints. Verifies the inlay-hint scanner skips
+// over comments/strings end-to-end (matching the unit-test coverage
+// in server/inlayhints_test+test.ha) and lands the hint at the right
+// byte position over the wire.
+@test fn e2e_inlay_hint_emits_param_hints_skipping_noncode() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	// `helper(fake)` inside the block comment must NOT produce a
+	// param hint; only the real `helper("real")` call should.
+	const sample =
+		`fn helper(name: str) void = void;
+fn caller() void = { /* helper(fake) */ helper("real"); };
+`;
+	open_doc(&s, "file:///ih_param.ha", sample);
+
+	const req =
+		`{"jsonrpc":"2.0","id":2220,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///ih_param.ha"},"range":{"start":{"line":0,"character":0},"end":{"line":3,"character":0}}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 2220.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
+	let param_hint_count = 0z;
+	let saw_name_at_real_call = false;
+	for (let i = 0z; i < len(arr); i += 1) {
+		const h = arr[i] as json::object;
+		const kind = *(json::get(&h, "kind") as *json::value) as f64;
+		if (kind != 2.0) continue;
+		param_hint_count += 1;
+		const label = *(json::get(&h, "label") as *json::value) as str;
+		const pos = *(json::get(&h, "position") as *json::value) as json::object;
+		const line = *(json::get(&pos, "line") as *json::value) as f64;
+		const ch = *(json::get(&pos, "character") as *json::value) as f64;
+		// Line 1 character positions of `fn caller() void = { /* helper(fake) */ helper("real"); };`
+		// The real `"real"` starts at column 47.
+		if (label == "name:" && line == 1.0 && ch == 47.0) {
+			saw_name_at_real_call = true;
+		};
+	};
+	assert(
+		param_hint_count == 1,
+		"only the real call should emit a parameter hint (the comment one must be skipped)"
+	);
+	assert(
+		saw_name_at_real_call,
+		"the `name:` hint must land at the opening quote of the real argument"
+	);
+};
