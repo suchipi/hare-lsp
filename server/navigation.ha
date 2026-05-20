@@ -302,26 +302,39 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	const qualifier_peek = analysis::qualifier_prefix_at(data, ident_range.0);
 	defer free(qualifier_peek);
 	if (len(qualifier_peek) == 0) {
-		// Direct: cursor on a TYPE name. Jump to the type's decl. A
-		// non-TYPE hit (global, const, function) falls through to the
-		// binding-walk path below — a global/const's declared type
-		// might still be a named alias we can jump to.
 		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
 		case let p: *analysis::symbol =>
 			if (p.kind == analysis::symbol_kind::TYPE) {
+				// Cursor on a TYPE name declared locally.
 				send_location(s, r.id, uri, p.span, doc);
 				return;
 			};
+			// Non-TYPE local symbol (global, const, function). The
+			// binding walk might still find a named alias for a
+			// global/const declared type. If it doesn't, we return
+			// null directly — falling through to the workspace
+			// lookup would let a same-named TYPE in another file
+			// hijack the response, which is the wrong target for a
+			// locally-bound symbol.
+			if (try_send_type_def_via_binding(s, r, doc, &cache.pr.subunit, ident_str,
+						off)) {
+				return;
+			};
+			send_null_result(s, r.id);
+			return;
 		case void => void;
 		};
-		// Binding walk: cursor on a local variable / parameter / global
-		// whose declared type is a named alias.
+		// Not in the local top-level index. Could still be a function
+		// parameter or a let/const binding — find_local_binding_type
+		// (inside try_send_type_def_via_binding) knows about those.
 		if (try_send_type_def_via_binding(s, r, doc, &cache.pr.subunit, ident_str,
 					off)) {
 			return;
 		};
 	};
-	// Module-aware workspace fallback (TYPE only).
+	// Module-aware workspace fallback (TYPE only). Reached for qualified
+	// references (`foo::Bar`) or bare names that aren't bound anywhere in
+	// the open file.
 	match (workspace_lookup_aware(s, doc, data, ident_range.0, ident_str)) {
 	case let e: *analysis::workspace_entry =>
 		if (e.kind != analysis::symbol_kind::TYPE) {
@@ -336,10 +349,12 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 
 // Resolves a bare identifier at `off` to its declared type and emits a
 // Location pointing at that type's declaration. Returns true if a Location
-// was sent. Returns false (caller falls through to null) when the binding
+// was sent. Returns false — with no response written — when the binding
 // can't be located, its declared type isn't a named alias, or the alias's
-// decl can't be resolved. Only named aliases are followed; pointers,
-// slices, tagged unions, and other compound types are not chased.
+// decl can't be resolved; the caller decides whether to fall through to a
+// workspace lookup or send null. Only named aliases are followed;
+// pointers, slices, tagged unions, and other compound types are not
+// chased.
 //
 // @param s: borrowed
 // @param r: borrowed

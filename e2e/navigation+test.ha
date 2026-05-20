@@ -109,13 +109,13 @@ export fn main() void = {
 
 // Multi-byte coverage required by CLAUDE.md's "Byte / rune offsets"
 // section: the cursor line contains a `"日本語"` string literal before
-// the identifier, so a buggy UTF-16-vs-byte conversion would land on
-// the middle of a multibyte rune instead of `user_id`. The identifier
-// names themselves are multi-character (not single-letter `v`), the
-// other guard CLAUDE.md asks for: single-char names mask the
-// `loc.end.off = start of last rune` semantic. (Block comments `/* */`
-// are avoided here because the upstream Hare lexer aborts when
-// unreading a multi-byte rune past the comment's terminator.)
+// the identifier, so a buggy UTF-16-vs-byte conversion lands the cursor
+// on a different token entirely. The identifier names themselves are
+// multi-character (not single-letter `v`), the other guard CLAUDE.md
+// asks for: single-char names mask the `loc.end.off = start of last
+// rune` semantic. (Block comments `/* */` are avoided here because the
+// upstream Hare lexer aborts when unreading a multi-byte rune past the
+// comment's terminator.)
 @test fn e2e_type_definition_on_variable_handles_multibyte_offsets() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
@@ -123,9 +123,14 @@ export fn main() void = {
 
 	// On the cursor's line `\tlet label = "日本語"; let _ = user_id;`,
 	// bytes 14-22 hold the 9-byte `日本語` block (3 bytes per rune)
-	// while UTF-16 columns 14-16 hold the same three BMP runes (each
-	// 1 unit). So UTF-16 column 30 lands on `e` in `user_id` (byte 36)
-	// — column 30 read as bytes would fall mid-rune in `語`.
+	// while UTF-16 columns 14-16 hold the same three BMP runes (each 1
+	// unit). UTF-16 column 30 lands on `e` in `user_id` (byte 36).
+	// A regression that re-uses UTF-16 columns as raw byte offsets
+	// would instead read byte 30 — the `_` discard ident in
+	// `let _ = user_id` — and `let _ = ...` parses with an empty
+	// `names` slice on the binding, so the binding walk wouldn't match
+	// anything and the test would observe `result:null` rather than a
+	// Location.
 	const sample =
 		`type customer_id = u64;
 
@@ -180,6 +185,65 @@ export fn check(value: my_int) void = {
 	const obj = v as json::object;
 	const result = *(json::get(&obj, "result") as *json::value);
 	check_decl_location(result, text, "file:///td_param.ha", "typeDefinition");
+};
+
+// Pins the rule that a cursor on a *local* non-TYPE symbol (function,
+// global, const) returns null even if a same-short-named TYPE exists in
+// another workspace file. The handler must NOT silently re-target a
+// function call to a workspace alias decl just because their short
+// names coincide; that would be a wrong-target jump for the user.
+@test fn e2e_type_definition_on_local_non_type_does_not_fall_back_to_workspace(
+
+) void = {
+	const root = setup_typedef_no_fallback_workspace();
+	defer cleanup_workspace(root);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init_with_workspace(&s, root);
+	drain_until_indexed_ref(&s);
+
+	// `alias_mod/aliases.ha` (on disk) defines `type shadowed_name = int;`.
+	// The doc we open lives at `main_mod/main.ha`, which exists only as
+	// an open buffer — main_mod is not on disk, so the workspace index
+	// only contains alias_mod's TYPE entry. That is exactly the layout
+	// in which the buggy fall-through would emit the alias's Location.
+	const uri = strings::concat("file://", root, "/main_mod/main.ha")!;
+	defer free(uri);
+	const sample =
+		`export fn shadowed_name() void = void;
+export fn caller() void = shadowed_name();
+`;
+	open_doc(&s, uri, sample);
+
+	// Cursor on `shadowed_name` inside `caller`'s body. Line 1's
+	// `export fn caller() void = ` is 26 ASCII cols; the identifier
+	// starts at col 26, so col 32 lands on `e` in `shadowed_name`.
+	const req =
+		strings::concat(
+			`{"jsonrpc":"2.0","id":1106,"method":"textDocument/typeDefinition","params":{"textDocument":{"uri":"`,
+			uri, `"},"position":{"line":1,"character":32}}}`)!;
+	defer free(req);
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1106.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value);
+	assert(
+		result is json::_null,
+		"typeDefinition on a local non-TYPE symbol must return null, not jump to a same-named workspace TYPE"
+	);
+};
+
+fn setup_typedef_no_fallback_workspace() str = {
+	const files: [](str, str) = [
+		("alias_mod/aliases.ha", "type shadowed_name = int;\n"),
+	];
+	return make_workspace("typedef-no-fallback", files);
 };
 
 // Positive coverage for the working path: cursor on a *type name* (the
