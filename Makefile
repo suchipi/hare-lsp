@@ -52,10 +52,26 @@ HARE_PARSE_PATCHES = hare/parse/parse.ha.patch hare/parse/import.ha.patch
 
 hare/parse/.stamp: $(HARE_PARSE_PATCHES) $(HARE_PARSE_UPSTREAM)
 	@echo "[hare/parse] materializing from $(STDLIB)/hare/parse/"
-	@rm -f hare/parse/*.ha
+	@mkdir -p .tmp
+	@rm -f hare/parse/*.ha hare/parse/*.rej
 	@cp $(STDLIB)/hare/parse/*.ha hare/parse/
-	@patch -p1 -d hare/parse < hare/parse/parse.ha.patch
-	@patch -p1 -d hare/parse < hare/parse/import.ha.patch
+	@# `patch -N` tolerates already-applied hunks but still exits non-zero
+	@# and emits the matching message on stdout. Some stdlib distributions
+	@# (e.g. Alpine's hare=0.26.0.1-r0) carry one or more of these fixes
+	@# upstream already, in which case we let the build continue. Any
+	@# other patch failure is fatal.
+	@for p in $(HARE_PARSE_PATCHES); do \
+		log=".tmp/$$(basename $$p).log"; \
+		if patch -N -p1 -d hare/parse < $$p > $$log 2>&1; then \
+			cat $$log; \
+		elif grep -qE '(previously|already) applied' $$log; then \
+			echo "[hare/parse] $$p already applied upstream; skipping"; \
+			rm -f hare/parse/*.rej; \
+		else \
+			cat $$log >&2; rm -f $$log; exit 1; \
+		fi; \
+		rm -f $$log; \
+	done
 	@touch $@
 
 vendor-hare-parse: hare/parse/.stamp

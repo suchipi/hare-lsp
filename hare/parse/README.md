@@ -29,10 +29,17 @@ cycle, leaving a token in the lexer's single-slot unlex buffer. The
 
 That assertion fires routinely on intermediate editing states (e.g. the
 user has just typed `let x =` and is still typing the right-hand side),
-so an unmodified stdlib parser crashes the LSP. The patch substitutes
-`tok.2` (the failing token's own location). `lex::tokstr` ignores the
-location field for the keyword/symbol tokens used in `want`'s
-alternatives, so the rendered error is identical.
+so an unmodified stdlib parser crashes the LSP. The patch moves the
+`lex::unlex(lexer, tok)` call up above the alternatives loop, which
+primes the unlex slot with `tok` before any `mkloc` call. Subsequent
+`mkloc` invocations then lex `tok` back out of the slot, unlex it
+again, and leave the slot holding `tok` - no clash.
+
+Newer stdlib distributions (e.g. Alpine's `hare=0.26.0.1-r0`) carry
+the same fix upstream. The build wrapper applies the patch with
+`patch -N` and treats "previously applied" output as success, so the
+same `parse.ha.patch` works against both the buggy and the
+already-fixed upstream variant.
 
 ### `import.ha`'s `imports()` `loc.end`
 
@@ -51,13 +58,18 @@ the headers at the top of each file document the change in detail.
 
 ## Refreshing for a new Hare release
 
-Most of the time, just `make clean && make`. If upstream has touched
-either of the patched functions, the offending patch will fail to apply
-and you'll need to regenerate it:
+Most of the time, just `make clean && make`. The recipe tolerates the
+"already applied upstream" case automatically, so a stdlib bump that
+includes one of these fixes won't break the build - it just skips the
+relevant patch.
+
+If upstream has touched a patched function in a way that's neither the
+original buggy form nor the form our patch produces, the patch will
+fail to apply and you'll need to regenerate it:
 
 1. Copy the new upstream file (`$(STDLIB)/hare/parse/<name>.ha`) into a
    scratch dir.
-2. Re-apply the fix and the comments described above.
+2. Re-apply the fix described above.
 3. `diff -u --label a/<name>.ha --label b/<name>.ha orig new > <name>.ha.patch`.
 4. Restore the human-readable header at the top of the patch
    (everything before the first `---` line is documentation and is
@@ -66,7 +78,8 @@ and you'll need to regenerate it:
    the e2e suite exercises the original abort path for `want()` and the
    documentLink-overrun path for `imports()`.
 
-If a future stdlib release fixes either bug upstream, delete the
-corresponding patch (and tighten this README accordingly). If both bugs
-are gone, delete this directory's contents and the Makefile bits that
-materialize it.
+If a future stdlib release fixes both bugs upstream, the build will
+skip both patches silently and the `.ha` files in this directory will
+be byte-identical to `$(STDLIB)/hare/parse/`. At that point you can
+delete the patches, this README, and the Makefile bits that
+materialize the directory.
