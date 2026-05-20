@@ -206,7 +206,6 @@ const VSCODE_INITIALIZE_PARAMS: str =
             "path": "hare",
             "tags": [],
             "diagnostics": {"debounceMs": 300, "enableBuild": true},
-            "format": {"indentStyle": "tab", "indentWidth": 8, "trimFinalNewlines": true, "insertFinalNewline": true},
             "inlayHints": {"parameterNames": true, "inferredTypes": true}
         }
     },

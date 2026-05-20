@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Formatter**: removed `hare.format.indentStyle`, `hare.format.indentWidth`,
+  `hare.format.trimFinalNewlines`, and `hare.format.insertFinalNewline`. The
+  formatter is now fully opinionated and follows Hare's style guide: tab
+  indentation, no trailing whitespace, single trailing newline. The LSP's
+  `textDocument/formatting` and the `harefmt` CLI share the same engine and
+  produce byte-identical output for the same input.
+- **Document sync**: dropped the `textDocument/willSaveWaitUntil` handler
+  and capability. The trim-trailing-whitespace + ensure-final-newline
+  normalization that previously lived there now happens inside the
+  formatter itself, so both editor formatting and the CLI apply it. The
+  `textDocument/willSave` notification is still accepted (no-op).
+
 ## 0.0.1 (initial release)
 
 First release. Implements the full applicable surface of LSP 3.17:

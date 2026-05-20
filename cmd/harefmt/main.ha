@@ -7,9 +7,10 @@
 // file handling, and gofmt-style exit codes (0 clean, 1 changes
 // needed or parse error, 2 usage error).
 //
-// Output is always tab-indented at column 0; Hare's style guide
-// mandates tabs for indentation, so harefmt doesn't expose
-// --indent-* knobs.
+// The formatter is fully opinionated: tab-indented at column 0,
+// trailing whitespace stripped, single trailing newline on non-empty
+// files. Both `harefmt` and the LSP call into `server::format_source`,
+// so they produce byte-identical output for the same input.
 
 use bytes;
 use fmt;

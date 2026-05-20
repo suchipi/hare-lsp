@@ -77,7 +77,6 @@ require("hare-lsp").setup({
   settings = {
     hare = {
       diagnostics = { enableBuild = false },
-      format = { indentStyle = "space", indentWidth = 4 },
     },
   },
   on_attach = function(client, bufnr)

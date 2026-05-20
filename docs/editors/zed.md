@@ -27,7 +27,6 @@ extension or your own), point Zed at `hare-lsp` in
       "settings": {
         "hare": {
           "diagnostics": { "enableBuild": true, "debounceMs": 300 },
-          "format": { "indentStyle": "tab", "indentWidth": 8 },
           "inlayHints": { "parameterNames": true, "inferredTypes": true }
         }
       }

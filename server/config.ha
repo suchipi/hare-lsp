@@ -45,11 +45,6 @@ export type config = struct {
 	// SIGTERM'd and remaining modules are skipped. Defaults to 60000
 	// (60s); set to 0 to disable the deadline (waits indefinitely).
 	build_timeout_ms: u32,
-	// Format options.
-	format_indent_style: indent_style,
-	format_indent_width: u32,
-	format_trim_final_newlines: bool,
-	format_insert_final_newline: bool,
 	// Whether to wrap the hover Ownership line in `<small>` so HTML-aware
 	// clients (VSCode) render it as fine print. Disable for editors that
 	// don't render HTML in hover markdown (Neovim, Helix, Emacs default
@@ -68,12 +63,6 @@ export type config = struct {
 	limits: limits,
 };
 
-// Indent style for formatter output.
-export type indent_style = enum {
-	TAB,
-	SPACE,
-};
-
 // Returns the default configuration (used until the client provides values).
 export fn default_config() config = config {
 	hare_path = strings::dup("hare")!,
@@ -82,10 +71,6 @@ export fn default_config() config = config {
 	diagnostics_debounce_ms = 300,
 	enable_build_diagnostics = true,
 	build_timeout_ms = 60000,
-	format_indent_style = indent_style::TAB,
-	format_indent_width = 8,
-	format_trim_final_newlines = true,
-	format_insert_final_newline = true,
 	hover_use_html = true,
 	inlay_hints_parameter_names = true,
 	inlay_hints_inferred_types = true,
@@ -364,61 +349,6 @@ export fn apply_settings(s: *server, v: json::value) void = {
 					if (f >= 0.0) {
 						s.config.build_timeout_ms = f: u32;
 					};
-				case => void;
-				};
-			case => void;
-			};
-		case => void;
-		};
-	case => void;
-	};
-
-	// "format": {"indentStyle": "tab"|"space", "indentWidth": N,
-	//   "trimFinalNewlines": bool, "insertFinalNewline": bool}
-	match (json::get(&o, "format")) {
-	case let p: *json::value =>
-		match (*p) {
-		case let fobj: json::object =>
-			match (json::get(&fobj, "indentStyle")) {
-			case let fp: *json::value =>
-				match (*fp) {
-				case let str_val: str =>
-					switch (str_val) {
-					case "tab" =>
-						s.config.format_indent_style = indent_style::TAB;
-					case "space" =>
-						s.config.format_indent_style = indent_style::SPACE;
-					case => void;
-					};
-				case => void;
-				};
-			case => void;
-			};
-			match (json::get(&fobj, "indentWidth")) {
-			case let fp: *json::value =>
-				match (*fp) {
-				case let f: f64 =>
-					if (f > 0.0) {
-						s.config.format_indent_width = f: u32;
-					};
-				case => void;
-				};
-			case => void;
-			};
-			match (json::get(&fobj, "trimFinalNewlines")) {
-			case let fp: *json::value =>
-				match (*fp) {
-				case let b: bool =>
-					s.config.format_trim_final_newlines = b;
-				case => void;
-				};
-			case => void;
-			};
-			match (json::get(&fobj, "insertFinalNewline")) {
-			case let fp: *json::value =>
-				match (*fp) {
-				case let b: bool =>
-					s.config.format_insert_final_newline = b;
 				case => void;
 				};
 			case => void;

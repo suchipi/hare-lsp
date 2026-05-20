@@ -44,7 +44,6 @@ Eglot pulls settings via `workspace/configuration`. Configure them via
 (setq-default eglot-workspace-configuration
               '(:hare
                 (:diagnostics (:enableBuild t :debounceMs 300)
-                 :format (:indentStyle "tab" :indentWidth 8)
                  :inlayHints (:parameterNames t :inferredTypes t))))
 ```
 

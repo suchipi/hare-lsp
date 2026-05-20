@@ -20,7 +20,10 @@ Targets LSP 3.17 and Hare v0.26.0.
 
 - Open / close: yes (`openClose: true`).
 - Incremental updates: yes (`change: 2`).
-- `willSave`, `willSaveWaitUntil`: yes.
+- `willSave`: yes (notification only; the server consumes it as a no-op).
+- `willSaveWaitUntil`: not advertised. The formatter is opinionated and does
+  all normalization (trim trailing whitespace, ensure final newline) inside
+  `textDocument/formatting`, so there's nothing to inject at save time.
 - `didSave` with `includeText: true`: yes.
 
 ## Diagnostics
@@ -175,10 +178,6 @@ Highlights:
 | `hare.diagnostics.debounceMs` | `300` | Parse-diagnostics debounce. |
 | `hare.diagnostics.enableBuild` | `true` | Run `hare build` on save. |
 | `hare.diagnostics.buildTimeoutMs` | `60000` | Build wall-clock cap; `0` disables. |
-| `hare.format.indentStyle` | `"tab"` | Tab vs space indent. |
-| `hare.format.indentWidth` | `8` | Spaces per indent when `indentStyle = space`. |
-| `hare.format.trimFinalNewlines` | `true` | Trim trailing whitespace at file end. |
-| `hare.format.insertFinalNewline` | `true` | Ensure trailing newline. |
 | `hare.hover.useHtml` | `true` | Wrap the Ownership line in `<small>` so HTML-aware clients render it as fine print. Disable for editors whose hover renderer doesn't process HTML. |
 | `hare.inlayHints.parameterNames` | `true` | Param-name hints at call sites. |
 | `hare.inlayHints.inferredTypes` | `true` | Inferred-type hints on `let` / `const`. |
