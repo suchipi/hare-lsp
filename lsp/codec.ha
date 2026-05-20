@@ -78,45 +78,6 @@ export fn json_obj(o: *json::object, key: str) (json::object | void) = {
 	};
 };
 
-// Returns the value at obj[key] as an array, or void.
-//
-// @returns: borrowed from o
-// @param o: borrowed
-// @param key: borrowed
-export fn json_arr(o: *json::object, key: str) ([]json::value | void) = {
-	const p = match (json::get(o, key)) {
-	case let p: *json::value =>
-		yield p;
-	case void =>
-		return void;
-	};
-	return match (*p) {
-	case let a: []json::value =>
-		yield a;
-	case =>
-		yield void;
-	};
-};
-
-// Returns the value at obj[key] as a bool, or void.
-//
-// @param o: borrowed
-// @param key: borrowed
-export fn json_bool(o: *json::object, key: str) (bool | void) = {
-	const p = match (json::get(o, key)) {
-	case let p: *json::value =>
-		yield p;
-	case void =>
-		return void;
-	};
-	return match (*p) {
-	case let b: bool =>
-		yield b;
-	case =>
-		yield void;
-	};
-};
-
 // Unwraps `(json::value | void)` (the typical type of a request's
 // `params`) into a json::object, or returns void if it's not an object.
 //
@@ -215,44 +176,6 @@ export fn decode_range(v: json::value) (range | bad_message) = {
 		return "Range.end is required": bad_message;
 	};
 	return range { start = start, end = end };
-};
-
-// --- Location ---------------------------------------------------------
-// @returns: owned
-export fn encode_location(l: location) (json::value | nomem) = {
-	let o = json::newobject();
-	let ok = false;
-	defer if (!ok) json::finish(o);
-	json::set(&o, "uri", l.uri: json::value)?;
-	json::put(&o, "range", encode_range(l.range)?)?;
-	ok = true;
-	return o;
-};
-
-// --- TextDocumentIdentifier ------------------------------------------
-// @returns: owned
-// @param v: borrowed
-export fn decode_text_document_identifier(
-	v: json::value,
-) (text_document_identifier | bad_message) = {
-	const o = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return "TextDocumentIdentifier must be an object": bad_message;
-	};
-	const uri = match (json::get(&o, "uri")) {
-	case let v: *json::value =>
-		yield match (*v) {
-		case let s: str =>
-			yield strings::dup(s)!;
-		case =>
-			return "TextDocumentIdentifier.uri must be a string": bad_message;
-		};
-	case =>
-		return "TextDocumentIdentifier.uri is required": bad_message;
-	};
-	return text_document_identifier { uri = uri };
 };
 
 // --- Diagnostic -------------------------------------------------------
