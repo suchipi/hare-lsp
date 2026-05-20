@@ -182,7 +182,7 @@ fn build_decl_document_symbol(
 		name);
 
 	let item = json::newobject();
-	json::set(&item, "name", strings::dup(name)!: json::value)!;
+	json::set(&item, "name", name: json::value)!;
 	json::put(&item, "kind", kind)!;
 	json::put(&item, "range",
 		encode_byte_range(data, line_index, enc, range_start, range_end))!;
@@ -250,7 +250,7 @@ fn build_type_children(
 			const name_start = v.loc.start.off: size;
 			const name_end = name_start + len(v.name);
 			let item = json::newobject();
-			json::set(&item, "name", strings::dup(v.name)!: json::value)!;
+			json::set(&item, "name", v.name: json::value)!;
 			json::put(&item, "kind", SK_ENUM_MEMBER)!;
 			json::put(&item, "range",
 				encode_byte_range(data, line_index, enc, name_start, name_end))!;
@@ -291,7 +291,7 @@ fn struct_member_children(
 		if (type_end > len(data)) type_end = len(data);
 		if (type_end < name_end) type_end = name_end;
 		let item = json::newobject();
-		json::set(&item, "name", strings::dup(f.name)!: json::value)!;
+		json::set(&item, "name", f.name: json::value)!;
 		json::put(&item, "kind", SK_FIELD)!;
 		json::put(&item, "range",
 			encode_byte_range(data, line_index, enc, name_start, type_end))!;
@@ -433,9 +433,14 @@ fn client_supports_hierarchical_doc_symbol(s: *server) bool = {
 	case void =>
 		return false;
 	};
-	return match (lsp::json_bool(&ds, "hierarchicalDocumentSymbolSupport")) {
-	case let b: bool =>
-		yield b;
+	return match (json::get(&ds, "hierarchicalDocumentSymbolSupport")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let b: bool =>
+			yield b;
+		case =>
+			yield false;
+		};
 	case void =>
 		yield false;
 	};
