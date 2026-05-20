@@ -254,5 +254,8 @@ Highlights:
   and diagnostics per file) are tunable via `hare.limits.*` with no
   additional non-configurable ceiling - raise a limit if your
   workload needs it. Lowering a cap below current usage applies
-  prospectively; the server does not proactively evict. Hitting a
-  cap is logged via `window/logMessage`.
+  prospectively; the server does not proactively evict. The
+  buffer-bytes cap rejects the offending didOpen/didChange and warns
+  via `window/logMessage`; the diagnostics-per-file cap truncates
+  silently and appends a synthesised `diagnostics-truncated`
+  diagnostic at EOF so the client knows there are more.

@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 //
-// Named resource caps. Each field marks a defensive upper bound that the
-// server refuses to cross. The point isn't to handle a malicious client
-// gracefully; it's to fail loudly with a recognisable error rather than
-// silently grow until the OS kills us.
+// Named resource caps. Two distinct shapes:
 //
-// All defaults are conservative enough to cover real workloads (large
-// monorepos, dozens of open buffers, the occasional pathological generated
-// file) and small enough that hitting any cap is a strong signal that
-// something has gone wrong.
+// - `max_total_buffer_bytes` is a defensive memory cap: when an open
+//   or didChange would push the summed buffer bytes past it, the
+//   server refuses the operation and warns via `window/logMessage`.
+//   The point isn't to handle a malicious client gracefully; it's to
+//   fail loudly with a recognisable error rather than silently grow
+//   until the OS kills us. Hitting this cap is a strong signal that
+//   something has gone wrong.
+//
+// - `max_diagnostics_per_file` is a UX truncation: a file with
+//   thousands of parse errors produces a useless diagnostic list and
+//   a huge publishDiagnostics payload, so [[parse_diagnostics_for_doc]]
+//   truncates and appends a single synthesised "diagnostics-truncated"
+//   diagnostic at EOF. Hitting it is normal for pathological inputs,
+//   not an error condition.
 //
 // Caps are configurable at runtime via `hare.limits.*` settings (see
 // [[apply_settings]]); whatever the user sets is what the server
