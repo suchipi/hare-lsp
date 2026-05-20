@@ -31,6 +31,50 @@ check-deps:
 		echo ""; \
 		exit 1; \
 	fi
+	@if [ ! -f "$(STDLIB)/hare/parse/parse.ha" ]; then \
+		echo "ERROR: Hare stdlib not found at $(STDLIB)"; \
+		echo ""; \
+		echo "The hare/parse/ module is materialized from \$$(STDLIB)/hare/parse/"; \
+		echo "at build time. Set STDLIB on the command line if it lives elsewhere."; \
+		echo ""; \
+		exit 1; \
+	fi
+
+# hare::parse vendoring: the stdlib hare::parse module is copied into
+# hare/parse/ at build time and patched with the *.patch files in
+# hare/parse/ to fix two bugs that affect the LSP (see each patch's
+# header for details). Only the patches and README are tracked in git;
+# everything else in hare/parse/ is generated. HAREPATH puts $(PWD)
+# before $(STDLIB), so the materialized copy shadows the upstream
+# module.
+HARE_PARSE_UPSTREAM = $(wildcard $(STDLIB)/hare/parse/*.ha)
+HARE_PARSE_PATCHES = hare/parse/parse.ha.patch hare/parse/import.ha.patch
+
+hare/parse/.stamp: $(HARE_PARSE_PATCHES) $(HARE_PARSE_UPSTREAM)
+	@echo "[hare/parse] materializing from $(STDLIB)/hare/parse/"
+	@mkdir -p .tmp
+	@rm -f hare/parse/*.ha hare/parse/*.rej
+	@cp $(STDLIB)/hare/parse/*.ha hare/parse/
+	@# `patch -N` tolerates already-applied hunks but still exits non-zero
+	@# and emits the matching message on stdout. Some stdlib distributions
+	@# (e.g. Alpine's hare=0.26.0.1-r0) carry one or more of these fixes
+	@# upstream already, in which case we let the build continue. Any
+	@# other patch failure is fatal.
+	@for p in $(HARE_PARSE_PATCHES); do \
+		log=".tmp/$$(basename $$p).log"; \
+		if patch -N -p1 -d hare/parse < $$p > $$log 2>&1; then \
+			cat $$log; \
+		elif grep -qE '(previously|already) applied' $$log; then \
+			echo "[hare/parse] $$p already applied upstream; skipping"; \
+			rm -f hare/parse/*.rej; \
+		else \
+			cat $$log >&2; rm -f $$log; exit 1; \
+		fi; \
+		rm -f $$log; \
+	done
+	@touch $@
+
+vendor-hare-parse: hare/parse/.stamp
 
 # Sources: `gitignore/` is the standalone (vendorable) pattern matcher
 # used by harefmt, and `format` etc. are imported by both binaries via
@@ -42,11 +86,11 @@ HA_SOURCES = $(shell find cmd lsp server analysis hare gitignore -name '*.ha' 2>
 # `hare test` (no path), so its sources affect .tmp/all-tests.
 HA_TEST_SOURCES = $(HA_SOURCES) $(shell find e2e -name '*.ha' 2>/dev/null)
 
-hare-lsp: $(HA_SOURCES)
+hare-lsp: hare/parse/.stamp $(HA_SOURCES)
 	mkdir -p .cache
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) build $(HAREFLAGS) -o hare-lsp ./cmd/hare_lsp
 
-harefmt: $(HA_SOURCES)
+harefmt: hare/parse/.stamp $(HA_SOURCES)
 	mkdir -p .cache
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) build $(HAREFLAGS) -o harefmt ./cmd/harefmt
 
@@ -59,7 +103,7 @@ harefmt: $(HA_SOURCES)
 #
 # .tmp/all-tests covers every auto-discovered module: analysis, server,
 # lsp, gitignore, e2e, cmd::harefmt, and cmd::hare_lsp.
-.tmp/all-tests: $(HA_TEST_SOURCES)
+.tmp/all-tests: hare/parse/.stamp $(HA_TEST_SOURCES)
 	mkdir -p .cache .tmp
 	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS) -o $@
 
@@ -110,6 +154,7 @@ clean:
 	rm -rf hare-lsp harefmt .cache
 	rm -rf editors/vscode/dist editors/vscode/node_modules editors/vscode/*.vsix
 	rm -f .tmp/all-tests .tmp/test-shard-*.log
+	rm -f hare/parse/*.ha hare/parse/.stamp
 
 # Recovers from a wedged build. Symptoms it addresses:
 #  - `make` appears to hang at e.g. "130/133 tasks completed" for many
@@ -171,4 +216,4 @@ vscode-install: vscode-extension
 vscode-uninstall:
 	code --uninstall-extension local.hare-lsp
 
-.PHONY: all check-deps test test-serial clean unstuck install uninstall vscode-extension vscode-test vscode-install vscode-uninstall
+.PHONY: all check-deps vendor-hare-parse test test-serial clean unstuck install uninstall vscode-extension vscode-test vscode-install vscode-uninstall

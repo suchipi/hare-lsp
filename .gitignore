@@ -7,3 +7,8 @@ editors/vscode/dist/
 editors/vscode/out/
 editors/vscode/*.vsix
 /.claude/*.lock
+
+# Materialized from $(STDLIB)/hare/parse/ at build time; only the patch
+# and README are tracked. See hare/parse/README.md.
+/hare/parse/*.ha
+/hare/parse/.stamp

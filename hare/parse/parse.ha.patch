@@ -1,0 +1,52 @@
+hare-lsp's overlay patch for stdlib hare::parse::parse.ha.
+
+Applied by the Makefile's hare/parse/.stamp target on top of a fresh
+copy of $(STDLIB)/hare/parse/parse.ha. The build wrapper tolerates
+"already applied" results (`patch -N`) so the same patch works on
+Hare stdlib versions that have since adopted the same fix upstream
+(e.g. Alpine's hare=0.26.0.1-r0).
+
+What it changes:
+  Move `lex::unlex(lexer, tok);` from after the alternatives loop in
+  want() to before it. This is the upstream fix; we carry the same
+  diff here because the version of stdlib hare-lsp targets does not
+  ship it yet.
+
+Why:
+  Stdlib uses mkloc(lexer) inside the loop and in the trailing
+  syntaxerr() call. mkloc does an internal lex+unlex cycle, leaving a
+  token in the lexer's single-slot unlex buffer. The lex::unlex(lexer,
+  tok) call further down then asserts with "attempted to unlex more
+  than one token" and aborts the process. That fires routinely on
+  intermediate editing states (e.g. the user has just typed `let x =`
+  and is still typing the right-hand side), so an unmodified stdlib
+  parser crashes the LSP.
+
+  Moving the unlex above the loop primes the unlex slot with `tok`
+  before any mkloc call. Subsequent mkloc invocations then lex `tok`
+  back out of the slot, unlex it again, and leave the slot holding
+  `tok` - no clash.
+
+To refresh for a new Hare release: same procedure as documented in
+hare/parse/README.md.
+
+Apply with: `patch -N -p1 -d hare/parse < hare/parse/parse.ha.patch`
+
+--- a/parse.ha
++++ b/parse.ha
+@@ -40,6 +40,7 @@
+
+ 	let buf = memio::dynamic();
+ 	defer io::close(&buf)!;
++	lex::unlex(lexer, tok);
+ 	for (let i = 0z; i < len(want); i += 1) {
+ 		const tstr = if (want[i] == ltok::NAME) "name"
+ 			else lex::tokstr((want[i], void, mkloc(lexer)));
+@@ -48,7 +49,6 @@
+ 			fmt::fprint(&buf, ", ")!;
+ 		};
+ 	};
+-	lex::unlex(lexer, tok);
+ 	return syntaxerr(mkloc(lexer), "Unexpected '{}', was expecting {}",
+ 		lex::tokstr(tok), memio::string(&buf)!);
+ };
