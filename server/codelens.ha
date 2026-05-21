@@ -19,7 +19,7 @@ use strings;
 
 // @param s: borrowed
 export fn handle_code_lens(s: *server, r: lsp::request) void = {
-	const uri = match (uri_from_cl(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -48,7 +48,7 @@ export fn handle_code_lens(s: *server, r: lsp::request) void = {
 			sym.span.start.off: size);
 		const ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
 			sym.span.end.off: size);
-		json::put(&lens, "range", encode_range_cl(sp, ep))!;
+		json::put(&lens, "range", encode_range_pos(sp, ep))!;
 		// Carry a `data` blob so resolve knows what to fill in.
 		// We also stash the identifier's own position so the resolve
 		// step can hand it to editor.action.showReferences — using the
@@ -253,8 +253,9 @@ fn count_token_occurrences(data: []u8, name: str) size = {
 	let count = 0z;
 	let i = 0z;
 	for (i + len(t) <= len(data); i += 1) {
-		if (i > 0 && is_word_byte_cl(data[i - 1])) continue;
-		if (i + len(t) < len(data) && is_word_byte_cl(data[i + len(t)])) continue;
+		if (i > 0 && analysis::is_ident_byte(data[i - 1])) continue;
+		if (i + len(t) < len(data) &&
+				analysis::is_ident_byte(data[i + len(t)])) continue;
 		let ok = true;
 		for (let j = 0z; j < len(t); j += 1) {
 			if (data[i + j] != t[j]) {
@@ -268,13 +269,6 @@ fn count_token_occurrences(data: []u8, name: str) size = {
 		};
 	};
 	return count;
-};
-
-fn is_word_byte_cl(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '_': u8;
 };
 
 // A @test attribute paired with the function name immediately
@@ -382,62 +376,6 @@ fn fmt_size_cl(n: size) str = {
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
 };
 
-// @returns: owned
-fn encode_range_cl(
-	start: analysis::position,
-	end: analysis::position,
-) json::value = {
-	let r = json::newobject();
-	let s_obj = json::newobject();
-	json::put(&s_obj, "line", start.line: f64)!;
-	json::put(&s_obj, "character", start.character: f64)!;
-	let e_obj = json::newobject();
-	json::put(&e_obj, "line", end.line: f64)!;
-	json::put(&e_obj, "character", end.character: f64)!;
-	json::put(&r, "start", s_obj)!;
-	json::put(&r, "end", e_obj)!;
-	return r;
-};
-
-// @param p: borrowed
-// @returns: borrowed from p
-fn uri_from_cl(p: (json::value | void)) (str | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		match (*p) {
-		case let s: str =>
-			return s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-};
-
 // @param p: borrowed
 fn params_obj_cl(
 	p: (json::value | void),
@@ -468,8 +406,9 @@ fn find_ident_within(
 			};
 		};
 		if (!ok) continue;
-		if (i > span_start && is_word_byte_cl(data[i - 1])) continue;
-		if (i + len(target) < end && is_word_byte_cl(data[i + len(target)])) continue;
+		if (i > span_start && analysis::is_ident_byte(data[i - 1])) continue;
+		if (i + len(target) < end &&
+				analysis::is_ident_byte(data[i + len(target)])) continue;
 		return i;
 	};
 	return span_start;

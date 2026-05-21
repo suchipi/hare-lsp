@@ -384,7 +384,7 @@ fn token_preceded_by_keyword(data: []u8, pos: size, keyword: str) bool = {
 		return false;
 	};
 	if (i == len(keyword)) return true;
-	return !is_ident_byte(data[i - len(keyword) - 1]);
+	return !analysis::is_ident_byte(data[i - len(keyword) - 1]);
 };
 
 // `..` inside `[` is a slice; inside `(...)` after `for` is the
@@ -449,9 +449,9 @@ fn classify_paren_ellipsis(data: []u8, op_start: size) op_role = {
 		const b = data[i - 1];
 		if (b != ' ': u8 && b != '\t': u8) break;
 	};
-	if (i == 0 || !is_ident_byte(data[i - 1])) return op_role::SPREAD;
+	if (i == 0 || !analysis::is_ident_byte(data[i - 1])) return op_role::SPREAD;
 	for (i > 0; i -= 1) {
-		if (!is_ident_byte(data[i - 1])) break;
+		if (!analysis::is_ident_byte(data[i - 1])) break;
 	};
 	for (i > 0; i -= 1) {
 		const b = data[i - 1];
@@ -495,11 +495,11 @@ fn classify_lbrace_role(data: []u8, brace_pos: size) op_role = {
 		if (b == '{': u8) return op_role::COMPOUND_BLOCK;
 		if (b == ',': u8) return op_role::COMPOUND_BLOCK;
 		if (b == ')': u8) return classify_lbrace_after_rparen(data, i);
-		if (is_ident_byte(b)) {
+		if (analysis::is_ident_byte(b)) {
 			let end = i + 1;
 			let start = i;
 			for (start > 0; start -= 1) {
-				if (!is_ident_byte(data[start - 1])) break;
+				if (!analysis::is_ident_byte(data[start - 1])) break;
 			};
 			const word = strings::fromutf8(data[start..end])!;
 			switch (word) {
@@ -518,7 +518,7 @@ fn classify_lbrace_role(data: []u8, brace_pos: size) op_role = {
 				};
 				if (j >= 4) {
 					const prev_word = strings::fromutf8(data[j - 4..j])!;
-					const is_at_start = j == 4 || !is_ident_byte(data[j - 5]);
+					const is_at_start = j == 4 || !analysis::is_ident_byte(data[j - 5]);
 					if (prev_word == "enum" && is_at_start) {
 						return op_role::ENUM_BODY;
 					};
@@ -557,11 +557,12 @@ fn classify_lbrace_after_rparen(data: []u8, rparen_pos: size) op_role = {
 		const b = data[j - 1];
 		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
 	};
-	if (j == 0 || !is_ident_byte(data[j - 1])) return op_role::COMPOUND_BLOCK;
+	if (j == 0 ||
+			!analysis::is_ident_byte(data[j - 1])) return op_role::COMPOUND_BLOCK;
 	let end = j;
 	let start = j;
 	for (start > 0; start -= 1) {
-		if (!is_ident_byte(data[start - 1])) break;
+		if (!analysis::is_ident_byte(data[start - 1])) break;
 	};
 	const word = strings::fromutf8(data[start..end])!;
 	switch (word) {
@@ -672,11 +673,11 @@ fn classify_lparen_role(data: []u8, paren_pos: size) op_role = {
 		return op_role::EXPR_PARENS;
 	};
 	const prev = data[i - 1];
-	if (is_ident_byte(prev)) {
+	if (analysis::is_ident_byte(prev)) {
 		let end = i;
 		let start = i;
 		for (start > 0; start -= 1) {
-			if (!is_ident_byte(data[start - 1])) break;
+			if (!analysis::is_ident_byte(data[start - 1])) break;
 		};
 		const word = strings::fromutf8(data[start..end])!;
 		switch (word) {
@@ -700,7 +701,7 @@ fn classify_lparen_role(data: []u8, paren_pos: size) op_role = {
 			};
 			if (j >= 2) {
 				const prev_word = strings::fromutf8(data[j - 2..j])!;
-				const at_start = j == 2 || !is_ident_byte(data[j - 3]);
+				const at_start = j == 2 || !analysis::is_ident_byte(data[j - 3]);
 				if (prev_word == "fn" && at_start) {
 					return op_role::PARAM_LIST;
 				};
@@ -800,18 +801,18 @@ fn classify_colon_role(data: []u8, op_start: size) op_role = {
 // @param data: borrowed
 fn is_label_colon(data: []u8, op_start: size) bool = {
 	if (op_start + 1 >= len(data)) return false;
-	if (!is_ident_byte(data[op_start + 1])) return false;
+	if (!analysis::is_ident_byte(data[op_start + 1])) return false;
 	let i = op_start;
 	for (i > 0) {
 		i -= 1;
 		const b = data[i];
 		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8) continue;
 		if (b == '{': u8) return true;
-		if (!is_ident_byte(b)) return false;
+		if (!analysis::is_ident_byte(b)) return false;
 		let end = i + 1;
 		let start = i;
 		for (start > 0; start -= 1) {
-			if (!is_ident_byte(data[start - 1])) break;
+			if (!analysis::is_ident_byte(data[start - 1])) break;
 		};
 		const word = strings::fromutf8(data[start..end])!;
 		switch (word) {
@@ -861,9 +862,9 @@ fn classify_colon_by_ident_context(data: []u8, op_start: size) op_role = {
 		const b = data[i - 1];
 		if (b != ' ': u8 && b != '\t': u8) break;
 	};
-	if (i == 0 || !is_ident_byte(data[i - 1])) return op_role::TYPE;
+	if (i == 0 || !analysis::is_ident_byte(data[i - 1])) return op_role::TYPE;
 	for (i > 0; i -= 1) {
-		if (!is_ident_byte(data[i - 1])) break;
+		if (!analysis::is_ident_byte(data[i - 1])) break;
 	};
 	for (i > 0; i -= 1) {
 		const b = data[i - 1];
@@ -890,11 +891,11 @@ fn classify_colon_by_ident_context(data: []u8, op_start: size) op_role = {
 		return op_role::TYPE;
 	case => void;
 	};
-	if (!is_ident_byte(b)) return op_role::TYPE;
+	if (!analysis::is_ident_byte(b)) return op_role::TYPE;
 	let kw_end = i;
 	let kw_start = i;
 	for (kw_start > 0; kw_start -= 1) {
-		if (!is_ident_byte(data[kw_start - 1])) break;
+		if (!analysis::is_ident_byte(data[kw_start - 1])) break;
 	};
 	const word = strings::fromutf8(data[kw_start..kw_end])!;
 	switch (word) {
@@ -920,11 +921,11 @@ fn is_value_end_before(data: []u8, op_start: size) bool = {
 		if (b == ' ': u8 || b == '\t': u8) continue;
 		if (b == '\n': u8 || b == '\r': u8) return false;
 		if (!is_value_end_byte(b)) return false;
-		if (is_ident_byte(b)) {
+		if (analysis::is_ident_byte(b)) {
 			let word_end = i + 1;
 			let word_start = i;
 			for (word_start > 0; word_start -= 1) {
-				if (!is_ident_byte(data[word_start - 1])) break;
+				if (!analysis::is_ident_byte(data[word_start - 1])) break;
 			};
 			const word = strings::fromutf8(data[word_start..word_end])!;
 			if (is_keyword_not_value(word)) return false;
@@ -1005,21 +1006,14 @@ fn prev_token_is_type_marker(data: []u8, pos: size) bool = {
 	};
 	if (i == 0) return false;
 	// Trailing identifier-shaped token: read it backwards.
-	if (!is_ident_byte(data[i])) return false;
+	if (!analysis::is_ident_byte(data[i])) return false;
 	let kw_end = i + 1;
 	let kw_start = i;
 	for (kw_start > 0; kw_start -= 1) {
-		if (!is_ident_byte(data[kw_start - 1])) break;
+		if (!analysis::is_ident_byte(data[kw_start - 1])) break;
 	};
 	const word = strings::fromutf8(data[kw_start..kw_end])!;
 	return word == "as" || word == "is" || word == "nullable";
-};
-
-fn is_ident_byte(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '_': u8;
 };
 
 // Given an `=` at `eq_pos`, returns true if it introduces the RHS of a
@@ -1035,7 +1029,7 @@ fn is_type_alias_eq(data: []u8, eq_pos: size) bool = {
 		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
 	};
 	for (i > 0; i -= 1) {
-		if (!is_ident_byte(data[i - 1])) break;
+		if (!analysis::is_ident_byte(data[i - 1])) break;
 	};
 	for (i > 0; i -= 1) {
 		const b = data[i - 1];
@@ -1044,7 +1038,7 @@ fn is_type_alias_eq(data: []u8, eq_pos: size) bool = {
 	if (i < 4) return false;
 	if (strings::fromutf8(data[i - 4..i])! != "type") return false;
 	if (i - 4 == 0) return true;
-	return !is_ident_byte(data[i - 5]);
+	return !analysis::is_ident_byte(data[i - 5]);
 };
 
 // Forward scan from byte 0 to `target`, tracking paren depth while

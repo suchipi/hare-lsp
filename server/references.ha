@@ -34,11 +34,11 @@ use strings;
 //
 // @param s: borrowed
 export fn handle_references(s: *server, r: lsp::request) void = {
-	const (uri, pos) = match (parse_pos(r.params)) {
+	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
-		send_empty_array_local(s, r.id);
+		send_empty_array(s, r.id);
 		return;
 	};
 
@@ -48,7 +48,7 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 	case let p: *document =>
 		yield p;
 	case null =>
-		send_empty_array_local(s, r.id);
+		send_empty_array(s, r.id);
 		return;
 	};
 	const data = analysis::bytes(&doc.buf);
@@ -59,7 +59,7 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 	case let r: (size, size) =>
 		yield r;
 	case void =>
-		send_empty_array_local(s, r.id);
+		send_empty_array(s, r.id);
 		return;
 	};
 	const target = strings::fromutf8(data[ident_range.0..ident_range.1])!;
@@ -445,7 +445,7 @@ fn build_location(
 //
 // @param s: borrowed
 export fn handle_prepare_rename(s: *server, r: lsp::request) void = {
-	const (uri, pos) = match (parse_pos(r.params)) {
+	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
@@ -510,7 +510,7 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 		return;
 	};
 
-	const (uri, pos) = match (parse_pos(r.params)) {
+	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
@@ -773,66 +773,4 @@ fn is_ident_first(b: u8) bool = {
 	if (b >= 'a': u8 && b <= 'z': u8) return true;
 	if (b >= 'A': u8 && b <= 'Z': u8) return true;
 	return b == '_': u8;
-};
-
-// @param p: borrowed
-fn parse_pos(p: (json::value | void)) ((str, lsp::position) | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const uri = match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let s: str =>
-			yield s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const pos = match (json::get(&obj, "position")) {
-	case let p: *json::value =>
-		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position =>
-			yield pos;
-		case lsp::bad_message =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	return (uri, pos);
-};
-
-// @param s: borrowed
-// @param id: borrowed
-fn send_empty_array_local(s: *server, id: lsp::id) void = {
-	const arr: []json::value = [];
-	const v: json::value = arr;
-	defer json::finish(v);
-	match (lsp::encode_response_result(s.out, id, v)) {
-	case size => void;
-	case => void;
-	};
 };

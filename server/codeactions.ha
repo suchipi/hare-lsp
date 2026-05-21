@@ -486,8 +486,8 @@ fn find_unused_imports(data: []u8, su: *ast::subunit) []size = {
 	let ns_names: []str = [];
 	let direct_names: []str = [];
 	defer {
-		strings_finish_all(ns_names);
-		strings_finish_all(direct_names);
+		analysis::free_str_slice(ns_names);
+		analysis::free_str_slice(direct_names);
 	};
 	collect_body_path_heads(data, scan_start, &ns_names, &direct_names);
 
@@ -594,14 +594,6 @@ fn str_in_list(list: []str, s: str) bool = {
 		if (list[i] == s) return true;
 	};
 	return false;
-};
-
-// @param list: owned
-fn strings_finish_all(list: []str) void = {
-	for (let i = 0z; i < len(list); i += 1) {
-		free(list[i]);
-	};
-	free(list);
 };
 
 // Title to show in the editor's code-action menu. The introduced name

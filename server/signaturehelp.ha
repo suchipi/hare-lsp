@@ -17,7 +17,7 @@ use strings;
 
 // @param s: borrowed
 export fn handle_signature_help(s: *server, r: lsp::request) void = {
-	const (uri, pos) = match (parse_pos_sh(r.params)) {
+	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
@@ -46,7 +46,7 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 
 	// Resolve the callee in the file's index, then in the workspace index.
 	const cache = parse_of(doc);
-	const decl_idx = match (find_decl_by_short_name(&cache.pr.subunit,
+	const decl_idx = match (find_decl_by_name(&cache.pr.subunit,
 		ctx.callee_name)) {
 	case let i: size =>
 		yield i;
@@ -199,7 +199,7 @@ fn find_call_context(data: []u8, off: size) (call_context | void) = {
 	let ns = e;
 	for (ns > 0; ns -= 1) {
 		const cb = data[ns - 1];
-		if (!is_ident_byte_sh(cb)) break;
+		if (!analysis::is_ident_byte(cb)) break;
 	};
 	if (ns == e) return void;
 	const name = strings::dup(strings::fromutf8(data[ns..e])!)!;
@@ -207,89 +207,4 @@ fn find_call_context(data: []u8, off: size) (call_context | void) = {
 		callee_name = name,
 		active_param = active,
 	};
-};
-
-fn is_ident_byte_sh(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '_': u8;
-};
-
-// @param su: borrowed
-// @param name: borrowed
-fn find_decl_by_short_name(su: *ast::subunit, name: str) (size | void) = {
-	for (let i = 0z; i < len(su.decls); i += 1) {
-		const id = decl_ident_sh(&su.decls[i]);
-		if (len(id) > 0 && id[len(id) - 1] == name) return i;
-	};
-	return void;
-};
-
-// @param d: borrowed
-// @returns: borrowed from d
-fn decl_ident_sh(d: *ast::decl) ast::ident = {
-	match (d.decl) {
-	case let f: ast::decl_func =>
-		return f.ident;
-	case let t: ast::decl_type =>
-		return t.ident;
-	case let g: ast::decl_global =>
-		return g.ident;
-	case let c: ast::decl_const =>
-		return c.ident;
-	case ast::assert_expr =>
-		return [];
-	};
-};
-
-// @param p: borrowed
-// @returns: borrowed from p
-fn parse_pos_sh(p: (json::value | void)) ((str, lsp::position) | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const uri = match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let s: str =>
-			yield s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const pos = match (json::get(&obj, "position")) {
-	case let p: *json::value =>
-		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position =>
-			yield pos;
-		case lsp::bad_message =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	return (uri, pos);
 };

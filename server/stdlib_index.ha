@@ -11,7 +11,6 @@
 // references hit the existing index without re-walking the filesystem.
 
 use analysis;
-use fs;
 use os;
 use strings;
 
@@ -127,16 +126,6 @@ fn module_subpath(module: str) str = {
 		append(out, bytes[i])!;
 	};
 	return strings::fromutf8(out)!;
-};
-
-// @param path: borrowed
-fn is_directory(path: str) bool = {
-	match (os::stat(path)) {
-	case let st: fs::filestat =>
-		return fs::isdir(st.mode);
-	case =>
-		return false;
-	};
 };
 
 // Returns the fully-qualified module name (e.g. "encoding::json", "os")

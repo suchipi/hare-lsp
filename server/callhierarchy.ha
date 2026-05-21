@@ -20,7 +20,7 @@ use strings;
 //
 // @param s: borrowed
 export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
-	const (uri, pos) = match (parse_pos_local(r.params)) {
+	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
@@ -283,7 +283,7 @@ export fn handle_outgoing_calls(s: *server, r: lsp::request) void = {
 				position_encoding(s), abs);
 			const ep = analysis::byte_to_position(data, doc.buf.line_index,
 				position_encoding(s), abs + len(t));
-			append(from_ranges, encode_range_local(sp, ep))!;
+			append(from_ranges, encode_range_pos(sp, ep))!;
 			i += len(t) - 1;
 		};
 
@@ -354,7 +354,7 @@ fn build_call_hierarchy_item(
 	const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
 		span_start);
 	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, span_end);
-	json::put(&item, "range", encode_range_local(sp, ep))!;
+	json::put(&item, "range", encode_range_pos(sp, ep))!;
 	// LSP: selectionRange is "the range to be selected and revealed
 	// when this symbol is being picked, e.g. the name of a function".
 	// Search the decl body for the identifier so the editor lands the
@@ -367,7 +367,7 @@ fn build_call_hierarchy_item(
 		ident_off);
 	const sel_ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
 		ident_end);
-	json::put(&item, "selectionRange", encode_range_local(sel_sp, sel_ep))!;
+	json::put(&item, "selectionRange", encode_range_pos(sel_sp, sel_ep))!;
 	return item;
 };
 
@@ -531,7 +531,7 @@ fn scan_calls_static(
 			analysis::encoding::UTF16, i + len(t));
 		let loc = json::newobject();
 		json::set(&loc, "uri", uri: json::value)!;
-		json::put(&loc, "range", encode_range_local(start_pos, end_pos))!;
+		json::put(&loc, "range", encode_range_pos(start_pos, end_pos))!;
 		append(arr, loc: json::value)!;
 		i += len(t) - 1;
 	};
@@ -618,70 +618,4 @@ fn zero_range() json::value = {
 	json::put(&r, "start", z)!;
 	json::put(&r, "end", z2)!;
 	return r;
-};
-
-fn encode_range_local(
-	start: analysis::position,
-	end: analysis::position,
-) json::value = {
-	let r = json::newobject();
-	let s_obj = json::newobject();
-	json::put(&s_obj, "line", start.line: f64)!;
-	json::put(&s_obj, "character", start.character: f64)!;
-	let e_obj = json::newobject();
-	json::put(&e_obj, "line", end.line: f64)!;
-	json::put(&e_obj, "character", end.character: f64)!;
-	json::put(&r, "start", s_obj)!;
-	json::put(&r, "end", e_obj)!;
-	return r;
-};
-
-// @param p: borrowed
-fn parse_pos_local(p: (json::value | void)) ((str, lsp::position) | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const uri = match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let s: str =>
-			yield s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const pos = match (json::get(&obj, "position")) {
-	case let p: *json::value =>
-		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position =>
-			yield pos;
-		case lsp::bad_message =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	return (uri, pos);
 };
