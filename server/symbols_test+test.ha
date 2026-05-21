@@ -150,6 +150,100 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	assert(len(result) == 3);
 };
 
+// When the client advertises hierarchicalDocumentSymbolSupport, the
+// server returns DocumentSymbol[] with children populated for structs
+// and enums. The unit-level fixture pins the structural shape without
+// the cost of spinning up a fresh process per assertion (the e2e suite
+// catches wire-format regressions).
+@test fn document_symbol_hierarchical_nests_struct_fields() void = {
+	let (s, scan, in_buf, out) = sym_test_server();
+	defer sym_test_cleanup(&s, scan, in_buf, out);
+	// Synthesize the capability we'd normally receive on initialize.
+	const caps_json =
+		`{"textDocument":{"documentSymbol":{"hierarchicalDocumentSymbolSupport":true}}}`;
+	s.client_capabilities = json::loadstr(caps_json)!;
+
+	sym_open(&s, "file:///hier.ha", "type point = struct { x: int, y: int };\\n");
+
+	const params = `{"textDocument":{"uri":"file:///hier.ha"}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 100.0,
+		method = strings::dup("textDocument/documentSymbol")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_document_symbol(&s, r);
+	const v = sym_skip_to_response(out, 100.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	assert(
+		len(result) == 1,
+		"hierarchical response must contain the one type decl"
+	);
+	const top = result[0] as json::object;
+	const top_name = *(json::get(&top, "name") as *json::value) as str;
+	assert(top_name == "point", "top-level entry must be the struct's name");
+	// SymbolKind 23 = Struct. A regression that reverted to the flat
+	// shape (which also reports 23 for any TYPE-kind symbol) would
+	// still pass the kind check, but the children check below would
+	// catch it.
+	const top_kind = *(json::get(&top, "kind") as *json::value) as f64;
+	assert(top_kind == 23.0, "type-decl-of-struct must be SymbolKind.Struct (23)");
+	const children =
+		*(json::get(&top, "children") as *json::value) as []json::value;
+	assert(len(children) == 2, "struct point must expose two field children");
+	const x = children[0] as json::object;
+	const x_name = *(json::get(&x, "name") as *json::value) as str;
+	const x_kind = *(json::get(&x, "kind") as *json::value) as f64;
+	assert(x_name == "x", "first child must be field x");
+	assert(x_kind == 8.0, "struct field must be SymbolKind.Field (8)");
+};
+
+// When the client omits the hierarchical capability the server must
+// keep returning the legacy SymbolInformation[] shape so older editors
+// (and headless probes) don't regress.
+@test fn document_symbol_legacy_shape_when_capability_absent() void = {
+	let (s, scan, in_buf, out) = sym_test_server();
+	defer sym_test_cleanup(&s, scan, in_buf, out);
+
+	// No client_capabilities set — defaults to void, which the
+	// capability probe treats as "flat-only".
+	sym_open(&s, "file:///legacy.ha",
+		"type point = struct { x: int, y: int };\\n");
+
+	const params = `{"textDocument":{"uri":"file:///legacy.ha"}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 101.0,
+		method = strings::dup("textDocument/documentSymbol")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_document_symbol(&s, r);
+	const v = sym_skip_to_response(out, 101.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+	assert(
+		len(result) == 1,
+		"legacy response must contain one entry per top-level decl"
+	);
+	const item = result[0] as json::object;
+	// Legacy shape carries `location`, not `range`/`selectionRange`/`children`.
+	assert(
+		json::get(&item, "location") is *json::value,
+		"legacy SymbolInformation must carry a `location` field"
+	);
+	assert(
+		json::get(&item, "children") is void,
+		"legacy SymbolInformation must not carry a `children` field"
+	);
+};
+
 @test fn folding_range_returns_decls() void = {
 	let (s, scan, in_buf, out) = sym_test_server();
 	defer sym_test_cleanup(&s, scan, in_buf, out);

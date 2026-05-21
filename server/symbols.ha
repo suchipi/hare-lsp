@@ -5,6 +5,7 @@
 // document links — all AST-walk features that share infrastructure.
 
 use analysis;
+use bytes;
 use encoding::json;
 use hare::ast;
 use hare::module;
@@ -16,22 +17,30 @@ def SK_FILE: f64 = 1.0;
 
 def SK_NAMESPACE: f64 = 3.0;
 
+def SK_ENUM: f64 = 10.0;
+
 def SK_FUNCTION: f64 = 12.0;
 
 def SK_VARIABLE: f64 = 13.0;
 
 def SK_CONSTANT: f64 = 14.0;
 
+def SK_OBJECT: f64 = 19.0;
+
+def SK_ENUM_MEMBER: f64 = 22.0;
+
 def SK_STRUCT: f64 = 23.0;
 
 def SK_TYPE_PARAMETER: f64 = 26.0;
 
-def SK_OBJECT: f64 = 19.0;
+def SK_FIELD: f64 = 8.0;
 
-// Handles textDocument/documentSymbol. Returns a flat list of
-// SymbolInformation (we use the legacy flat shape for compatibility; the
-// hierarchical DocumentSymbol shape would require nesting struct fields
-// which a future revision will add).
+// Handles textDocument/documentSymbol. Returns the hierarchical
+// `DocumentSymbol[]` shape (struct fields nested under the struct decl,
+// enum variants nested under the enum decl, etc.) when the client
+// advertises `hierarchicalDocumentSymbolSupport`; otherwise falls back
+// to the legacy flat `SymbolInformation[]` list one entry per top-level
+// decl.
 //
 // @param s: borrowed
 export fn handle_document_symbol(s: *server, r: lsp::request) void = {
@@ -52,18 +61,39 @@ export fn handle_document_symbol(s: *server, r: lsp::request) void = {
 
 	const data = analysis::bytes(&doc.buf);
 	const cache = parse_of(doc);
-
 	const enc = position_encoding(s);
+	let arr: []json::value = if (client_supports_hierarchical_doc_symbol(s)) {
+		yield build_document_symbols(data, doc.buf.line_index, enc,
+			&cache.pr.subunit);
+	} else {
+		yield build_flat_symbols(data, doc.buf.line_index, enc, uri, &cache.idx);
+	};
+	send_array_result(s, r.id, arr);
+};
+
+// Builds the flat `SymbolInformation[]` shape from the per-file index.
+//
+// @param data: borrowed
+// @param line_index: borrowed
+// @param uri: borrowed
+// @param idx: borrowed
+// @returns: owned
+fn build_flat_symbols(
+	data: []u8,
+	line_index: []size,
+	enc: analysis::encoding,
+	uri: str,
+	idx: *analysis::file_index,
+) []json::value = {
 	let arr: []json::value = [];
-	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
-		const sym = &cache.idx.symbols[i];
+	for (let i = 0z; i < len(idx.symbols); i += 1) {
+		const sym = &idx.symbols[i];
 		let item = json::newobject();
 		json::set(&item, "name", sym.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_lsp(sym.kind))!;
-		// Location: file URI + full span.
-		const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		const start_pos = analysis::byte_to_position(data, line_index, enc,
 			sym.span.start.off: size);
-		const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		const end_pos = analysis::byte_to_position(data, line_index, enc,
 			sym.span.end.off: size);
 		let loc = json::newobject();
 		json::set(&loc, "uri", uri: json::value)!;
@@ -72,7 +102,343 @@ export fn handle_document_symbol(s: *server, r: lsp::request) void = {
 		json::put(&item, "location", loc)!;
 		append(arr, item: json::value)!;
 	};
-	send_array_result(s, r.id, arr);
+	return arr;
+};
+
+// Builds the hierarchical `DocumentSymbol[]` shape. Walks the parsed
+// subunit so children (struct fields, enum variants, union members) can
+// be nested under their parent decl.
+//
+// @param data: borrowed
+// @param line_index: borrowed
+// @param su: borrowed
+// @returns: owned
+fn build_document_symbols(
+	data: []u8,
+	line_index: []size,
+	enc: analysis::encoding,
+	su: *ast::subunit,
+) []json::value = {
+	let arr: []json::value = [];
+	for (let i = 0z; i < len(su.decls); i += 1) {
+		match (build_decl_document_symbol(data, line_index, enc, &su.decls[i])) {
+		case let v: json::value =>
+			append(arr, v)!;
+		case void => void;
+		};
+	};
+	return arr;
+};
+
+// Builds a single DocumentSymbol entry for a top-level decl. Returns
+// void for decls that have no associated symbol (e.g. `static assert`).
+//
+// @param data: borrowed
+// @param line_index: borrowed
+// @param d: borrowed
+fn build_decl_document_symbol(
+	data: []u8,
+	line_index: []size,
+	enc: analysis::encoding,
+	d: *ast::decl,
+) (json::value | void) = {
+	const (name, kind, is_type, type_ptr) = match (d.decl) {
+	case let f: ast::decl_func =>
+		yield (
+			ident_join_borrowed(f.ident),
+			SK_FUNCTION,
+			false,
+			null: nullable *ast::_type,
+		);
+	case let t: ast::decl_type =>
+		yield (
+			ident_join_borrowed(t.ident),
+			decl_type_kind(t._type),
+			true,
+			t._type: nullable *ast::_type,
+		);
+	case let g: ast::decl_global =>
+		const k = if (g.is_const) SK_CONSTANT else SK_VARIABLE;
+		yield (ident_join_borrowed(g.ident), k, false, null: nullable *ast::_type);
+	case let c: ast::decl_const =>
+		yield (
+			ident_join_borrowed(c.ident),
+			SK_CONSTANT,
+			false,
+			null: nullable *ast::_type,
+		);
+	case ast::assert_expr =>
+		return void;
+	};
+	defer free(name);
+	if (len(name) == 0) return void;
+
+	const range_start = d.loc.start.off: size;
+	let range_end = d.loc.end.off: size;
+	if (range_end > len(data)) range_end = len(data);
+	if (range_end < range_start) range_end = range_start;
+
+	const (sel_start, sel_end) = decl_name_range(data, range_start, range_end,
+		name);
+
+	let item = json::newobject();
+	json::set(&item, "name", name: json::value)!;
+	json::put(&item, "kind", kind)!;
+	json::put(&item, "range",
+		encode_byte_range(data, line_index, enc, range_start, range_end))!;
+	json::put(&item, "selectionRange",
+		encode_byte_range(data, line_index, enc, sel_start, sel_end))!;
+
+	if (is_type) {
+		match (type_ptr) {
+		case let t: *ast::_type =>
+			let children = build_type_children(data, line_index, enc, t);
+			if (len(children) > 0) {
+				json::put(&item, "children", children: json::value)!;
+			} else {
+				free(children);
+			};
+		case null => void;
+		};
+	};
+	return item: json::value;
+};
+
+// Picks the LSP SymbolKind for a `type` decl based on its inner type.
+// Struct → Struct, enum → Enum, union → Struct (no dedicated LSP kind),
+// everything else → TypeParameter so generic aliases (tagged unions,
+// tuples, etc.) at least render distinctly from concrete struct types.
+//
+// @param t: borrowed
+fn decl_type_kind(t: *ast::_type) f64 = {
+	match (t.repr) {
+	case ast::struct_type =>
+		return SK_STRUCT;
+	case ast::enum_type =>
+		return SK_ENUM;
+	case ast::union_type =>
+		return SK_STRUCT;
+	case =>
+		return SK_TYPE_PARAMETER;
+	};
+};
+
+// Builds the `children` array for a type decl. Struct fields become
+// Field children, enum variants become EnumMember children, and union
+// alternatives become Field children. Other type shapes have no natural
+// children and return an empty slice.
+//
+// @param data: borrowed
+// @param line_index: borrowed
+// @param t: borrowed
+// @returns: owned
+fn build_type_children(
+	data: []u8,
+	line_index: []size,
+	enc: analysis::encoding,
+	t: *ast::_type,
+) []json::value = {
+	let out: []json::value = [];
+	match (t.repr) {
+	case let st: ast::struct_type =>
+		struct_member_children(&out, data, line_index, enc, st.members);
+	case let un: ast::union_type =>
+		struct_member_children(&out, data, line_index, enc, un);
+	case let en: ast::enum_type =>
+		for (let i = 0z; i < len(en.values); i += 1) {
+			const v = &en.values[i];
+			const name_start = v.loc.start.off: size;
+			const name_end = name_start + len(v.name);
+			let item = json::newobject();
+			json::set(&item, "name", v.name: json::value)!;
+			json::put(&item, "kind", SK_ENUM_MEMBER)!;
+			json::put(&item, "range",
+				encode_byte_range(data, line_index, enc, name_start, name_end))!;
+			json::put(&item, "selectionRange",
+				encode_byte_range(data, line_index, enc, name_start, name_end))!;
+			append(out, item: json::value)!;
+		};
+	case => void;
+	};
+	return out;
+};
+
+// Appends a Field child for each named member in `members`. Embedded
+// types and struct aliases are skipped — they don't have a distinct
+// field name to anchor a child entry on.
+//
+// @param out: borrowed
+// @param data: borrowed
+// @param line_index: borrowed
+// @param members: borrowed
+fn struct_member_children(
+	out: *[]json::value,
+	data: []u8,
+	line_index: []size,
+	enc: analysis::encoding,
+	members: []ast::struct_member,
+) void = {
+	for (let i = 0z; i < len(members); i += 1) {
+		const f = match (members[i].member) {
+		case let f: ast::struct_field =>
+			yield f;
+		case =>
+			continue;
+		};
+		const (name_start, name_end) = field_name_range(data, f);
+		if (name_start == name_end) continue;
+		let type_end = f._type.loc.end.off: size;
+		if (type_end > len(data)) type_end = len(data);
+		if (type_end < name_end) type_end = name_end;
+		let item = json::newobject();
+		json::set(&item, "name", f.name: json::value)!;
+		json::put(&item, "kind", SK_FIELD)!;
+		json::put(&item, "range",
+			encode_byte_range(data, line_index, enc, name_start, type_end))!;
+		json::put(&item, "selectionRange",
+			encode_byte_range(data, line_index, enc, name_start, name_end))!;
+		append(out, item: json::value)!;
+	};
+};
+
+// Joins an ident with "::" and returns an owned string. Mirrors
+// `analysis::ident_join` (which is package-private to `analysis`).
+//
+// @param id: borrowed
+// @returns: owned
+fn ident_join_borrowed(id: ast::ident) str = {
+	if (len(id) == 0) return strings::dup("")!;
+	if (len(id) == 1) return strings::dup(id[0])!;
+	let parts: []str = [];
+	defer free(parts);
+	for (let i = 0z; i < len(id); i += 1) {
+		append(parts, id[i])!;
+	};
+	return strings::join("::", parts...)!;
+};
+
+// Locates the joined identifier `name` within the decl span, returning
+// its byte range. The decl's `loc.start.off` points at the start of any
+// leading `export` / `@symbol(...)` / `@threadlocal` modifiers, so we
+// scan forward (skipping comments and string contents) for the
+// declaration keyword (`fn` / `type` / `let` / `const` / `def`),
+// step past whitespace, and read off the identifier. Returns
+// `(start, start)` as a fallback when the scan fails — callers treat an
+// empty range as "use the decl span itself for selectionRange".
+//
+// @param data: borrowed
+// @param name: borrowed
+fn decl_name_range(
+	data: []u8,
+	decl_start: size,
+	decl_end: size,
+	name: str,
+) (size, size) = {
+	if (len(name) == 0) return (decl_start, decl_start);
+	const name_bytes = strings::toutf8(name);
+	let end = decl_end;
+	if (end > len(data)) end = len(data);
+	if (decl_start >= end) return (decl_start, decl_start);
+
+	// Walk forward looking for the joined name as a whole token.
+	// Skipping noncode regions (strings, comments, raw strings) avoids
+	// false matches inside `@symbol("...")` attributes and docstrings.
+	let i = decl_start;
+	for (i + len(name_bytes) <= end) {
+		const after = analysis::token_skip_noncode(data, i, end);
+		if (after != i) {
+			i = after;
+			continue;
+		};
+		if (!is_decl_name_start(data, i, name_bytes, end)) {
+			i += 1;
+			continue;
+		};
+		return (i, i + len(name_bytes));
+	};
+	return (decl_start, decl_start);
+};
+
+// Returns true if `data[i..i+len(name)]` equals `name` AND is bounded
+// by non-ident bytes on either side (so we don't match `foo` inside
+// `foobar` or `prefix::foo` mid-segment).
+//
+// @param data: borrowed
+// @param name: borrowed
+fn is_decl_name_start(data: []u8, i: size, name: []u8, end: size) bool = {
+	if (i + len(name) > end) return false;
+	if (!bytes::equal(data[i..i + len(name)], name)) return false;
+	if (i > 0) {
+		const prev = data[i - 1];
+		if (analysis::is_ident_byte(prev)) return false;
+		// Reject matches that look like the tail of a `pre::name`
+		// qualifier — selectionRange should always be the full
+		// joined name, not just its last segment.
+		if (prev == ':': u8) return false;
+	};
+	const after = i + len(name);
+	if (after < end) {
+		const next = data[after];
+		if (analysis::is_ident_byte(next)) return false;
+		if (next == ':': u8 && after + 1 < end && data[after + 1] == ':': u8) {
+			return false;
+		};
+	};
+	return true;
+};
+
+// Builds a JSON `range` object directly from byte offsets.
+//
+// @param data: borrowed
+// @param line_index: borrowed
+fn encode_byte_range(
+	data: []u8,
+	line_index: []size,
+	enc: analysis::encoding,
+	start: size,
+	end: size,
+) json::value = {
+	const sp = analysis::byte_to_position(data, line_index, enc, start);
+	const ep = analysis::byte_to_position(data, line_index, enc, end);
+	return encode_range_pos(sp, ep);
+};
+
+// Returns true if the client advertised support for the hierarchical
+// `DocumentSymbol[]` response shape. Defaults to false when the
+// capability subtree is absent (older clients only handle the flat
+// `SymbolInformation[]` shape).
+//
+// @param s: borrowed
+fn client_supports_hierarchical_doc_symbol(s: *server) bool = {
+	const caps = match (s.client_capabilities) {
+	case void =>
+		return false;
+	case let v: json::value =>
+		yield match (v) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			return false;
+		};
+	};
+	const td = match (lsp::json_obj(&caps, "textDocument")) {
+	case let o: json::object =>
+		yield o;
+	case void =>
+		return false;
+	};
+	const ds = match (lsp::json_obj(&td, "documentSymbol")) {
+	case let o: json::object =>
+		yield o;
+	case void =>
+		return false;
+	};
+	return match (lsp::json_bool(&ds, "hierarchicalDocumentSymbolSupport")) {
+	case let b: bool =>
+		yield b;
+	case void =>
+		yield false;
+	};
 };
 
 fn symbol_kind_to_lsp(k: analysis::symbol_kind) f64 = {
