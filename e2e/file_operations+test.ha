@@ -4,8 +4,7 @@
 // e2e: workspace/willCreateFiles, willRenameFiles, willDeleteFiles
 // (request) and the corresponding didCreateFiles, didRenameFiles,
 // didDeleteFiles, didChangeWatchedFiles (notification) handlers. Also
-// covers textDocument/didChange, didClose, didSave, willSave, and
-// textDocument/willSaveWaitUntil.
+// covers textDocument/didChange, didClose, didSave, and willSave.
 
 use encoding::json;
 use fmt;

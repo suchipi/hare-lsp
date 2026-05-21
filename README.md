@@ -84,10 +84,6 @@ Settings are read from the `hare` namespace.
 | `diagnostics.debounceMs`           | number            | `300`       | Minimum ms between the last `didChange` and the next parse-diagnostics refresh.                                                                                                                     |
 | `diagnostics.enableBuild`          | boolean           | `true`      | Whether to run `hare build` on save.                                                                                                                                                                |
 | `diagnostics.buildTimeoutMs`       | number            | `60000`     | Max wall-clock ms to wait for `hare build` (or `hare test` / `hare run`) before SIGTERM. `0` disables the timeout.                                                                                  |
-| `format.indentStyle`               | `"tab"`/`"space"` | `"tab"`     | Tab vs space indent in formatting output.                                                                                                                                                           |
-| `format.indentWidth`               | number            | `8`         | Number of spaces per indent level when `indentStyle = space`.                                                                                                                                       |
-| `format.trimFinalNewlines`         | boolean           | `true`      | Trim trailing whitespace at file end.                                                                                                                                                               |
-| `format.insertFinalNewline`        | boolean           | `true`      | Ensure a trailing newline.                                                                                                                                                                          |
 | `hover.useHtml`                    | boolean           | `true`      | Wrap the Ownership line in `<small>` so HTML-aware clients (VSCode) render it as fine print. Disable for editors that don't render HTML in hover markdown (Neovim, Helix, Emacs default renderers). |
 | `inlayHints.parameterNames`        | boolean           | `true`      | Show parameter-name hints at call sites.                                                                                                                                                            |
 | `inlayHints.inferredTypes`         | boolean           | `true`      | Show inferred-type hints on `let`/`const`.                                                                                                                                                          |
@@ -109,7 +105,7 @@ The canonical JSON Schema for these settings is checked in at [editors/vscode/sc
 
 `make` also builds `./harefmt`, a thin CLI wrapping the same formatter the LSP uses for `textDocument/formatting`. Use it from the shell or CI to format `*.ha` files outside an editor.
 
-Hare has a strict [style guide](https://harelang.org/documentation/usage/style.html) which `harefmt` tries its best to follow, so there are no formatting style options.
+The formatter is fully opinionated and follows Hare's [style guide](https://harelang.org/documentation/usage/style.html): tab-indented at column 0, trailing whitespace stripped, single trailing newline. There are no style options, and the LSP's `textDocument/formatting` calls the same engine, so editor-side and CLI-side output are byte-identical for the same input.
 
 ### Usage
 

@@ -274,8 +274,8 @@ fn sum_flat_width(items: []doc) size = {
 
 // Renders `d` to `out`. `max_col` is the soft column limit; `indent`
 // is the starting indent level (one indent unit = one tab character
-// emitted; tab-vs-space expansion happens in apply_indent_style
-// after the pretty-printer returns).
+// emitted; the formatter is fully opinionated, so output is always
+// tab-indented at column 0).
 //
 // @param d: borrowed
 export fn pretty(

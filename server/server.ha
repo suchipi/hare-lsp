@@ -451,8 +451,6 @@ fn handle_request(s: *server, r: lsp::request) void = {
 		handle_initialize(s, r);
 	case "shutdown" =>
 		handle_shutdown(s, r);
-	case "textDocument/willSaveWaitUntil" =>
-		handle_will_save_wait_until(s, r);
 	case "textDocument/diagnostic" =>
 		handle_textdocument_diagnostic(s, r);
 	case "workspace/diagnostic" =>
@@ -713,13 +711,15 @@ fn build_initialize_result(s: *server) (json::value | nomem) = {
 	};
 	json::set(&caps, "positionEncoding", enc_str: json::value)?;
 
-	// Text document sync: incremental, with willSave/willSaveWaitUntil/save.
+	// Text document sync: incremental, with willSave (notification only)
+	// and save. willSaveWaitUntil is intentionally not advertised: the
+	// formatter is fully opinionated, and we have nothing to inject
+	// before save.
 	let tds = json::newobject();
 	json::put(&tds, "openClose", true: json::value)?;
 	// 1 = Full, 2 = Incremental.
 	json::put(&tds, "change", 2: f64)?;
 	json::put(&tds, "willSave", true: json::value)?;
-	json::put(&tds, "willSaveWaitUntil", true: json::value)?;
 	let save_opts = json::newobject();
 	json::put(&save_opts, "includeText", true: json::value)?;
 	json::put(&tds, "save", save_opts)?;

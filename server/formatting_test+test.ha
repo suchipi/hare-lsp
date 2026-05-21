@@ -191,33 +191,46 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(len(result) == 0);
 };
 
-@test fn apply_indent_style_tab_passes_through() void = {
-	const input = "fn x() void = {\n\treturn;\n};";
-	const r = apply_indent_style(input, indent_style::TAB, 8);
-	assert(r == input);
+// format_source must strip trailing whitespace and ensure exactly one
+// final newline. Hare identifiers are ASCII-only (the lexer asserts
+// on non-printable-ASCII unlex paths), so we exercise multi-byte
+// content via a string literal - byte length still differs from rune
+// length, which is what the project rune-vs-byte rule cares about.
+@test fn format_source_normalizes_eof() void = {
+	const input =
+		strings::toutf8("export fn alphabet() str = \"αβγ\";\n   \n\n");
+	const out = format_source(input, "<test>") as str;
+	defer free(out);
+	assert(strings::hassuffix(out, "\n"));
+	assert(!strings::hassuffix(out, "  \n"));
+	assert(!strings::hassuffix(out, "\n\n"));
+	assert(strings::contains(out, "αβγ"));
 };
 
-@test fn apply_indent_style_space_expands_leading_tabs() void = {
-	const input = "fn x() void = {\n\treturn;\n};";
-	const r = apply_indent_style(input, indent_style::SPACE, 4);
-	defer free(r);
-	assert(r == "fn x() void = {\n    return;\n};");
+@test fn format_source_appends_missing_final_newline() void = {
+	// Trailing line comment with a multi-byte rune; the formatter must
+	// preserve the comment AND add the missing terminal newline.
+	const input =
+		strings::toutf8("export fn x() void = void; // φοο");
+	const out = format_source(input, "<test>") as str;
+	defer free(out);
+	assert(strings::hassuffix(out, "\n"));
+	assert(strings::contains(out, "φοο"));
 };
 
-@test fn apply_indent_style_handles_multiple_tabs() void = {
-	const input = "if (x) {\n\t\tfoo();\n};";
-	const r = apply_indent_style(input, indent_style::SPACE, 2);
-	defer free(r);
-	assert(r == "if (x) {\n    foo();\n};");
+// Empty input is the degenerate case of "ensure one trailing newline"
+// and should produce a single newline, not the empty string. Asserts
+// the rule is uniform with no special-case for empty buffers.
+@test fn format_source_empty_input_yields_single_newline() void = {
+	const out = format_source([], "<test>") as str;
+	defer free(out);
+	assert(out == "\n");
 };
 
-@test fn apply_indent_style_leaves_tabs_inside_strings_alone() void = {
-	// A tab after a non-whitespace byte (e.g. inside a string literal)
-	// should not be expanded.
-	const input = "let s = \"a\tb\";";
-	const r = apply_indent_style(input, indent_style::SPACE, 4);
-	defer free(r);
-	assert(r == "let s = \"a\tb\";");
+@test fn format_source_whitespace_only_input_yields_single_newline() void = {
+	const out = format_source(strings::toutf8("   \n\n\t\n"), "<test>") as str;
+	defer free(out);
+	assert(out == "\n");
 };
 
 @test fn on_type_formatting_reindents_close_brace() void = {
@@ -294,12 +307,10 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(len(result) == 0);
 };
 
-@test fn on_type_formatting_with_space_indent_emits_spaces() void = {
+@test fn on_type_formatting_emits_tabs_for_nested_close_brace() void = {
 	let (s, scan, in_buf, out) = fmt_test_server();
 	defer fmt_test_cleanup(&s, scan, in_buf, out);
-	s.config.format_indent_style = indent_style::SPACE;
-	s.config.format_indent_width = 2;
-	// Nested block where the inner `}` should land at depth 1 = 2 spaces.
+	// Nested block where the inner `}` should land at depth 1 = one tab.
 	// (Hare requires `;` after each compound expression.)
 	fmt_open(&s, "file:///x.ha",
 		"fn x() void = {\\n\\tif (true) {\\n\\t\\treturn;\\n};\\n};\\n");
@@ -323,5 +334,5 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(len(result) == 1);
 	const e0 = result[0] as json::object;
 	const new_text = *(json::get(&e0, "newText") as *json::value) as str;
-	assert(new_text == "  ");
+	assert(new_text == "\t");
 };

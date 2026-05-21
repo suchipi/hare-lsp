@@ -38,8 +38,6 @@ fn cleanup_server(
 	assert(c.diagnostics_debounce_ms == 300);
 	assert(c.enable_build_diagnostics);
 	assert(c.build_timeout_ms == 60000);
-	assert(c.format_indent_style == indent_style::TAB);
-	assert(c.format_indent_width == 8);
 	assert(c.inlay_hints_parameter_names);
 	assert(c.inlay_hints_inferred_types);
 };
@@ -49,7 +47,7 @@ fn cleanup_server(
 	defer cleanup_server(&s, scan, in_buf, out);
 
 	const settings =
-		`{"path":"/opt/hare/bin/hare","tags":["+linux","+x86_64"],"diagnostics":{"debounceMs":500,"enableBuild":false,"buildTimeoutMs":10000},"format":{"indentStyle":"space","indentWidth":4,"trimFinalNewlines":false,"insertFinalNewline":false},"inlayHints":{"parameterNames":false,"inferredTypes":false}}`;
+		`{"path":"/opt/hare/bin/hare","tags":["+linux","+x86_64"],"diagnostics":{"debounceMs":500,"enableBuild":false,"buildTimeoutMs":10000},"inlayHints":{"parameterNames":false,"inferredTypes":false}}`;
 	let v = json::loadstr(settings)!;
 	defer json::finish(v);
 	apply_settings(&s, v);
@@ -61,10 +59,6 @@ fn cleanup_server(
 	assert(s.config.diagnostics_debounce_ms == 500);
 	assert(!s.config.enable_build_diagnostics);
 	assert(s.config.build_timeout_ms == 10000);
-	assert(s.config.format_indent_style == indent_style::SPACE);
-	assert(s.config.format_indent_width == 4);
-	assert(!s.config.format_trim_final_newlines);
-	assert(!s.config.format_insert_final_newline);
 	assert(!s.config.inlay_hints_parameter_names);
 	assert(!s.config.inlay_hints_inferred_types);
 };
@@ -81,7 +75,7 @@ fn cleanup_server(
 	assert(s.config.diagnostics_debounce_ms == 1000);
 	// Other fields untouched.
 	assert(s.config.hare_path == "hare");
-	assert(s.config.format_indent_style == indent_style::TAB);
+	assert(s.config.enable_build_diagnostics);
 };
 
 @test fn did_change_configuration_with_namespace() void = {

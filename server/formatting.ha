@@ -36,19 +36,23 @@ export fn format_error_finish(e: *format_error) void = {
 // freshly-allocated string the caller owns. `path` is an opaque label
 // used in parser diagnostics.
 //
-// Output is always tab-indented at column 0; callers that want a
-// space-indent variant should pass the result through
-// [[apply_indent_style]]. If parsing produces any diagnostics we refuse
-// to format and return the first one - reformatting partially-parsed
-// source would rewrite over the user's in-flight edits.
+// Output is always tab-indented at column 0, with all trailing
+// whitespace stripped and (for non-empty buffers) a single trailing
+// newline. The formatter is fully opinionated: there are no knobs,
+// and the harefmt CLI and the LSP both call this function so they
+// produce byte-identical output. If parsing produces any diagnostics
+// we refuse to format and return the first one - reformatting
+// partially-parsed source would rewrite over the user's in-flight
+// edits.
 //
-// The formatter is run TWICE in a row and the second pass's output is
-// returned. The single-pass build is not provably idempotent in
-// pathological cases (e.g. a struct literal collapses to single-line
-// on pass 1, then a containing call shrinks enough to no longer want
-// the wrap, etc.); a guaranteed second pass converges those rare
-// drifts so a single user-facing `harefmt --write .` invocation
-// always produces output that `harefmt --check .` immediately accepts.
+// The pretty pass is run TWICE in a row and the second pass's output
+// is then EOF-normalized. The single-pass build is not provably
+// idempotent in pathological cases (e.g. a struct literal collapses
+// to single-line on pass 1, then a containing call shrinks enough to
+// no longer want the wrap, etc.); a guaranteed second pass converges
+// those rare drifts so a single user-facing `harefmt --write .`
+// invocation always produces output that `harefmt --check .`
+// immediately accepts.
 //
 // @param data: borrowed
 // @param path: borrowed
@@ -57,7 +61,33 @@ export fn format_source(data: []u8, path: str) (str | format_error) = {
 	const first = format_source_once(data, path)?;
 	defer free(first);
 	const second = format_source_once(strings::toutf8(first), path)?;
-	return second;
+	defer free(second);
+	return normalize_eof(second);
+};
+
+// Trims trailing ' ', '\t', '\n', '\r' and appends exactly one '\n'.
+// Empty input becomes a single newline; the rule is uniform - every
+// formatted output ends with exactly one '\n', no special cases.
+// Returns a freshly-allocated string the caller owns.
+//
+// @param s: borrowed
+// @returns: owned
+fn normalize_eof(s: str) str = {
+	const src = strings::toutf8(s);
+	let end = len(src);
+	for (end > 0; end -= 1) {
+		const c = src[end - 1];
+		if (c != ' ': u8 && c != '\t': u8 && c != '\n': u8 && c != '\r': u8) {
+			break;
+		};
+	};
+	let out: []u8 = alloc([], end + 1)!;
+	defer free(out);
+	for (let i = 0z; i < end; i += 1) {
+		append(out, src[i])!;
+	};
+	append(out, '\n': u8)!;
+	return strings::dup(strings::fromutf8(out)!)!;
 };
 
 // Single formatting pass. Internal; callers want `format_source`,
@@ -143,10 +173,10 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	};
 	// Re-run the formatter on its own output to converge any
 	// drift (a single pass isn't provably idempotent in all
-	// cases). Mirrors `format_source`'s two-pass guarantee so the
-	// LSP and the harefmt CLI behave the same.
+	// cases), then EOF-normalize. Mirrors `format_source` so the
+	// LSP and the harefmt CLI produce byte-identical output.
 	const first_pass = memio::string(&buf)!;
-	const formatted_raw = match (format_source_once(strings::toutf8(first_pass),
+	const second_pass = match (format_source_once(strings::toutf8(first_pass),
 		uri)) {
 	case let s: str =>
 		yield s;
@@ -156,10 +186,9 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 		format_error_finish(&e);
 		yield strings::dup(first_pass)!;
 	};
-	defer free(formatted_raw);
-	const formatted_str = apply_indent_style(formatted_raw,
-		s.config.format_indent_style, s.config.format_indent_width);
-	defer if (formatted_str != formatted_raw) free(formatted_str);
+	defer free(second_pass);
+	const formatted_str = normalize_eof(second_pass);
+	defer free(formatted_str);
 	const formatted = strings::toutf8(formatted_str);
 
 	// If the formatted output equals the input, no edits needed.
@@ -296,10 +325,6 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 	const formatted_str = memio::string(&buf)!;
-	const formatted_str_with_indent = apply_indent_style(formatted_str,
-		s.config.format_indent_style, s.config.format_indent_width);
-	defer if (formatted_str_with_indent != formatted_str)
-		free(formatted_str_with_indent);
 	_ = decl_range_end; // silence unused warning if any
 
 	const replace_start = pr.subunit.decls[first_idx: size].loc.start.off: size;
@@ -320,7 +345,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	json::put(&r_obj, "start", s_obj)!;
 	json::put(&r_obj, "end", e_obj)!;
 	json::put(&edit, "range", r_obj)!;
-	json::set(&edit, "newText", formatted_str_with_indent: json::value)!;
+	json::set(&edit, "newText", formatted_str: json::value)!;
 
 	let arr: []json::value = [];
 	append(arr, edit: json::value)!;
@@ -429,19 +454,12 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	};
 	const expected_depth = depth - 1;
 
-	// Build the new indent string.
+	// Build the new indent string (always tabs; Hare's style guide
+	// mandates tab indentation and the formatter is opinionated).
 	let new_indent: []u8 = [];
 	defer free(new_indent);
-	switch (s.config.format_indent_style) {
-	case indent_style::TAB =>
-		for (let i = 0u32; i < expected_depth; i += 1) {
-			append(new_indent, '\t': u8)!;
-		};
-	case indent_style::SPACE =>
-		const w = s.config.format_indent_width;
-		for (let i = 0u32; i < expected_depth * w; i += 1) {
-			append(new_indent, ' ': u8)!;
-		};
+	for (let i = 0u32; i < expected_depth; i += 1) {
+		append(new_indent, '\t': u8)!;
 	};
 
 	// Compare with the current indent; if equal, no edit needed.
@@ -567,43 +585,3 @@ fn params_obj_fmt(
 	p: (json::value | void),
 ) (json::object | void) = lsp::params_object(p);
 
-// Post-processes pretty-printer output to honour an indent style.
-// `pretty` always emits tabs; when `style == SPACE`, expand the leading
-// tabs on each line into `width` spaces.
-//
-// Returns the input string unchanged when style == TAB, otherwise a
-// freshly-allocated string the caller must free if it differs from the
-// input.
-//
-// @param source: borrowed
-export fn apply_indent_style(
-	source: str,
-	style: indent_style,
-	width: u32,
-) str = {
-	if (style == indent_style::TAB) return source;
-	const w = width: size;
-	const src = strings::toutf8(source);
-	let out: []u8 = alloc([], len(src))!;
-	let at_line_start = true;
-	for (let i = 0z; i < len(src); i += 1) {
-		const b = src[i];
-		if (at_line_start && b == '\t': u8) {
-			for (let j = 0z; j < w; j += 1) {
-				append(out, ' ': u8)!;
-			};
-			continue;
-		};
-		if (b != ' ': u8 && b != '\t': u8) {
-			at_line_start = false;
-		};
-		if (b == '\n': u8) {
-			at_line_start = true;
-		};
-		append(out, b)!;
-	};
-	const result = strings::fromutf8(out)!;
-	const dup = strings::dup(result)!;
-	free(out);
-	return dup;
-};

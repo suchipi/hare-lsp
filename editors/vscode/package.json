@@ -180,31 +180,6 @@
             "minimum": 0,
             "description": "Maximum wall-clock ms to wait for `hare build` (or `hare test` / `hare run`) before SIGTERM. 0 disables the timeout."
           },
-          "hare.format.indentStyle": {
-            "type": "string",
-            "enum": [
-              "tab",
-              "space"
-            ],
-            "default": "tab",
-            "description": "Tab vs space indent in formatting output."
-          },
-          "hare.format.indentWidth": {
-            "type": "number",
-            "default": 8,
-            "minimum": 1,
-            "description": "Number of spaces per indent level when indentStyle is `space`."
-          },
-          "hare.format.trimFinalNewlines": {
-            "type": "boolean",
-            "default": true,
-            "description": "Trim trailing whitespace at end of file on save."
-          },
-          "hare.format.insertFinalNewline": {
-            "type": "boolean",
-            "default": true,
-            "description": "Ensure the file ends with a single newline on save."
-          },
           "hare.inlayHints.parameterNames": {
             "type": "boolean",
             "default": true,

@@ -31,8 +31,6 @@ Helix forwards settings under the language-server config table via
 [language-server.hare-lsp.config.hare]
 diagnostics.enableBuild = true
 diagnostics.debounceMs  = 300
-format.indentStyle      = "tab"
-format.indentWidth      = 8
 inlayHints.parameterNames = true
 inlayHints.inferredTypes  = true
 ```

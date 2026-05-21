@@ -46,35 +46,6 @@
         }
       }
     },
-    "format": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Formatter output options. Applied by textDocument/formatting and friends.",
-      "properties": {
-        "indentStyle": {
-          "type": "string",
-          "enum": ["tab", "space"],
-          "default": "tab",
-          "description": "Tab vs space indent."
-        },
-        "indentWidth": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 8,
-          "description": "Spaces per indent level when `indentStyle` is `space`. Ignored when `indentStyle` is `tab`."
-        },
-        "trimFinalNewlines": {
-          "type": "boolean",
-          "default": true,
-          "description": "Trim trailing whitespace at end of file."
-        },
-        "insertFinalNewline": {
-          "type": "boolean",
-          "default": true,
-          "description": "Ensure the file ends with a single newline."
-        }
-      }
-    },
     "hover": {
       "type": "object",
       "additionalProperties": false,

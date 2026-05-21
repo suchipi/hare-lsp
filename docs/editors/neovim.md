@@ -29,7 +29,6 @@ vim.api.nvim_create_autocmd("FileType", {
         hare = {
           -- Override defaults here. Empty table works too.
           diagnostics = { enableBuild = true, debounceMs = 300 },
-          format = { indentStyle = "tab", indentWidth = 8 },
           inlayHints = { parameterNames = true, inferredTypes = true },
         },
       },
@@ -62,7 +61,6 @@ if not configs.hare_lsp then
       settings = {
         hare = {
           diagnostics = { enableBuild = true },
-          format = { indentStyle = "tab", indentWidth = 8 },
         },
       },
     },

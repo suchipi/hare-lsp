@@ -25,12 +25,6 @@ M.default_settings = {
       enableBuild = true,
       buildTimeoutMs = 60000,
     },
-    format = {
-      indentStyle = "tab",
-      indentWidth = 8,
-      trimFinalNewlines = true,
-      insertFinalNewline = true,
-    },
     inlayHints = {
       parameterNames = true,
       inferredTypes = true,
