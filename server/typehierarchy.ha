@@ -21,7 +21,7 @@ use strings;
 
 // @param s: borrowed
 export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
-	const (uri, pos) = match (parse_pos_th(r.params)) {
+	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
@@ -506,7 +506,7 @@ fn build_type_item(
 	const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
 		start_off);
 	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, end_off);
-	json::put(&item, "range", encode_range_th(sp, ep))!;
+	json::put(&item, "range", encode_range_pos(sp, ep))!;
 	// selectionRange is the identifier itself per LSP spec (so a
 	// "navigate to this item" lands on the type name, not on `type`).
 	const ident_off = find_ident_in_type_decl(data, start_off, end_off, name);
@@ -515,7 +515,7 @@ fn build_type_item(
 		ident_off);
 	const sel_ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
 		ident_off + ident_len);
-	json::put(&item, "selectionRange", encode_range_th(sel_sp, sel_ep))!;
+	json::put(&item, "selectionRange", encode_range_pos(sel_sp, sel_ep))!;
 	return item;
 };
 
@@ -544,13 +544,13 @@ fn build_type_item_for_path(
 	const enc = position_encoding(s);
 	const sp = analysis::byte_to_position(text, idx, enc, start_off);
 	const ep = analysis::byte_to_position(text, idx, enc, end_off);
-	json::put(&item, "range", encode_range_th(sp, ep))!;
+	json::put(&item, "range", encode_range_pos(sp, ep))!;
 	const ident_off = find_ident_in_type_decl(text, start_off, end_off, name);
 	const ident_len = len(strings::toutf8(name));
 	const sel_sp = analysis::byte_to_position(text, idx, enc, ident_off);
 	const sel_ep = analysis::byte_to_position(text, idx, enc,
 		ident_off + ident_len);
-	json::put(&item, "selectionRange", encode_range_th(sel_sp, sel_ep))!;
+	json::put(&item, "selectionRange", encode_range_pos(sel_sp, sel_ep))!;
 	return item;
 };
 
@@ -579,82 +579,10 @@ fn find_ident_in_type_decl(
 			};
 		};
 		if (!ok) continue;
-		if (i > span_start && is_word_byte_th(data[i - 1])) continue;
-		if (i + len(target) < end && is_word_byte_th(data[i + len(target)])) continue;
+		if (i > span_start && analysis::is_ident_byte(data[i - 1])) continue;
+		if (i + len(target) < end &&
+				analysis::is_ident_byte(data[i + len(target)])) continue;
 		return i;
 	};
 	return span_start;
-};
-
-fn is_word_byte_th(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '_': u8;
-};
-
-// @param p: borrowed
-fn parse_pos_th(p: (json::value | void)) ((str, lsp::position) | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const uri = match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let s: str =>
-			yield s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const pos = match (json::get(&obj, "position")) {
-	case let p: *json::value =>
-		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position =>
-			yield pos;
-		case lsp::bad_message =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	return (uri, pos);
-};
-
-fn encode_range_th(
-	start: analysis::position,
-	end: analysis::position,
-) json::value = {
-	let r = json::newobject();
-	let s_obj = json::newobject();
-	json::put(&s_obj, "line", start.line: f64)!;
-	json::put(&s_obj, "character", start.character: f64)!;
-	let e_obj = json::newobject();
-	json::put(&e_obj, "line", end.line: f64)!;
-	json::put(&e_obj, "character", end.character: f64)!;
-	json::put(&r, "start", s_obj)!;
-	json::put(&r, "end", e_obj)!;
-	return r;
 };

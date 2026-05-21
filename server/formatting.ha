@@ -129,7 +129,7 @@ fn format_source_once(data: []u8, path: str) (str | format_error) = {
 
 // @param s: borrowed
 export fn handle_formatting(s: *server, r: lsp::request) void = {
-	const uri = match (uri_from_request(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -222,14 +222,14 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 
 // @param s: borrowed
 export fn handle_range_formatting(s: *server, r: lsp::request) void = {
-	const obj = match (params_obj_fmt(r.params)) {
+	const obj = match (lsp::params_object(r.params)) {
 	case let o: json::object =>
 		yield o;
 	case void =>
 		send_array_result(s, r.id, []);
 		return;
 	};
-	const uri = match (uri_from_request(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -354,14 +354,14 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 // @param s: borrowed
 export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
-	const obj = match (params_obj_fmt(r.params)) {
+	const obj = match (lsp::params_object(r.params)) {
 	case let o: json::object =>
 		yield o;
 	case void =>
 		send_array_result(s, r.id, []);
 		return;
 	};
-	const uri = match (uri_from_request(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -541,47 +541,3 @@ fn bytes_equal(a: []u8, b: []u8) bool = {
 	};
 	return true;
 };
-
-// @param p: borrowed
-fn uri_from_request(p: (json::value | void)) (str | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		match (*p) {
-		case let s: str =>
-			return s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-};
-
-// @param p: borrowed
-fn params_obj_fmt(
-	p: (json::value | void),
-) (json::object | void) = lsp::params_object(p);
-

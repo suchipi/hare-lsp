@@ -91,7 +91,7 @@ export fn token_legend() json::value = {
 
 // @param s: borrowed
 export fn handle_semantic_tokens_full(s: *server, r: lsp::request) void = {
-	const uri = match (uri_from_st(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -136,7 +136,7 @@ export fn handle_semantic_tokens_full_delta(
 		handle_semantic_tokens_full(s, r);
 		return;
 	};
-	const uri = match (uri_from_st(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -578,42 +578,4 @@ fn send_tokens_with_id(
 fn send_empty_tokens(s: *server, id: lsp::id) void = {
 	const empty: []u32 = [];
 	send_tokens(s, id, empty);
-};
-
-// @param p: borrowed
-fn uri_from_st(p: (json::value | void)) (str | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		match (*p) {
-		case let s: str =>
-			return s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
 };

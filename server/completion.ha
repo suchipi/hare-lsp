@@ -142,7 +142,7 @@ def RESOLVE_SRC_WORKSPACE: str = "workspace";
 
 // @param s: borrowed
 export fn handle_completion(s: *server, r: lsp::request) void = {
-	const (uri, pos) = match (parse_pos_comp(r.params)) {
+	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
@@ -239,7 +239,7 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 	let s = off;
 	for (s > 0; s -= 1) {
 		const b = data[s - 1];
-		if (!is_word_byte_comp(b)) break;
+		if (!analysis::is_ident_byte(b)) break;
 	};
 	// Walk forward past `off` over any trailing word bytes so we capture
 	// chars the user already typed when editing in the middle of an
@@ -249,7 +249,7 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 	// `<sentinel>field`.
 	let e = off;
 	for (e < len(data); e += 1) {
-		if (!is_word_byte_comp(data[e])) break;
+		if (!analysis::is_ident_byte(data[e])) break;
 	};
 	const partial = strings::dup(strings::fromutf8(data[s..off])!)!;
 
@@ -275,7 +275,7 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 		// Walk further to capture the module ident.
 		let m = s - 2;
 		for (m > 0; m -= 1) {
-			if (!is_word_byte_comp(data[m - 1])) break;
+			if (!analysis::is_ident_byte(data[m - 1])) break;
 		};
 		const module_str = strings::dup(strings::fromutf8(data[m..s - 2])!)!;
 		return prefix_info {
@@ -298,13 +298,6 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 	};
 };
 
-fn is_word_byte_comp(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '_': u8;
-};
-
 // Returns true when the byte slice ending at `dot_off` (exclusive)
 // looks like an expression a member access could chain off, given that
 // `data[dot_off] == '.'`. We accept `)`, `]`, `!`, `?` (postfix
@@ -323,13 +316,13 @@ fn receiver_ends_before_dot(data: []u8, dot_off: size) bool = {
 	if (b == ']': u8) return true;
 	if (b == '!': u8) return true;
 	if (b == '?': u8) return true;
-	if (!is_word_byte_comp(b)) return false;
+	if (!analysis::is_ident_byte(b)) return false;
 	// Walk back over the word and check whether any byte is non-digit.
 	// Pure-digit prefix means this `.` belongs to a numeric literal.
 	let i = dot_off;
 	for (i > 0; i -= 1) {
 		const c = data[i - 1];
-		if (!is_word_byte_comp(c)) break;
+		if (!analysis::is_ident_byte(c)) break;
 		if (c < '0': u8 || c > '9': u8) return true;
 	};
 	return false;
@@ -422,7 +415,7 @@ fn add_workspace_symbols(
 	// Snapshot the doc's already-imported modules once so we can decide
 	// per-entry whether to attach an auto-import edit.
 	const imported = doc_imported_modules(doc);
-	defer strings_free_all(imported);
+	defer analysis::free_str_slice(imported);
 	let added = 0z;
 	for (let i = 0z; i < cap && added < 200z; i += 1) {
 		const e = &s.workspace_index.entries[i];
@@ -477,7 +470,7 @@ fn add_stdlib_symbols(
 		return;
 	};
 	const imported = doc_imported_modules(doc);
-	defer strings_free_all(imported);
+	defer analysis::free_str_slice(imported);
 	let added = 0z;
 	for (let i = 0z; i < len(s.stdlib_index.entries) && added < 200z; i += 1) {
 		const e = &s.stdlib_index.entries[i];
@@ -539,9 +532,9 @@ fn add_module_name_completions(
 	if (len(partial) == 0) return;
 	let a = *arr;
 	const imported = doc_imported_modules(doc);
-	defer strings_free_all(imported);
+	defer analysis::free_str_slice(imported);
 	let seen: []str = [];
-	defer strings_free_all(seen);
+	defer analysis::free_str_slice(seen);
 
 	for (let i = 0z; i < len(s.workspace_index.entries); i += 1) {
 		const e = &s.workspace_index.entries[i];
@@ -635,7 +628,7 @@ fn emit_module_completion(
 // against this list using leaf-vs-leaf matching, which is the right
 // granularity: two imports sharing a leaf would create an ambiguous
 // reference in Hare, so suggesting one when the other is already
-// imported would be a mistake. Caller frees with strings_free_all.
+// imported would be a mistake. Caller frees with analysis::free_str_slice.
 //
 // @param doc: borrowed
 // @returns: owned
@@ -649,14 +642,6 @@ fn doc_imported_modules(doc: *document) []str = {
 		append(out, strings::dup(imp.ident[len(imp.ident) - 1])!)!;
 	};
 	return out;
-};
-
-// @param list: owned
-fn strings_free_all(list: []str) void = {
-	for (let i = 0z; i < len(list); i += 1) {
-		free(list[i]);
-	};
-	free(list);
 };
 
 // When `module` is non-empty and its leaf isn't already in `imported`
@@ -867,7 +852,7 @@ fn add_struct_members(
 
 	let a = *arr;
 	let seen: []str = [];
-	defer strings_free_all(seen);
+	defer analysis::free_str_slice(seen);
 	emit_struct_member_completions(s, doc, recv_type, info.partial, &a, &seen, 0);
 	*arr = a;
 };
@@ -1762,57 +1747,6 @@ fn find_entry_for_resolve(
 		if (e.uri == uri && e.short_name == name) return e;
 	};
 	return void;
-};
-
-// @param p: borrowed
-// @returns: borrowed from p
-fn parse_pos_comp(p: (json::value | void)) ((str, lsp::position) | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const uri = match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let s: str =>
-			yield s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const pos = match (json::get(&obj, "position")) {
-	case let p: *json::value =>
-		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position =>
-			yield pos;
-		case lsp::bad_message =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	return (uri, pos);
 };
 
 // @param s: borrowed

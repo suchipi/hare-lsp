@@ -44,7 +44,7 @@ def SK_FIELD: f64 = 8.0;
 //
 // @param s: borrowed
 export fn handle_document_symbol(s: *server, r: lsp::request) void = {
-	const uri = match (uri_from_textdoc_request(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -467,7 +467,7 @@ fn symbol_kind_to_lsp(k: analysis::symbol_kind) f64 = {
 //
 // @param s: borrowed
 export fn handle_document_highlight(s: *server, r: lsp::request) void = {
-	const (uri, pos) = match (parse_text_document_position_local(r.params)) {
+	const (uri, pos) = match (parse_text_document_position(r.params)) {
 	case let v: (str, lsp::position) =>
 		yield v;
 	case void =>
@@ -518,7 +518,7 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 //
 // @param s: borrowed
 export fn handle_folding_range(s: *server, r: lsp::request) void = {
-	const uri = match (uri_from_textdoc_request(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -577,21 +577,21 @@ export fn handle_folding_range(s: *server, r: lsp::request) void = {
 //
 // @param s: borrowed
 export fn handle_selection_range(s: *server, r: lsp::request) void = {
-	const params_obj = match (params_object_local(r.params)) {
+	const params_obj = match (lsp::params_object(r.params)) {
 	case let o: json::object =>
 		yield o;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
 	};
-	const td = match (object_field_object_local(&params_obj, "textDocument")) {
+	const td = match (lsp::json_obj(&params_obj, "textDocument")) {
 	case let o: json::object =>
 		yield o;
 	case void =>
 		send_empty_array(s, r.id);
 		return;
 	};
-	const uri = match (object_string_local(&td, "uri")) {
+	const uri = match (lsp::json_str(&td, "uri")) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -735,7 +735,7 @@ fn line_range_around(data: []u8, off: size) (size, size) = {
 //
 // @param s: borrowed
 export fn handle_document_link(s: *server, r: lsp::request) void = {
-	const uri = match (uri_from_textdoc_request(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -973,101 +973,6 @@ fn send_response_obj(s: *server, id: lsp::id, result: json::value) void = {
 };
 
 // --- helpers --------------------------------------------------------
-// @param p: borrowed
-fn uri_from_textdoc_request(p: (json::value | void)) (str | void) = {
-	const obj = match (params_object_local(p)) {
-	case let o: json::object =>
-		yield o;
-	case void =>
-		return void;
-	};
-	const td = match (object_field_object_local(&obj, "textDocument")) {
-	case let o: json::object =>
-		yield o;
-	case void =>
-		return void;
-	};
-	return object_string_local(&td, "uri");
-};
-
-// @param p: borrowed
-fn parse_text_document_position_local(
-	p: (json::value | void),
-) ((str, lsp::position) | void) = {
-	const obj = match (params_object_local(p)) {
-	case let o: json::object =>
-		yield o;
-	case void =>
-		return void;
-	};
-	const td = match (object_field_object_local(&obj, "textDocument")) {
-	case let o: json::object =>
-		yield o;
-	case void =>
-		return void;
-	};
-	const uri = match (object_string_local(&td, "uri")) {
-	case let s: str =>
-		yield s;
-	case void =>
-		return void;
-	};
-	const pos = match (json::get(&obj, "position")) {
-	case let p: *json::value =>
-		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position =>
-			yield pos;
-		case lsp::bad_message =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	return (uri, pos);
-};
-
-// @param p: borrowed
-fn params_object_local(
-	p: (json::value | void),
-) (json::object | void) = lsp::params_object(p);
-
-// @param o: borrowed
-// @param key: borrowed
-fn object_field_object_local(
-	o: *json::object,
-	key: str,
-) (json::object | void) = lsp::json_obj(o, key);
-
-// @param o: borrowed
-// @param key: borrowed
-fn object_string_local(
-	o: *json::object,
-	key: str,
-) (str | void) = lsp::json_str(o, key);
-
-fn encode_range_pos(
-	start: analysis::position,
-	end: analysis::position,
-) json::value = {
-	let r = json::newobject();
-	let s_obj = json::newobject();
-	json::put(&s_obj, "line", start.line: f64)!;
-	json::put(&s_obj, "character", start.character: f64)!;
-	let e_obj = json::newobject();
-	json::put(&e_obj, "line", end.line: f64)!;
-	json::put(&e_obj, "character", end.character: f64)!;
-	json::put(&r, "start", s_obj)!;
-	json::put(&r, "end", e_obj)!;
-	return r;
-};
-
-// @param s: borrowed
-// @param id: borrowed
-fn send_empty_array(s: *server, id: lsp::id) void = {
-	const empty: []json::value = [];
-	send_array_result(s, id, empty);
-};
-
 // @param s: borrowed
 // @param id: borrowed
 // @param arr: owned

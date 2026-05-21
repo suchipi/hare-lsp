@@ -8,6 +8,7 @@
 // ([[name]] -> command:hare-lsp.openLocation) runs on the README too, so
 // references inside it stay clickable.
 
+use analysis;
 use fs;
 use hare::module;
 use io;
@@ -88,7 +89,7 @@ fn detect_module_hover(
 		return void;
 	};
 	const segments = parse_path_segments(data, run_start, run_end);
-	defer free_str_slice(segments);
+	defer analysis::free_str_slice(segments);
 	if (len(segments) < 2) {
 		// A bare ident in code isn't treated as a module on its own
 		// (it would shadow legit local-symbol hovers). We still allow
@@ -106,7 +107,7 @@ fn detect_module_hover(
 		yield len(segments);
 	};
 	const ident = strs_to_ident(segments[..ident_end]);
-	defer free_str_slice(ident);
+	defer analysis::free_str_slice(ident);
 	// Require the path to actually match a module before claiming this
 	// hover. Otherwise `decl1::decl2`-style code (none today, but hypo-
 	// thetically) would suppress the existing decl-hover.
@@ -165,9 +166,9 @@ fn segment_index_at(
 			if (cursor + len(name) <= len(data) &&
 					bytes_equal(data[cursor..cursor + len(name)], name) &&
 					(cursor + len(name) == len(data) ||
-					!is_ident_byte_local(data[cursor + len(name)])) &&
+					!analysis::is_ident_byte(data[cursor + len(name)])) &&
 					(cursor == 0 ||
-					!is_ident_byte_local(data[cursor - 1]))) {
+					!analysis::is_ident_byte(data[cursor - 1]))) {
 				break;
 			};
 			cursor += 1;
@@ -226,7 +227,7 @@ export fn path_run_at(data: []u8, off: size) ((size, size) | void) = {
 	let s = off;
 	for (s > 0) {
 		const b = data[s - 1];
-		if (is_ident_byte_local(b)) {
+		if (analysis::is_ident_byte(b)) {
 			s -= 1;
 			continue;
 		};
@@ -241,7 +242,7 @@ export fn path_run_at(data: []u8, off: size) ((size, size) | void) = {
 	let e = off;
 	for (e < len(data)) {
 		const b = data[e];
-		if (is_ident_byte_local(b)) {
+		if (analysis::is_ident_byte(b)) {
 			e += 1;
 			continue;
 		};
@@ -260,7 +261,7 @@ export fn path_run_at(data: []u8, off: size) ((size, size) | void) = {
 // @param b: borrowed
 fn any_ident_byte(b: []u8) bool = {
 	for (let i = 0z; i < len(b); i += 1) {
-		if (is_ident_byte_local(b[i])) return true;
+		if (analysis::is_ident_byte(b[i])) return true;
 	};
 	return false;
 };
@@ -300,21 +301,6 @@ fn strs_to_ident(s: []str) []str = {
 		append(out, strings::dup(s[i])!)!;
 	};
 	return out;
-};
-
-// @param s: owned
-fn free_str_slice(s: []str) void = {
-	for (let i = 0z; i < len(s); i += 1) {
-		free(s[i]);
-	};
-	free(s);
-};
-
-fn is_ident_byte_local(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '_': u8;
 };
 
 // Reads the README file for the module at `dir`, returning its contents

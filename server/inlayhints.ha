@@ -23,7 +23,7 @@ export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
 		send_array_result(s, r.id, []);
 		return;
 	};
-	const uri = match (uri_from_ih(r.params)) {
+	const uri = match (uri_from_textdoc(r.params)) {
 	case let s: str =>
 		yield s;
 	case void =>
@@ -122,10 +122,10 @@ fn emit_inferred_type_hints(
 fn find_post_name_offset(data: []u8, start: size) size = {
 	let i = start;
 	// Skip a leading keyword (let/const/def/static).
-	for (i < len(data) && is_word_byte_ih(data[i]); i += 1) void;
+	for (i < len(data) && analysis::is_ident_byte(data[i]); i += 1) void;
 	for (i < len(data) && is_ws(data[i]); i += 1) void;
 	// Skip the name.
-	for (i < len(data) && is_word_byte_ih(data[i]); i += 1) void;
+	for (i < len(data) && analysis::is_ident_byte(data[i]); i += 1) void;
 	return i;
 };
 
@@ -155,13 +155,13 @@ fn emit_param_hints(
 			i = after;
 			continue;
 		};
-		if (!is_word_byte_ih(data[i])) {
+		if (!analysis::is_ident_byte(data[i])) {
 			i += 1;
 			continue;
 		};
 		// Identifier start. Find end.
 		let j = i;
-		for (j < limit && is_word_byte_ih(data[j]); j += 1) void;
+		for (j < limit && analysis::is_ident_byte(data[j]); j += 1) void;
 		// Must be followed by '('.
 		if (j >= limit || data[j] != '(': u8) {
 			i = j;
@@ -188,7 +188,7 @@ fn emit_param_hints(
 			continue;
 		};
 		// Find the decl.
-		const decl_idx = match (find_decl_idx(su, name)) {
+		const decl_idx = match (find_decl_by_name(su, name)) {
 		case let n: size =>
 			yield n;
 		case void =>
@@ -228,13 +228,6 @@ fn emit_param_hints(
 	};
 };
 
-fn is_word_byte_ih(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	if (b >= '0': u8 && b <= '9': u8) return true;
-	return b == '_': u8;
-};
-
 // True when the identifier starting at `i` is preceded (after skipping
 // whitespace) by the keyword `fn` standing on its own. Used to skip
 // function declaration names so we don't render parameter hints on the
@@ -249,34 +242,7 @@ fn preceded_by_fn(data: []u8, i: size) bool = {
 	if (data[k - 1] != 'n': u8 || data[k - 2] != 'f': u8) return false;
 	// The `fn` must itself be a standalone word.
 	if (k == 2) return true;
-	return !is_word_byte_ih(data[k - 3]);
-};
-
-// @param su: borrowed
-// @param name: borrowed
-fn find_decl_idx(su: *ast::subunit, name: str) (size | void) = {
-	for (let i = 0z; i < len(su.decls); i += 1) {
-		const id = decl_ident_ih(&su.decls[i]);
-		if (len(id) > 0 && id[len(id) - 1] == name) return i;
-	};
-	return void;
-};
-
-// @param d: borrowed
-// @returns: borrowed from d
-fn decl_ident_ih(d: *ast::decl) ast::ident = {
-	match (d.decl) {
-	case let f: ast::decl_func =>
-		return f.ident;
-	case let t: ast::decl_type =>
-		return t.ident;
-	case let g: ast::decl_global =>
-		return g.ident;
-	case let c: ast::decl_const =>
-		return c.ident;
-	case ast::assert_expr =>
-		return [];
-	};
+	return !analysis::is_ident_byte(data[k - 3]);
 };
 
 // @param d: borrowed
@@ -389,44 +355,5 @@ export fn handle_inlay_hint_resolve(s: *server, r: lsp::request) void = {
 	match (lsp::encode_response_result(s.out, r.id, v)) {
 	case size => void;
 	case => void;
-	};
-};
-
-// @param p: borrowed
-// @returns: borrowed from p
-fn uri_from_ih(p: (json::value | void)) (str | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		match (*p) {
-		case let s: str =>
-			return s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
 	};
 };

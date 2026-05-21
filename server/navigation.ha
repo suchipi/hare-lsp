@@ -616,32 +616,6 @@ fn send_location(
 	};
 };
 
-// @param su: borrowed
-// @param name: borrowed
-fn find_decl_by_name(su: *ast::subunit, name: str) (size | void) = {
-	for (let i = 0z; i < len(su.decls); i += 1) {
-		const id = decl_ident(&su.decls[i]);
-		if (len(id) > 0 && id[len(id) - 1] == name) return i;
-	};
-	return void;
-};
-
-// @param d: borrowed
-fn decl_ident(d: *ast::decl) ast::ident = {
-	match (d.decl) {
-	case let f: ast::decl_func =>
-		return f.ident;
-	case let t: ast::decl_type =>
-		return t.ident;
-	case let g: ast::decl_global =>
-		return g.ident;
-	case let c: ast::decl_const =>
-		return c.ident;
-	case ast::assert_expr =>
-		return [];
-	};
-};
-
 // Renders the declaration's signature without its body (for fn) or
 // initializer (for global / def). For type aliases we keep the RHS
 // because that *is* the type. The intent is that hover shows just what
@@ -834,58 +808,6 @@ fn clean_doc_comment(docs: str) str = {
 		append(cleaned, strings::trimprefix(lines[i], " "))!;
 	};
 	return strings::join("\n", cleaned...)!;
-};
-
-// @param p: borrowed
-fn parse_text_document_position(
-	p: (json::value | void),
-) ((str, lsp::position) | void) = {
-	const v = match (p) {
-	case let v: json::value =>
-		yield v;
-	case void =>
-		return void;
-	};
-	const obj = match (v) {
-	case let o: json::object =>
-		yield o;
-	case =>
-		return void;
-	};
-	const td = match (json::get(&obj, "textDocument")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let o: json::object =>
-			yield o;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const uri = match (json::get(&td, "uri")) {
-	case let p: *json::value =>
-		yield match (*p) {
-		case let s: str =>
-			yield s;
-		case =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	const pos = match (json::get(&obj, "position")) {
-	case let p: *json::value =>
-		yield match (lsp::decode_position(*p)) {
-		case let pos: lsp::position =>
-			yield pos;
-		case lsp::bad_message =>
-			return void;
-		};
-	case =>
-		return void;
-	};
-	return (uri, pos);
 };
 
 // Looks at the bytes immediately before the ident at off and returns the
