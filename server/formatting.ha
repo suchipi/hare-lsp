@@ -65,9 +65,10 @@ export fn format_source(data: []u8, path: str) (str | format_error) = {
 	return normalize_eof(second);
 };
 
-// Trims trailing ' ', '\t', '\n', '\r' and appends exactly one '\n'
-// when the result is non-empty. Returns a freshly-allocated string
-// the caller owns.
+// Trims trailing ' ', '\t', '\n', '\r' and appends exactly one '\n'.
+// Empty input becomes a single newline; the rule is uniform - every
+// formatted output ends with exactly one '\n', no special cases.
+// Returns a freshly-allocated string the caller owns.
 //
 // @param s: borrowed
 // @returns: owned
@@ -85,9 +86,7 @@ fn normalize_eof(s: str) str = {
 	for (let i = 0z; i < end; i += 1) {
 		append(out, src[i])!;
 	};
-	if (end > 0) {
-		append(out, '\n': u8)!;
-	};
+	append(out, '\n': u8)!;
 	return strings::dup(strings::fromutf8(out)!)!;
 };
 

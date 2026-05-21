@@ -218,6 +218,21 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(out, "φοο"));
 };
 
+// Empty input is the degenerate case of "ensure one trailing newline"
+// and should produce a single newline, not the empty string. Asserts
+// the rule is uniform with no special-case for empty buffers.
+@test fn format_source_empty_input_yields_single_newline() void = {
+	const out = format_source([], "<test>") as str;
+	defer free(out);
+	assert(out == "\n");
+};
+
+@test fn format_source_whitespace_only_input_yields_single_newline() void = {
+	const out = format_source(strings::toutf8("   \n\n\t\n"), "<test>") as str;
+	defer free(out);
+	assert(out == "\n");
+};
+
 @test fn on_type_formatting_reindents_close_brace() void = {
 	let (s, scan, in_buf, out) = fmt_test_server();
 	defer fmt_test_cleanup(&s, scan, in_buf, out);
