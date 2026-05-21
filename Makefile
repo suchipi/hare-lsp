@@ -121,10 +121,22 @@ harefmt: hare/parse/.stamp $(HA_SOURCES)
 # editors other than VSCode and shouldn't need Node installed to run
 # the hare-side test suite. Run `make vscode-test` (or `make test
 # vscode-test`) when working on extension code.
+#
+# Timeout budgets: parallel shards naturally compete for CPU, so we
+# raise the harness's per-recv and exit-grace floors past their
+# already-generous defaults. The 60s recv budget is roughly 12x the
+# original 5s value - more than enough headroom for a cold-cache
+# `./hare-lsp` startup under 7-shard contention. The defaults (30s /
+# 10s) cover most local development; the parallel target pushes the
+# floor up so users running `make test` on smaller boxes don't have
+# to discover the env vars themselves.
 test: hare-lsp harefmt .tmp/all-tests
 	@mkdir -p .cache .tmp
 	@rm -f .tmp/test-shard-*.log
-	@( .tmp/all-tests 'analysis::*' 'cmd::*' 'gitignore::*' 'lsp::*' 'server::*' > .tmp/test-shard-1-non-e2e.log  2>&1 ) & p1=$$!; \
+	@E2E_RECV_TIMEOUT_MS=$${E2E_RECV_TIMEOUT_MS:-60000}; \
+		E2E_EXIT_TIMEOUT_MS=$${E2E_EXIT_TIMEOUT_MS:-15000}; \
+		export E2E_RECV_TIMEOUT_MS E2E_EXIT_TIMEOUT_MS; \
+		( .tmp/all-tests 'analysis::*' 'cmd::*' 'gitignore::*' 'lsp::*' 'server::*' > .tmp/test-shard-1-non-e2e.log  2>&1 ) & p1=$$!; \
 		( .tmp/all-tests 'e2e::e2e_c*'                                  > .tmp/test-shard-2-e2e-c.log   2>&1 ) & p2=$$!; \
 		( .tmp/all-tests 'e2e::e2e_d*'                                  > .tmp/test-shard-3-e2e-d.log   2>&1 ) & p3=$$!; \
 		( .tmp/all-tests 'e2e::e2e_[e-h]*'                              > .tmp/test-shard-4-e2e-eh.log  2>&1 ) & p4=$$!; \
@@ -140,15 +152,18 @@ test: hare-lsp harefmt .tmp/all-tests
 
 # Serial counterpart to `test`. Runs every test in one .tmp/all-tests
 # process, end to end, with no backgrounded shards. Slower wall-clock
-# (no parallelism) but gives a reliable pass/fail signal when the
-# machine is under load - the parallel shards in `make test` share
-# the same `e2e: recv timed out after 5000 ms` budget and start
-# flaking once seven concurrent ./hare-lsp processes contend for
-# CPU/IO. Use this when you need to know whether something is actually
-# broken vs. just flaky.
+# (no parallelism) but gives an additional signal independent of the
+# parallel scheduler when investigating a flake.
+#
+# Even serial runs can flake under post-reboot disk-cache cold load
+# (a hare-lsp spawn that has to fault every page in from disk while
+# the system is also doing first-touch IO for other binaries), so
+# this target also bumps the recv budget past the harness default.
 test-serial: hare-lsp harefmt .tmp/all-tests
 	@mkdir -p .cache .tmp
-	.tmp/all-tests
+	E2E_RECV_TIMEOUT_MS=$${E2E_RECV_TIMEOUT_MS:-45000} \
+		E2E_EXIT_TIMEOUT_MS=$${E2E_EXIT_TIMEOUT_MS:-15000} \
+		.tmp/all-tests
 
 clean:
 	rm -rf hare-lsp harefmt .cache

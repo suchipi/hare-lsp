@@ -18,7 +18,53 @@ use time;
 use unix::poll;
 use unix::signal;
 
-def RECV_TIMEOUT: time::duration = 5 * time::SECOND;
+// Default deadlines for per-recv waits and child-exit waits. Tests
+// historically used a 5s recv budget and a 2s exit budget. Both proved
+// too tight when `make test`'s seven parallel shards spawn
+// fresh `./hare-lsp` processes under CPU/IO contention: every shard
+// runs an independent test process plus its own server child, so an
+// 8-core machine is already at ~1.75x oversubscription before any
+// background load. The bumped floors give the harness real headroom
+// while still failing reasonably fast on a truly hung server.
+//
+// Both floors are env-overridable so CI on tiny boxes can dial them
+// up further without touching code: set E2E_RECV_TIMEOUT_MS for the
+// per-recv budget and E2E_EXIT_TIMEOUT_MS for assert_clean_exit /
+// finish_session graceful-exit windows. The Makefile sets these for
+// the parallel `test` target only; `test-serial` uses the defaults.
+def DEFAULT_RECV_TIMEOUT_MS: i64 = 30000;
+
+def DEFAULT_EXIT_TIMEOUT_MS: i64 = 10000;
+
+// Liveness polling cadence inside recv. While waiting for bytes, we
+// also peek the child periodically; if it exited unexpectedly we want
+// a clear "server died" diagnostic rather than a "recv timed out"
+// after the full budget elapses. 250ms keeps the overhead negligible
+// (4 syscalls/s during a wait) while still surfacing a crash quickly.
+def LIVENESS_POLL_INTERVAL: time::duration = 250 * time::MILLISECOND;
+
+fn env_duration_ms(name: str, default_ms: i64) time::duration = {
+	const ms = match (os::getenv(name)) {
+	case let s: str =>
+		yield match (strconv::stoi64(s)) {
+		case let n: i64 =>
+			yield if (n > 0) n else default_ms;
+		case =>
+			yield default_ms;
+		};
+	case void =>
+		yield default_ms;
+	};
+	return ms: time::duration * time::MILLISECOND;
+};
+
+fn recv_timeout() time::duration = {
+	return env_duration_ms("E2E_RECV_TIMEOUT_MS", DEFAULT_RECV_TIMEOUT_MS);
+};
+
+fn exit_timeout() time::duration = {
+	return env_duration_ms("E2E_EXIT_TIMEOUT_MS", DEFAULT_EXIT_TIMEOUT_MS);
+};
 
 let session_counter: size = 0;
 
@@ -173,6 +219,37 @@ fn make_notification(method: str, params_json: str) str = {
 		params_json, `}`)!;
 };
 
+// Wait for the child to exit, returning its exit status if it does
+// within `deadline`. Returns void on timeout. Polls at ~20ms cadence,
+// which keeps the test responsive (no test wastes more than one poll
+// interval on an already-dead child) while leaving plenty of CPU for
+// other shards.
+//
+// `exec::peek` returning `exec::error` is treated as not-yet-exited
+// rather than fatal: the most plausible cause is a transient signal
+// state, and the next poll iteration will see the real exit if the
+// process is genuinely gone.
+fn wait_for_exit(s: *session, deadline: time::instant) (exec::status | void) = {
+	for (true) {
+		match (exec::peek(&s.proc)) {
+		case let st: exec::status =>
+			return st;
+		case (void | exec::error) => void;
+		};
+		if (time::compare(time::now(time::clock::MONOTONIC), deadline) >= 0) {
+			return void;
+		};
+		time::sleep(20 * time::MILLISECOND);
+	};
+};
+
+// Tear the session down: close pipes, give the child a graceful
+// window to exit, then escalate to SIGTERM and finally SIGKILL.
+// All deadlines scale with `exit_timeout()` so high-load shards
+// don't false-positive on a healthy-but-slow shutdown. The graceful
+// window is the larger of the two; SIGTERM gets a fixed slice
+// because once we've signaled, anything beyond a second or so is
+// effectively a stuck process and SIGKILL is appropriate.
 fn finish_session(s: *session) void = {
 	defer {
 		free(s.read_buf);
@@ -181,53 +258,50 @@ fn finish_session(s: *session) void = {
 	const _ = io::close(s.stdin);
 	const _ = io::close(s.stdout);
 
-	const deadline = time::add(time::now(time::clock::MONOTONIC),
-		500 * time::MILLISECOND);
-	for (true) {
-		match (exec::peek(&s.proc)) {
-		case let st: exec::status =>
-			return;
-		case void => void;
-		case exec::error =>
-			return;
-		};
-		if (time::compare(time::now(time::clock::MONOTONIC), deadline) >= 0) {
-			break;
-		};
-		time::sleep(10 * time::MILLISECOND);
+	const budget = exit_timeout();
+	const graceful = time::add(time::now(time::clock::MONOTONIC), budget);
+	match (wait_for_exit(s, graceful)) {
+	case exec::status =>
+		return;
+	case void => void;
 	};
 	const _ = exec::sig(s.proc, signal::sig::TERM);
-	time::sleep(100 * time::MILLISECOND);
-	match (exec::peek(&s.proc)) {
-	case let st: exec::status =>
+	const after_term = time::add(time::now(time::clock::MONOTONIC),
+		1 * time::SECOND);
+	match (wait_for_exit(s, after_term)) {
+	case exec::status =>
 		return;
-	case (void | exec::error) =>
+	case void =>
 		const _ = exec::sig(s.proc, signal::sig::KILL);
 		const _ = exec::wait(&s.proc);
 	};
 };
 
+// Polls for the child to exit and fails the test if it doesn't, or if
+// it exits with a non-zero status. `total` is the per-test grace
+// window for an honest exit; on parallel-shard CI it is dominated by
+// the time the LSP needs to flush diagnostics + return from main, not
+// by an actual hang. Tests can pass a small `total` here; the harness
+// floors it at the configured exit budget so a 2-second caller still
+// gets ~10s of headroom under load.
 fn assert_clean_exit(s: *session, total: time::duration) void = {
-	const deadline = time::add(time::now(time::clock::MONOTONIC), total);
-	for (true) {
-		let st = exec::peek(&s.proc);
-		match (st) {
-		case let st: exec::status =>
-			match (exec::check(&st)) {
-			case void =>
-				return;
-			case !exec::exit_status =>
-				const summary = exec::exitstr(exec::exit(&st));
-				fmt::fatalf("e2e: server exited uncleanly after `exit`: {}", summary);
-			};
-		case void => void;
-		case exec::error => void;
+	const floor = exit_timeout();
+	// time::duration is an i64 in nanoseconds; compare directly. Don't
+	// reach for time::compare here, that one takes time::instant.
+	const effective = if (total: i64 < floor: i64) floor else total;
+	const deadline = time::add(time::now(time::clock::MONOTONIC), effective);
+	match (wait_for_exit(s, deadline)) {
+	case let st: exec::status =>
+		match (exec::check(&st)) {
+		case void =>
+			return;
+		case !exec::exit_status =>
+			const summary = exec::exitstr(exec::exit(&st));
+			fmt::fatalf("e2e: server exited uncleanly after `exit`: {}", summary);
 		};
-		if (time::compare(time::now(time::clock::MONOTONIC), deadline) >= 0) {
-			fmt::fatalf("e2e: server did not exit within {} ms of `exit`",
-				total / time::MILLISECOND);
-		};
-		time::sleep(20 * time::MILLISECOND);
+	case void =>
+		fmt::fatalf("e2e: server did not exit within {} ms of `exit`",
+			effective / time::MILLISECOND);
 	};
 };
 
@@ -240,15 +314,44 @@ fn send(s: *session, body: const []u8) void = {
 };
 
 fn recv(s: *session) []u8 = {
-	match (recv_with_deadline(s, RECV_TIMEOUT)) {
+	const budget = recv_timeout();
+	match (recv_with_deadline(s, budget)) {
 	case let b: []u8 =>
 		return b;
 	case void =>
-		fmt::fatalf("e2e: recv timed out after {} ms (buffered {} bytes)",
-			RECV_TIMEOUT / time::MILLISECOND, len(s.read_buf));
+		// If the budget elapsed without bytes arriving, do one last
+		// liveness check before reporting timeout: a server that died
+		// silently (e.g. SIGKILL'd by the OOM killer) deserves a
+		// clearer error than "recv timed out".
+		match (exec::peek(&s.proc)) {
+		case let st: exec::status =>
+			const summary = exec::exitstr(exec::exit(&st));
+			fmt::fatalf(
+				"e2e: server exited during recv (after {} ms, buffered {} bytes): {}",
+				budget / time::MILLISECOND, len(s.read_buf), summary);
+		case (void | exec::error) => void;
+		};
+		// The 0-bytes case is almost always parallel-shard load: the
+		// server hasn't crashed (peek succeeded above) and yet sent
+		// nothing during the window. Mention this in the message so
+		// future investigators can tell flake-from-load apart from a
+		// real bug without re-running. The fix when this is genuine
+		// flake-from-load is to bump E2E_RECV_TIMEOUT_MS, not to
+		// rewrite the test.
+		const hint = if (len(s.read_buf) == 0)
+			" (server alive but silent; usually shard contention - try E2E_RECV_TIMEOUT_MS=60000)"
+			else "";
+		fmt::fatalf("e2e: recv timed out after {} ms (buffered {} bytes){}",
+			budget / time::MILLISECOND, len(s.read_buf), hint);
 	};
 };
 
+// Reads framed messages with a soft deadline. Returns void on timeout
+// rather than fatal-ing, so callers like `expect_no_message` can assert
+// silence. Periodically peeks the child during the wait so a crashed
+// server triggers a clear "server died" fatal long before the budget
+// runs out; otherwise a dead-server probe would idle here for the full
+// timeout and then misreport the failure mode.
 fn recv_with_deadline(s: *session, budget: time::duration) ([]u8 | void) = {
 	const deadline = time::add(time::now(time::clock::MONOTONIC), budget);
 	let chunk: [4096]u8 = [0...];
@@ -265,6 +368,11 @@ fn recv_with_deadline(s: *session, budget: time::duration) ([]u8 | void) = {
 			return void;
 		};
 		const remaining_ns = time::diff(now, deadline);
+		// Cap each poll at LIVENESS_POLL_INTERVAL so a server that
+		// silently dies mid-wait surfaces quickly, not at the end of
+		// the (possibly minutes-long) budget.
+		const slice_ns = if (remaining_ns < LIVENESS_POLL_INTERVAL) remaining_ns
+			else LIVENESS_POLL_INTERVAL;
 
 		let pfd: [_]poll::pollfd = [
 			poll::pollfd {
@@ -273,12 +381,22 @@ fn recv_with_deadline(s: *session, budget: time::duration) ([]u8 | void) = {
 				revents = 0,
 			},
 		];
-		const ready = match (poll::poll(pfd, remaining_ns)) {
+		const ready = match (poll::poll(pfd, slice_ns)) {
 		case let n: uint =>
 			yield n;
 		case poll::error => abort("e2e: poll failed");
 		};
 		if (ready == 0) {
+			// No bytes this slice. If the child is gone, fail with
+			// a useful diagnostic rather than waiting out the rest
+			// of the budget.
+			match (exec::peek(&s.proc)) {
+			case let st: exec::status =>
+				const summary = exec::exitstr(exec::exit(&st));
+				fmt::fatalf("e2e: server exited mid-recv (buffered {} bytes): {}",
+					len(s.read_buf), summary);
+			case (void | exec::error) => void;
+			};
 			continue;
 		};
 

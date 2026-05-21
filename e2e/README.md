@@ -77,12 +77,23 @@ a helper in more than one file, move it there rather than copying it locally.
   child if needed. Always `defer` this immediately after spawning.
 - `assert_clean_exit(*session, duration) void` — poll-waits for the child
   to exit and fails the test if it didn't exit cleanly within the deadline.
+  The caller-supplied duration is floored at `E2E_EXIT_TIMEOUT_MS` (default
+  10 s, raised to 15 s for `make test`) so a 2 s caller still gets real
+  headroom under parallel-shard load. Use `finish_session` everywhere
+  *except* tests that specifically assert the server exits cleanly after
+  the `exit` notification — `assert_clean_exit` upgrades that check from
+  "process eventually goes away" to "process exited with status 0."
 
 ### Wire framing
 
 - `send(*session, []u8) void` — writes a framed LSP message.
-- `recv(*session) []u8` — reads a framed message; fatals on timeout
-  (default 5 s). Caller frees.
+- `recv(*session) []u8` — reads a framed message; fatals on timeout.
+  Default is 30 s; override with `E2E_RECV_TIMEOUT_MS=<ms>`. The
+  Makefile's `test` target bumps this to 60 s so parallel shards have
+  comfortable headroom under CPU contention. The recv loop also peeks
+  the child every ~250 ms during the wait so a crashed server fails
+  fast with a clear diagnostic rather than waiting out the budget.
+  Caller frees.
 - `recv_with_deadline(*session, duration) ([]u8 | void)` — soft variant.
   Returns void on timeout, used by tests that need to assert silence.
 - `expect_no_message(*session, duration) void` — drains and fatals if a
