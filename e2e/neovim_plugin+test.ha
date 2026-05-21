@@ -100,16 +100,18 @@ vim.api.nvim_create_autocmd("LspAttach", {
     -- Confirm the plugin can actually round-trip a request. Position
     -- 0:11 lands on "main" in the test buffer; the LSP server has to
     -- be alive and parsing the document for a non-error response.
-    -- The timeout is generous (15s) because the server may still be
-    -- draining its initial stdlib-indexing batches when the hover
-    -- arrives, and a tight 5s budget tripped under parallel-shard
-    -- load on CI.
+    -- The timeout is generous (60s) because three things are stacked
+    -- in one process here - nvim, the lua plugin, and the LSP server
+    -- - and a real hover from cold cache under parallel-shard load
+    -- can run several seconds even when no individual layer is hung.
+    -- A 15s budget tripped under load; if you see HOVER_FAILED:...:
+    -- timeout here, the fix is bumping this number, not the test.
     local params = {
       textDocument = { uri = vim.uri_from_bufnr(args.buf) },
       position = { line = 0, character = 11 },
     }
     local result, err = vim.lsp.buf_request_sync(
-      args.buf, "textDocument/hover", params, 15000)
+      args.buf, "textDocument/hover", params, 60000)
     if err or not result then
       write_sentinel("HOVER_FAILED:" .. name .. ":" .. tostring(err))
       vim.defer_fn(function() vim.cmd("qa!") end, 50)
@@ -138,7 +140,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
 vim.defer_fn(function()
   write_sentinel("TIMEOUT")
   vim.cmd("qa!")
-end, 25000)
+end, 90000)
 `;
 
 // A trivially-parseable Hare buffer. The exact contents don't matter -
@@ -218,10 +220,12 @@ const NVIM_BUFFER_HA: str = `export fn main() void = void;
 	// nvim owns the slave now.
 	io::close(slave)!;
 
-	// Outer budget covers the lua fallback (25s) plus a small margin
+	// Outer budget covers the lua fallback (90s) plus a small margin
 	// so we always observe a sentinel rather than killing nvim mid-
-	// write.
-	const sentinel = wait_for_sentinel(master, 30 * time::SECOND);
+	// write. The lua side now waits 60s for the LSP hover round-trip
+	// and falls back at 90s; we wait 120s here so any sentinel,
+	// including TIMEOUT, has a chance to land on disk.
+	const sentinel = wait_for_sentinel(master, 120 * time::SECOND);
 
 	// Best-effort cleanup. nvim should have exited via `qa!`; if
 	// it hasn't, SIGTERM it.
