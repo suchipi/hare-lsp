@@ -3,17 +3,17 @@
 
 import * as assert from "node:assert";
 import * as vscode from "vscode";
-import { openAndWaitForServer, waitFor } from "./helpers";
+import { openAndShow, waitFor, PROVIDER_TIMEOUT_MS } from "./helpers";
 
 suite("definition", () => {
   test("vscode.executeDefinitionProvider jumps cross-file", async () => {
-    const doc = await openAndWaitForServer("definition/b.ha");
+    const doc = await openAndShow("definition/b.ha");
 
     // `export fn caller() int = shared_helper();` is line 1 (after
     // the doc comment on line 0). `shared_helper` starts at col 25.
     const pos = new vscode.Position(1, 25);
 
-    // Workspace indexing of `a.ha` is asynchronous; retry until the
+    // Workspace indexing of a.ha is asynchronous; retry until the
     // cross-file lookup resolves.
     let locations: (vscode.Location | vscode.LocationLink)[] = [];
     await waitFor(
@@ -26,7 +26,7 @@ suite("definition", () => {
         const uri = "targetUri" in first ? first.targetUri : first.uri;
         return uri.fsPath.endsWith("a.ha");
       },
-      5000,
+      PROVIDER_TIMEOUT_MS,
       "definition never resolved to a.ha",
     );
 

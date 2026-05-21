@@ -186,15 +186,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # plenary.nvim is gitignored under e2e-nvim/.deps/. Caching across
-      # runs avoids cloning on every CI invocation; the key is bound to
-      # the pinned tag in the Makefile, so a tag bump invalidates the
-      # cache automatically.
+      # plenary.nvim is gitignored under e2e-nvim/.deps/. Cache its
+      # clone across runs, keyed on the Makefile's contents - bumping
+      # PLENARY_TAG (or any other Makefile change) invalidates the
+      # cache, and the Makefile rule re-clones. Without the
+      # hashFiles binding, bumping PLENARY_TAG would silently restore
+      # the previous tag from cache (the Makefile rule skips its
+      # `git clone` when the .deps dir already exists).
       - name: Cache plenary.nvim
         uses: actions/cache@v4
         with:
           path: e2e-nvim/.deps/plenary.nvim
-          key: plenary-v0.1.4
+          key: plenary-${{ hashFiles('Makefile') }}
 
       - name: Build and run plenary suite in Alpine
         run: |

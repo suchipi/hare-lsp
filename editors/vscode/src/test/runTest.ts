@@ -101,7 +101,24 @@ function writeFixtures(workspaceDir: string): void {
       "export type gamma = struct { x: int };",
       "",
     ].join("\n"),
-    "inlay.ha": "let g_x = 1;\n",
+    "inlay.ha": [
+      "// Π es una constante; abajo, un entero implícito 中文 mezcla.",
+      "const PI_NAME: str = \"🎉🔥 中文\"; let g_x = 1;",
+      "",
+    ].join("\n"),
+    "diagnostics.ha": [
+      "// Función rota ★ 中文 🎉 — un café antes de cerrar la llave.",
+      "export fn main() void = {",
+      "\tlet x = 1;",
+      "",
+    ].join("\n"),
+    "rename.ha": [
+      "// Función auxiliar ★ 中文 🎉 — renombrar para más claridad.",
+      "fn old_name() int = 1;",
+      "",
+      "export fn caller() int = old_name() + old_name();",
+      "",
+    ].join("\n"),
   };
   for (const [rel, contents] of Object.entries(files)) {
     const full = path.join(workspaceDir, rel);

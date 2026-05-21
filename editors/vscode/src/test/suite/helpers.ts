@@ -16,43 +16,23 @@ export function fixtureUri(relpath: string): vscode.Uri {
   return vscode.Uri.file(path.join(workspaceRoot(), relpath));
 }
 
-// Opens a document and waits for the language client to attach to it.
-// `executeXProvider` commands only return useful results once the
-// extension has been activated and the client is ready; otherwise the
-// command resolves with `undefined` / `null`.
-export async function openAndWaitForServer(
+// Opens a fixture, confirms its languageId resolves to `hare` (so the
+// LSP documentSelector matches), and ensures the extension is active.
+// Does NOT wait for any LSP response - each spec polls the specific
+// provider it cares about with `waitFor`, because the right "ready"
+// signal is provider-specific (a fixture with parse errors might emit
+// no document symbols but still answer completion requests).
+export async function openAndShow(
   relpath: string,
 ): Promise<vscode.TextDocument> {
   const ext = vscode.extensions.getExtension("local.hare-lsp");
   assert.ok(ext, "extension `local.hare-lsp` not found in test host");
-
   const doc = await vscode.workspace.openTextDocument(fixtureUri(relpath));
   assert.strictEqual(doc.languageId, "hare",
-    "expected document languageId === 'hare' (so the LSP documentSelector "
-    + "matches); got: " + doc.languageId);
+    "expected languageId === 'hare' so the LSP documentSelector matches; got: "
+    + doc.languageId);
   await vscode.window.showTextDocument(doc);
-
-  if (!ext.isActive) {
-    await ext.activate();
-  }
-  // Even after activate() resolves, the LanguageClient has to send
-  // didOpen and the server has to parse the document before
-  // executeDocumentSymbolProvider returns a meaningful array. We
-  // accept any defined result here - empty `[]` still proves a
-  // provider is registered (and some fixtures intentionally contain
-  // parse errors, so a non-empty array isn't a usable signal). The
-  // individual tests below retry their own provider calls so a
-  // brief race after didOpen settles itself.
-  await waitFor(
-    async () => {
-      const symbols = await vscode.commands.executeCommand<
-        vscode.DocumentSymbol[] | vscode.SymbolInformation[] | undefined
-      >("vscode.executeDocumentSymbolProvider", doc.uri);
-      return symbols !== undefined;
-    },
-    20000,
-    "no document symbol provider responded for " + relpath,
-  );
+  if (!ext.isActive) await ext.activate();
   return doc;
 }
 
@@ -72,3 +52,8 @@ export async function waitFor(
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// Default per-provider wait budget. Cold-start CI containers can take
+// a couple of seconds to spawn hare-lsp and parse the first fixture;
+// 20s leaves comfortable headroom.
+export const PROVIDER_TIMEOUT_MS = 20000;
