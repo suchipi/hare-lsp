@@ -167,7 +167,8 @@ test-serial: hare-lsp harefmt .tmp/all-tests
 
 clean:
 	rm -rf hare-lsp harefmt .cache
-	rm -rf editors/vscode/dist editors/vscode/node_modules editors/vscode/*.vsix
+	rm -rf editors/vscode/dist editors/vscode/node_modules editors/vscode/out editors/vscode/.vscode-test editors/vscode/*.vsix
+	rm -rf e2e-nvim/.deps
 	rm -f .tmp/all-tests .tmp/test-shard-*.log
 	rm -f hare/parse/*.ha hare/parse/.stamp
 
@@ -231,4 +232,43 @@ vscode-install: vscode-extension
 vscode-uninstall:
 	code --uninstall-extension local.hare-lsp
 
-.PHONY: all check-deps vendor-hare-parse test test-serial clean unstuck install uninstall vscode-extension vscode-test vscode-install vscode-uninstall
+# Runs the @vscode/test-electron suite that drives the real
+# Extension Development Host. Each spec exercises the in-tree
+# extension's LanguageClient by calling vscode.execute*Provider
+# commands; assertions are on API return values, not pixels. NOT a
+# dependency of `make test` for the same reason as `vscode-test`.
+# First run downloads VSCode into editors/vscode/.vscode-test/ (cached).
+vscode-e2e: hare-lsp
+	@if [ ! -d "$(VSCODE_DIR)/node_modules/@vscode/test-electron" ]; then \
+		cd $(VSCODE_DIR) && npm install; \
+	fi
+	cd $(VSCODE_DIR) && HARE_LSP_BIN="$(PWD)/hare-lsp" npm run test:e2e
+
+# --- Neovim plenary e2e ---------------------------------------------
+
+NVIM_DIR = e2e-nvim
+PLENARY_DIR = $(NVIM_DIR)/.deps/plenary.nvim
+PLENARY_TAG = v0.1.4
+
+# Lazy-clones plenary the first time `make nvim-test` runs, pinning the
+# checkout to a known tag so CI and local runs see the same code. The
+# `.deps/` tree is gitignored.
+$(PLENARY_DIR)/.git:
+	@mkdir -p $(NVIM_DIR)/.deps
+	git clone --depth 1 --branch $(PLENARY_TAG) \
+		https://github.com/nvim-lua/plenary.nvim $(PLENARY_DIR)
+
+# Runs the plenary spec suite against a real Neovim, driving the
+# in-tree editors/nvim plugin against ./hare-lsp. Each spec spawns its
+# own LSP client (the plugin uses `vim.lsp.start`), so tests are
+# isolated from each other. NOT a dependency of `make test`: users who
+# run hare-lsp from VSCode / Helix / Emacs shouldn't need Neovim
+# installed to run the Hare-side suite. CI runs this as a separate
+# gating job.
+nvim-test: hare-lsp $(PLENARY_DIR)/.git
+	HARE_LSP_BIN="$(PWD)/hare-lsp" \
+	HAREPATH="$(HAREPATH)" \
+		nvim --headless --noplugin -u $(NVIM_DIR)/minimal_init.lua \
+			-c "lua require('plenary.test_harness').test_directory('$(NVIM_DIR)/spec/', { minimal_init = '$(NVIM_DIR)/minimal_init.lua', sequential = true })"
+
+.PHONY: all check-deps vendor-hare-parse test test-serial clean unstuck install uninstall vscode-extension vscode-test vscode-e2e vscode-install vscode-uninstall nvim-test
