@@ -218,16 +218,22 @@
     "bundle:watch": "node esbuild.js --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "compile:e2e": "tsc -p tsconfig.test.json",
+    "test:e2e": "npm run bundle && npm run compile:e2e && node out/test/runTest.js",
     "package": "npm run typecheck && npm run test && npm run bundle -- --production && vsce package --allow-missing-repository"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^24.0.0",
     "@types/vscode": "^1.82.0",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
+    "glob": "^13.0.6",
+    "mocha": "^11.7.6",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6"
   }

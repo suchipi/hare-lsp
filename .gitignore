@@ -5,6 +5,7 @@
 editors/vscode/node_modules/
 editors/vscode/dist/
 editors/vscode/out/
+editors/vscode/.vscode-test/
 editors/vscode/*.vsix
 /.claude/*.lock
 
@@ -12,3 +13,6 @@ editors/vscode/*.vsix
 # and README are tracked. See hare/parse/README.md.
 /hare/parse/*.ha
 /hare/parse/.stamp
+
+# Auto-cloned by `make nvim-test` (plenary.nvim and any future test deps).
+/e2e-nvim/.deps/

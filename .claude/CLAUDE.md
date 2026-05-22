@@ -17,10 +17,12 @@ The project is driven entirely by the [Makefile](Makefile). It pins `HAREPATH` t
 - `make` — builds `./hare-lsp` (checks for `hare-json` at `/usr/local/src/hare/third-party/encoding/json/` first).
 - `make test` — builds the binary, then runs unit tests AND the e2e suite. The e2e tests spawn the actual `./hare-lsp` binary over OS pipes; they require the binary to exist, which is why `test` depends on `hare-lsp`. This target does **not** run the VSCode extension's vitest suite, because users running hare-lsp from non-VSCode editors shouldn't need Node installed.
 - `make vscode-test` — runs the VSCode extension's vitest suite (TypeScript-side logic, currently the terminal-output parser that drives the test-status gutter). When you run `make test`, also run `make vscode-test` so the extension tests stay green — they cover code that ships from this repo even though they're gated separately.
+- `make vscode-e2e` — runs the `@vscode/test-electron` suite under [editors/vscode/src/test/](editors/vscode/src/test/). Spawns a real VSCode build, loads the in-tree extension, and drives the LanguageClient via `vscode.execute*Provider` commands; covers capability negotiation and client-side response shaping that pure-LSP harnesses cannot. NOT a dependency of `make test`. First run downloads VSCode into `editors/vscode/.vscode-test/`.
+- `make nvim-test` — runs the plenary-driven Neovim e2e suite under [e2e-nvim/](e2e-nvim/). Drives the in-tree Neovim plugin against `./hare-lsp` from a real `nvim --headless` session, exercising capability negotiation, client-computed `didChange` diffs, and `WorkspaceEdit` consumption that the synthetic Hare-side e2e cannot. NOT a dependency of `make test`: users running hare-lsp from non-Neovim editors shouldn't need Neovim + plenary installed. CI runs this as a separate gating job. First run lazy-clones plenary into `e2e-nvim/.deps/`.
 - `make clean` — removes `./hare-lsp`, `.cache/`, and the VSCode extension build artifacts.
 - `make vscode-install` — builds and installs the in-tree VSCode extension at [editors/vscode/](editors/vscode/).
 
-There is no separate lint step; rely on `hare build` errors, `make test`, and `make vscode-test`.
+There is no separate lint step; rely on `hare build` errors, `make test`, `make vscode-test`, `make vscode-e2e`, and `make nvim-test`.
 
 Before committing, run `./harefmt --write .` to format Hare files in the repo.
 
