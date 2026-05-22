@@ -137,6 +137,15 @@ jobs:
             make hare-lsp
           '
 
+      # The docker run above writes files (.tmp/, .cache/, hare/parse/*,
+      # hare-lsp) as root because the container runs as root and bind-
+      # mounts the workspace. Subsequent host steps run as the runner
+      # user, which then cannot mkdir under .tmp/ (where runTest.ts
+      # writes the per-suite workspace + user-data-dir). Reclaim
+      # ownership so the rest of the job can write.
+      - name: Reclaim workspace ownership from the Alpine container
+        run: sudo chown -R "$(id -u):$(id -g)" .
+
       - name: Install vscode extension dependencies
         working-directory: editors/vscode
         run: npm ci
