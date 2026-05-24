@@ -140,9 +140,10 @@ export fn apply_configuration_response(s: *server, result: json::value) void = {
 	const old_enable_build = s.config.enable_build_diagnostics;
 	const old_ih_params = s.config.inlay_hints_parameter_names;
 	const old_ih_inferred = s.config.inlay_hints_inferred_types;
+	const old_ih_depth = s.config.inlay_hints_inferred_types_max_depth;
 	apply_settings(s, arr[0]);
 	refresh_after_config_change(s, old_debounce, old_enable_build, old_ih_params,
-		old_ih_inferred);
+		old_ih_inferred, old_ih_depth);
 };
 
 // Handles the workspace/didChangeConfiguration notification.
@@ -192,6 +193,7 @@ export fn handle_did_change_configuration(
 	const old_enable_build = s.config.enable_build_diagnostics;
 	const old_ih_params = s.config.inlay_hints_parameter_names;
 	const old_ih_inferred = s.config.inlay_hints_inferred_types;
+	const old_ih_depth = s.config.inlay_hints_inferred_types_max_depth;
 
 	// If it has a "hare" key, drill in; otherwise treat the value itself
 	// as the hare section.
@@ -201,7 +203,7 @@ export fn handle_did_change_configuration(
 		case let p: *json::value =>
 			apply_settings(s, *p);
 			refresh_after_config_change(s, old_debounce, old_enable_build, old_ih_params,
-				old_ih_inferred);
+				old_ih_inferred, old_ih_depth);
 			return;
 		case => void;
 		};
@@ -209,7 +211,7 @@ export fn handle_did_change_configuration(
 	};
 	apply_settings(s, settings);
 	refresh_after_config_change(s, old_debounce, old_enable_build, old_ih_params,
-		old_ih_inferred);
+		old_ih_inferred, old_ih_depth);
 };
 
 // Re-publishes diagnostics and sends inlayHint/refresh when the
@@ -222,13 +224,15 @@ fn refresh_after_config_change(
 	old_enable_build: bool,
 	old_ih_params: bool,
 	old_ih_inferred: bool,
+	old_ih_depth: u32,
 ) void = {
 	const diag_changed =
 		old_debounce != s.config.diagnostics_debounce_ms ||
 		old_enable_build != s.config.enable_build_diagnostics;
 	const ih_changed =
 		old_ih_params != s.config.inlay_hints_parameter_names ||
-		old_ih_inferred != s.config.inlay_hints_inferred_types;
+		old_ih_inferred != s.config.inlay_hints_inferred_types ||
+		old_ih_depth != s.config.inlay_hints_inferred_types_max_depth;
 
 	if (diag_changed) {
 		// Republish parse diagnostics for every open doc immediately

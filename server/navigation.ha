@@ -1249,11 +1249,6 @@ fn infer_type_from_init(
 	return infer_type_from_init_at(srv, doc, init, 0);
 };
 
-// Bounds the local-identifier follow-through in infer_type_from_init. Eight
-// hops is comfortably more than any real chain (`let a = b; let b = c; ...`)
-// and protects against pathological cycles in malformed code.
-def MAX_LOCAL_INFER_DEPTH: u32 = 8;
-
 // @param srv: borrowed
 // @param doc: borrowed
 // @param init: borrowed
@@ -1354,7 +1349,7 @@ fn infer_access_expr_type(
 	off: size,
 	depth: u32,
 ) (str | void) = {
-	if (depth >= MAX_LOCAL_INFER_DEPTH) return void;
+	if (depth >= srv.config.inlay_hints_inferred_types_max_depth) return void;
 	const id = match (a) {
 	case let id: ast::access_identifier =>
 		yield id;
