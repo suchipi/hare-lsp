@@ -2276,6 +2276,75 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(value, ": bool"));
 };
 
+// Chain: a -> 1; b -> a; c -> b. The local-identifier follow in
+// infer_access_expr_type is bounded by
+// `inlay_hints_inferred_types_max_depth`. With depth=1, walking from c
+// to b's init (`a`) trips the limit and the hover falls back without
+// the resolved type. With depth=3, the chain resolves all the way to
+// the literal, so hover renders `let c: int`.
+@test fn hover_let_local_chain_bounded_by_inferred_types_max_depth() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = "fn f() void = { let a = 1; let b = a; let c = b; };\\n";
+	nav_open(&s, "file:///chain.ha", src);
+
+	const col = find_col(src, "c = b");
+	const params = pos_params("file:///chain.ha", 0, col);
+	defer free(params);
+
+	// depth=1: the access_expr at depth=0 enters once (looking up
+	// `b`), recurses with depth=1, and the next access_expr (looking
+	// up `a`) hits `depth >= max_depth` and returns void. The chain
+	// is not resolved, so the hover does not contain ": int".
+	s.config.inlay_hints_inferred_types_max_depth = 1;
+	let pv1 = json::loadstr(params)!;
+	defer json::finish(pv1);
+	const r1 = lsp::request {
+		id = 6100.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv1,
+	};
+	defer free(r1.method);
+	handle_hover(&s, r1);
+	const v1 = skip_to_response(out, 6100.0);
+	defer json::finish(v1);
+	const v1_str = hover_value_str(v1);
+	assert(strings::contains(v1_str, "let c"));
+	assert(
+		!strings::contains(v1_str, ": int"),
+		"with depth=1 hover for `c` must not resolve through the chain to int"
+	);
+
+	// depth=3: the chain has room to walk c -> b -> a -> literal.
+	s.config.inlay_hints_inferred_types_max_depth = 3;
+	let pv2 = json::loadstr(params)!;
+	defer json::finish(pv2);
+	const r2 = lsp::request {
+		id = 6101.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv2,
+	};
+	defer free(r2.method);
+	handle_hover(&s, r2);
+	const v2 = skip_to_response(out, 6101.0);
+	defer json::finish(v2);
+	const v2_str = hover_value_str(v2);
+	assert(strings::contains(v2_str, "let c"));
+	assert(
+		strings::contains(v2_str, ": int"),
+		"with depth=3 hover for `c` must resolve through the chain to int"
+	);
+};
+
+fn hover_value_str(v: json::value) str = {
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	return *(json::get(&contents, "value") as *json::value) as str;
+};
+
 @test fn hover_on_use_module_shows_readme() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);

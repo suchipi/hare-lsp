@@ -300,6 +300,30 @@ fn cleanup_server(
 	assert(strings::contains(text, "workspace/inlayHint/refresh"));
 };
 
+@test fn did_change_configuration_with_inlay_hints_depth_change_emits_refresh(
+
+) void = {
+	let (s, scan, in_buf, out) = fresh_server();
+	defer cleanup_server(&s, scan, in_buf, out);
+
+	// Bump inferredTypesMaxDepth from the default 10 to 5.
+	const params =
+		`{"settings":{"hare":{"inlayHints":{"inferredTypesMaxDepth":5}}}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const n = lsp::notification {
+		method = strings::dup("workspace/didChangeConfiguration")!,
+		params = pv,
+	};
+	defer free(n.method);
+	handle_did_change_configuration(&s, n);
+
+	assert(s.config.inlay_hints_inferred_types_max_depth == 5);
+	// Should have sent a workspace/inlayHint/refresh.
+	const text = strings::fromutf8(memio::buffer(out))!;
+	assert(strings::contains(text, "workspace/inlayHint/refresh"));
+};
+
 @test fn did_change_configuration_with_no_change_is_quiet() void = {
 	let (s, scan, in_buf, out) = fresh_server();
 	defer cleanup_server(&s, scan, in_buf, out);
