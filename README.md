@@ -105,7 +105,7 @@ The canonical JSON Schema for these settings is checked in at [editors/vscode/sc
 
 `make` also builds `./harefmt`, a thin CLI wrapping the same formatter the LSP uses for `textDocument/formatting`. Use it from the shell or CI to format `*.ha` files outside an editor.
 
-The formatter is fully opinionated and follows Hare's [style guide](https://harelang.org/documentation/usage/style.html): tab-indented at column 0, trailing whitespace stripped, single trailing newline. There are no style options, and the LSP's `textDocument/formatting` calls the same engine, so editor-side and CLI-side output are byte-identical for the same input.
+The formatter is fully opinionated and follows Hare's [style guide](https://harelang.org/documentation/usage/style.html). There are no style options, and the LSP's `textDocument/formatting` calls the same engine, so editor-side and CLI-side output are byte-identical for the same input.
 
 ### Usage
 
