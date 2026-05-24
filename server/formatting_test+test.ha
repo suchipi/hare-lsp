@@ -197,8 +197,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 // content via a string literal - byte length still differs from rune
 // length, which is what the project rune-vs-byte rule cares about.
 @test fn format_source_normalizes_eof() void = {
-	const input =
-		strings::toutf8("export fn alphabet() str = \"αβγ\";\n   \n\n");
+	const input = strings::toutf8(
+		"export fn alphabet() str = \"αβγ\";\n   \n\n");
 	const out = format_source(input, "<test>") as str;
 	defer free(out);
 	assert(strings::hassuffix(out, "\n"));
@@ -210,8 +210,7 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn format_source_appends_missing_final_newline() void = {
 	// Trailing line comment with a multi-byte rune; the formatter must
 	// preserve the comment AND add the missing terminal newline.
-	const input =
-		strings::toutf8("export fn x() void = void; // φοο");
+	const input = strings::toutf8("export fn x() void = void; // φοο");
 	const out = format_source(input, "<test>") as str;
 	defer free(out);
 	assert(strings::hassuffix(out, "\n"));
