@@ -542,6 +542,7 @@ If you're coming from another language and reach for one of these, stop:
 - The tutorial: <https://harelang.org/tutorials/introduction/>.
 - The specification: <https://harelang.org/specification/> (terse but complete).
 - The stdlib source: `/usr/local/src/hare/stdlib/` — small enough to grep; treat it as documentation.
+- The project library: <https://harelang.org/project-library/> — a curated index of third-party Hare projects. Good for finding idiomatic example code when the stdlib doesn't cover what you need. In particular, <https://git.sr.ht/~sircmpwn/hare-datastructures/> is a useful reference for common data structures (heaps, lists, etc.) written in idiomatic Hare.
 - `haredoc <module>` prints the documentation for a module.
 - This repo's `CLAUDE.md` for architecture and build/test commands.
 - `.claude/rules/` for project conventions that override or extend this guide.
