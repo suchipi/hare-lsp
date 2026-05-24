@@ -161,7 +161,31 @@
               "type": "string"
             },
             "default": [],
-            "description": "Build tags passed to `hare build` (e.g. [\"+linux\", \"+x86_64\"])."
+            "description": "Build tags forwarded to every `hare {build,test,run}` invocation the server spawns (as `-T <tag>` pairs), e.g. [\"+linux\", \"+x86_64\"]."
+          },
+          "hare.extraArgs.build": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Extra arguments appended to the on-save `hare build` type-check pass. Each element is one argv slot (no shell splitting). e.g. [\"-lc\"] to link libc."
+          },
+          "hare.extraArgs.test": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Extra arguments appended to `hare test` invoked via the test codelens. Each element is one argv slot (no shell splitting)."
+          },
+          "hare.extraArgs.run": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Extra arguments appended to `hare run` invoked via the run codelens. Each element is one argv slot (no shell splitting)."
           },
           "hare.diagnostics.debounceMs": {
             "type": "number",

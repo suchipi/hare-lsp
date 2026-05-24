@@ -133,6 +133,22 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	let argv: []str = [];
 	defer free(argv);
 	append(argv, subcmd)!;
+	for (let i = 0z; i < len(s.config.tags); i += 1) {
+		append(argv, "-T")!;
+		append(argv, s.config.tags[i])!;
+	};
+	const subcmd_extras = if (subcmd == "build") {
+		yield s.config.extra_args_build;
+	} else if (subcmd == "test") {
+		yield s.config.extra_args_test;
+	} else if (subcmd == "run") {
+		yield s.config.extra_args_run;
+	} else {
+		yield []: []str;
+	};
+	for (let i = 0z; i < len(subcmd_extras); i += 1) {
+		append(argv, subcmd_extras[i])!;
+	};
 	for (let i = 0z; i < len(extra); i += 1) {
 		append(argv, extra[i])!;
 	};

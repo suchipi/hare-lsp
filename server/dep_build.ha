@@ -236,6 +236,9 @@ fn run_build_obj(
 		append(argv, "-T")!;
 		append(argv, s.config.tags[i])!;
 	};
+	for (let i = 0z; i < len(s.config.extra_args_build); i += 1) {
+		append(argv, s.config.extra_args_build[i])!;
+	};
 	append(argv, module_dir)!;
 
 	return spawn_hare_capture_stderr(s.config.hare_path, argv, cwd, harepath,

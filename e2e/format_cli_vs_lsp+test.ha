@@ -57,13 +57,13 @@ use strings;
 	let v = json::loadstr(text)!;
 	defer json::finish(v);
 	const obj = v as json::object;
-	const arr =
-		*(json::get(&obj, "result") as *json::value) as []json::value;
-	assert(len(arr) == 1,
-		"non-canonical input must produce exactly one full-document edit");
+	const arr = *(json::get(&obj, "result") as *json::value) as []json::value;
+	assert(
+		len(arr) == 1,
+		"non-canonical input must produce exactly one full-document edit"
+	);
 	const edit = arr[0] as json::object;
-	const new_text =
-		*(json::get(&edit, "newText") as *json::value) as str;
+	const new_text = *(json::get(&edit, "newText") as *json::value) as str;
 
 	const cli_text = strings::fromutf8(formatted_via_cli)!;
 	if (new_text != cli_text) {
@@ -73,10 +73,16 @@ use strings;
 	};
 	// Belt-and-suspenders: EOF must be a single '\n' with no trailing
 	// whitespace.
-	assert(strings::hassuffix(cli_text, ";\n"),
-		"formatter must emit a single trailing newline");
-	assert(!strings::hassuffix(cli_text, " \n"),
-		"formatter must strip trailing whitespace before the final newline");
-	assert(!strings::hassuffix(cli_text, "\n\n"),
-		"formatter must collapse trailing blank lines to one newline");
+	assert(
+		strings::hassuffix(cli_text, ";\n"),
+		"formatter must emit a single trailing newline"
+	);
+	assert(
+		!strings::hassuffix(cli_text, " \n"),
+		"formatter must strip trailing whitespace before the final newline"
+	);
+	assert(
+		!strings::hassuffix(cli_text, "\n\n"),
+		"formatter must collapse trailing blank lines to one newline"
+	);
 };

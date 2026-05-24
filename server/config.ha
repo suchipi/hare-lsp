@@ -25,11 +25,29 @@ export type config = struct {
 	//
 	// @owned
 	harepath: str,
-	// Build tags passed to `hare build` and module resolution. e.g.
-	// ["+linux", "+x86_64"].
+	// Build tags forwarded to every `hare {build,test,run}` invocation
+	// the server spawns (as `-T <tag>` pairs), e.g. ["+linux", "+x86_64"].
 	//
 	// @owned
 	tags: []str,
+	// Extra arguments appended verbatim to `hare build` when the server
+	// runs the on-save type-check pass. Each element occupies one argv
+	// slot (no shell splitting). Inserted after the standard flags and
+	// `-T` tags, before the trailing module path. e.g. ["-lc"] to link
+	// libc, ["-D", "FOO=1"] to define a constant.
+	//
+	// @owned
+	extra_args_build: []str,
+	// Extra arguments appended verbatim to `hare test` when invoked via
+	// the test codelens. Same shape and positioning as `extra_args_build`.
+	//
+	// @owned
+	extra_args_test: []str,
+	// Extra arguments appended verbatim to `hare run` when invoked via
+	// the run codelens. Same shape and positioning as `extra_args_build`.
+	//
+	// @owned
+	extra_args_run: []str,
 	// Diagnostics debounce interval in milliseconds. After the last
 	// document change, the server waits this long before invoking
 	// `hare build` for type-check diagnostics. Defaults to 300.
@@ -67,6 +85,9 @@ export fn default_config() config = config {
 	hare_path = strings::dup("hare")!,
 	harepath = strings::dup("")!,
 	tags = [],
+	extra_args_build = [],
+	extra_args_test = [],
+	extra_args_run = [],
 	diagnostics_debounce_ms = 300,
 	enable_build_diagnostics = true,
 	build_timeout_ms = 60000,
@@ -83,10 +104,18 @@ export fn default_config() config = config {
 export fn finish_config(c: *config) void = {
 	free(c.hare_path);
 	free(c.harepath);
-	for (let i = 0z; i < len(c.tags); i += 1) {
-		free(c.tags[i]);
+	free_str_slice(c.tags);
+	free_str_slice(c.extra_args_build);
+	free_str_slice(c.extra_args_test);
+	free_str_slice(c.extra_args_run);
+};
+
+// Frees every element of `slice` and then the slice itself.
+fn free_str_slice(slice: []str) void = {
+	for (let i = 0z; i < len(slice); i += 1) {
+		free(slice[i]);
 	};
-	free(c.tags);
+	free(slice);
 };
 
 // Sends a workspace/configuration request to pull the "hare" settings
@@ -279,22 +308,16 @@ export fn apply_settings(s: *server, v: json::value) void = {
 	case => void;
 	};
 
-	match (json::get(&o, "tags")) {
+	apply_str_array(&o, "tags", &s.config.tags);
+
+	// "extraArgs": { "build": [...], "test": [...], "run": [...] }
+	match (json::get(&o, "extraArgs")) {
 	case let p: *json::value =>
 		match (*p) {
-		case let arr: []json::value =>
-			for (let i = 0z; i < len(s.config.tags); i += 1) {
-				free(s.config.tags[i]);
-			};
-			free(s.config.tags);
-			s.config.tags = [];
-			for (let i = 0z; i < len(arr); i += 1) {
-				match (arr[i]) {
-				case let s2: str =>
-					append(s.config.tags, strings::dup(s2)!)!;
-				case => void;
-				};
-			};
+		case let eobj: json::object =>
+			apply_str_array(&eobj, "build", &s.config.extra_args_build);
+			apply_str_array(&eobj, "test", &s.config.extra_args_test);
+			apply_str_array(&eobj, "run", &s.config.extra_args_run);
 		case => void;
 		};
 	case => void;
@@ -408,6 +431,35 @@ export fn apply_settings(s: *server, v: json::value) void = {
 				&s.config.limits.max_total_buffer_bytes);
 			apply_limit_u64(&lobj, "maxDiagnosticsPerFile",
 				&s.config.limits.max_diagnostics_per_file);
+		case => void;
+		};
+	case => void;
+	};
+};
+
+// Reads `obj[key]` as an array of strings, replacing `*out` with freshly
+// duplicated copies. Missing keys, non-array values, and non-string array
+// elements are silently skipped (per-element: non-string entries are
+// dropped, the rest of the array is still applied). An empty array
+// clears `*out`.
+//
+// @param obj: borrowed
+// @param key: borrowed
+// @param out: borrowed
+fn apply_str_array(obj: *json::object, key: str, out: *[]str) void = {
+	match (json::get(obj, key)) {
+	case let p: *json::value =>
+		match (*p) {
+		case let arr: []json::value =>
+			free_str_slice(*out);
+			*out = [];
+			for (let i = 0z; i < len(arr); i += 1) {
+				match (arr[i]) {
+				case let s: str =>
+					append(out, strings::dup(s)!)!;
+				case => void;
+				};
+			};
 		case => void;
 		};
 	case => void;

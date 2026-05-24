@@ -20,7 +20,32 @@
       "type": "array",
       "items": { "type": "string" },
       "default": [],
-      "description": "Build tags passed to `hare build` and module resolution, e.g. [\"+linux\", \"+x86_64\"]."
+      "description": "Build tags forwarded to every `hare {build,test,run}` invocation the server spawns (as `-T <tag>` pairs), e.g. [\"+linux\", \"+x86_64\"]."
+    },
+    "extraArgs": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Extra arguments appended verbatim to specific `hare` subcommands the server spawns. Each element occupies one argv slot (no shell splitting). Inserted after the standard flags and `-T` tags, before any trailing positional argument (module path, test-name filter).",
+      "properties": {
+        "build": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Extra arguments for the on-save `hare build` type-check pass, e.g. [\"-lc\"] to link libc, [\"-D\", \"FOO=1\"] to define a constant."
+        },
+        "test": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Extra arguments for `hare test` invoked via the test codelens."
+        },
+        "run": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Extra arguments for `hare run` invoked via the run codelens."
+        }
+      }
     },
     "diagnostics": {
       "type": "object",
