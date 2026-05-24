@@ -274,6 +274,25 @@ export fn run(s: *server) int = {
 			drain_index_job(s);
 		};
 
+		// If any open document has pending diagnostics whose debounce
+		// window hasn't elapsed yet, wait at most until the soonest
+		// deadline for the next LSP message. If the window expires
+		// before any message arrives, flush the trailing edit and
+		// loop again so the publish doesn't hang on the next inbound
+		// byte (which, with the client idle, may never come).
+		match (next_trailing_flush_deadline_ms(s)) {
+		case let ms: i64 =>
+			if (ms <= 0) {
+				flush_pending_diagnostics(s);
+				continue;
+			};
+			if (!input_ready_within(s, ms)) {
+				flush_pending_diagnostics(s);
+				continue;
+			};
+		case void => void;
+		};
+
 		const body = match (lsp::read(&s.reader)) {
 		case let b: []u8 =>
 			yield b;
@@ -316,10 +335,11 @@ export fn run(s: *server) int = {
 
 		dispatch(s, msg);
 		lsp::finish_message(msg);
-		// Flush any pending debounced diagnostics now that we've
-		// processed a message. Rapid didChange-only traffic naturally
-		// coalesces; a trailing edit publishes once any later message
-		// arrives.
+		// Final attempt to publish anything whose debounce window
+		// expired during dispatch. The main loop's trailing-flush
+		// wait above is the primary fallback when the client goes
+		// quiet; this call covers the case where a message happens
+		// to arrive just as the window expires.
 		flush_pending_diagnostics(s);
 		// Drain one batch of background workspace indexing, if any.
 		// Cooperative: each batch processes a small number of files

@@ -494,3 +494,45 @@ use strings;
 		"broken doc must produce at least one severity-1 (Error) diagnostic"
 	);
 };
+
+// Trailing-flush regression: after a didChange the debounce window
+// suppresses the immediate publish, but the main loop's
+// input_ready_within wait must fire the flush once the window expires
+// even when the client sends no further messages. Without that, a
+// final keystroke would leave the editor stuck on stale diagnostics
+// until any later LSP traffic happens to arrive.
+//
+// Uses the default debounce (300ms); recv's 30s budget is plenty.
+@test fn e2e_publish_diagnostics_after_debounce_without_further_messages(
+
+) void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	const uri = "file:///trailing_flush.ha";
+	// Open clean: didOpen always publishes immediately, so drain
+	// the empty-diagnostics notification first.
+	open_doc(&s, uri, "export fn main() void = void;\n");
+	free(wait_for_publish_diagnostics(&s, uri));
+
+	// Replace with broken code via didChange (full-document sync). The
+	// debounce window starts here. We deliberately send nothing else,
+	// so only the trailing-flush path can publish the new diagnostics.
+	const change =
+		strings::concat(
+			`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"`,
+			uri,
+			`","version":2},"contentChanges":[{"text":"export fn bad( = void;\n"}]}}`)!;
+	defer free(change);
+	send(&s, strings::toutf8(change));
+
+	const body = wait_for_publish_diagnostics(&s, uri);
+	defer free(body);
+	const (jv, diags) = parse_publish_diagnostics(body);
+	defer json::finish(jv);
+	assert(
+		len(diags) >= 1,
+		"trailing-flush publishDiagnostics must include the parse error from the unanswered didChange"
+	);
+};

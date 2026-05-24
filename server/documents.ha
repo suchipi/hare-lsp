@@ -404,6 +404,46 @@ export fn drain_pending_diagnostics(s: *server) void = {
 	};
 };
 
+// Returns the smallest remaining milliseconds until any open document's
+// debounce window expires, across all docs with `diagnostics_pending`
+// = true. Returns `void` when no doc has anything pending, or `0` when
+// at least one deadline has already passed (caller should flush
+// immediately). The caller uses the result as a timeout for the
+// main-loop poll so the trailing edit publishes even when no further
+// LSP message arrives. Multiple pending docs collapse to the soonest
+// deadline; later docs catch up on the next loop iteration.
+//
+// @param s: borrowed
+export fn next_trailing_flush_deadline_ms(s: *server) (i64 | void) = {
+	const debounce_ms = s.config.diagnostics_debounce_ms: i64;
+	const debounce_ns = debounce_ms * time::MILLISECOND;
+	const now = time::now(time::clock::MONOTONIC);
+	let earliest: (i64 | void) = void;
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		const doc = &s.documents[i];
+		if (!doc.diagnostics_pending) continue;
+		const since_edit_ns = time::diff(doc.last_edit_at, now);
+		const remaining_ns = debounce_ns - since_edit_ns;
+		const remaining_ms: i64 = if (remaining_ns <= 0) {
+			yield 0i64;
+		} else {
+			// Round up so a sub-millisecond remainder still
+			// gets a full 1ms wait instead of collapsing to a
+			// zero-timeout spin that flushes before the
+			// debounce check would accept.
+			yield (remaining_ns + time::MILLISECOND - 1) /
+				time::MILLISECOND;
+		};
+		match (earliest) {
+		case void =>
+			earliest = remaining_ms;
+		case let cur: i64 =>
+			if (remaining_ms < cur) earliest = remaining_ms;
+		};
+	};
+	return earliest;
+};
+
 // @param s: borrowed
 // @param doc: borrowed
 // @param change: borrowed
