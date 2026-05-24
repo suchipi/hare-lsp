@@ -158,6 +158,9 @@ fn print_usage() void = {
 	fmt::println(
 		"  HARE_LSP_LOG_LEVEL   debug|info|warn|error "
 		"(default: info)")!;
+	fmt::println(
+		"  HARE_LSP_MAX_BODY_BYTES  Override LSP transport's max "
+		"request body size (default 32 MiB).")!;
 };
 
 // Reads HARE_LSP_MAX_BODY_BYTES if set. Returns void when unset or

@@ -35,6 +35,9 @@ fn cleanup_server(
 	defer finish_config(&c);
 	assert(c.hare_path == "hare");
 	assert(len(c.tags) == 0);
+	assert(len(c.extra_args_build) == 0);
+	assert(len(c.extra_args_test) == 0);
+	assert(len(c.extra_args_run) == 0);
 	assert(c.diagnostics_debounce_ms == 300);
 	assert(c.enable_build_diagnostics);
 	assert(c.build_timeout_ms == 60000);
@@ -76,6 +79,82 @@ fn cleanup_server(
 	// Other fields untouched.
 	assert(s.config.hare_path == "hare");
 	assert(s.config.enable_build_diagnostics);
+};
+
+@test fn apply_settings_extra_args_all_three() void = {
+	let (s, scan, in_buf, out) = fresh_server();
+	defer cleanup_server(&s, scan, in_buf, out);
+
+	const settings =
+		`{"extraArgs":{"build":["-lc","-D","FOO=1"],"test":["-v"],"run":["-q"]}}`;
+	let v = json::loadstr(settings)!;
+	defer json::finish(v);
+	apply_settings(&s, v);
+
+	assert(len(s.config.extra_args_build) == 3);
+	assert(s.config.extra_args_build[0] == "-lc");
+	assert(s.config.extra_args_build[1] == "-D");
+	assert(s.config.extra_args_build[2] == "FOO=1");
+	assert(len(s.config.extra_args_test) == 1);
+	assert(s.config.extra_args_test[0] == "-v");
+	assert(len(s.config.extra_args_run) == 1);
+	assert(s.config.extra_args_run[0] == "-q");
+};
+
+@test fn apply_settings_extra_args_partial_preserves_others() void = {
+	let (s, scan, in_buf, out) = fresh_server();
+	defer cleanup_server(&s, scan, in_buf, out);
+
+	// Seed all three with values.
+	const seed = `{"extraArgs":{"build":["-lc"],"test":["-v"],"run":["-q"]}}`;
+	let sv = json::loadstr(seed)!;
+	defer json::finish(sv);
+	apply_settings(&s, sv);
+
+	// Update only build; test and run should be untouched.
+	const partial = `{"extraArgs":{"build":["-O3"]}}`;
+	let pv = json::loadstr(partial)!;
+	defer json::finish(pv);
+	apply_settings(&s, pv);
+
+	assert(len(s.config.extra_args_build) == 1);
+	assert(s.config.extra_args_build[0] == "-O3");
+	assert(len(s.config.extra_args_test) == 1);
+	assert(s.config.extra_args_test[0] == "-v");
+	assert(len(s.config.extra_args_run) == 1);
+	assert(s.config.extra_args_run[0] == "-q");
+};
+
+@test fn apply_settings_no_extra_args_keeps_defaults() void = {
+	let (s, scan, in_buf, out) = fresh_server();
+	defer cleanup_server(&s, scan, in_buf, out);
+
+	// A settings object that doesn't mention extraArgs at all.
+	const settings = `{"diagnostics":{"debounceMs":500}}`;
+	let v = json::loadstr(settings)!;
+	defer json::finish(v);
+	apply_settings(&s, v);
+
+	assert(len(s.config.extra_args_build) == 0);
+	assert(len(s.config.extra_args_test) == 0);
+	assert(len(s.config.extra_args_run) == 0);
+};
+
+@test fn apply_settings_extra_args_empty_array_clears() void = {
+	let (s, scan, in_buf, out) = fresh_server();
+	defer cleanup_server(&s, scan, in_buf, out);
+
+	const seed = `{"extraArgs":{"build":["-lc"]}}`;
+	let sv = json::loadstr(seed)!;
+	defer json::finish(sv);
+	apply_settings(&s, sv);
+	assert(len(s.config.extra_args_build) == 1);
+
+	const clear = `{"extraArgs":{"build":[]}}`;
+	let cv = json::loadstr(clear)!;
+	defer json::finish(cv);
+	apply_settings(&s, cv);
+	assert(len(s.config.extra_args_build) == 0);
 };
 
 @test fn did_change_configuration_with_namespace() void = {

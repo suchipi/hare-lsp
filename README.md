@@ -46,6 +46,11 @@ After installing, run `hare-lsp --doctor` to verify your environment
 (checks `hare` on `$PATH`, HAREPATH entries, hare-json, and any
 `HARE_LSP_LOG_DIR` you've set).
 
+Note: `--doctor` only inspects the process environment. Editor-side
+`hare.*` settings (`hare.path`, `hare.harepath`, `hare.tags`, ...) arrive
+later via `workspace/configuration` and are invisible to the doctor, so
+its report reflects your shell environment, not those overrides.
+
 ### Test
 
 ```sh
@@ -80,7 +85,10 @@ Settings are read from the `hare` namespace.
 | ---------------------------------- | ----------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `path`                             | string            | `"hare"`    | Path to the `hare` binary.                                                                                                                                                                          |
 | `harepath`                         | string            | `""`        | Colon-separated module search path (overrides `$HAREPATH`). Empty falls back to environment.                                                                                                        |
-| `tags`                             | string[]          | `[]`        | Build tags (`-T <tag>`).                                                                                                                                                                            |
+| `tags`                             | string[]          | `[]`        | Build tags (`-T <tag>` pairs) forwarded to every `hare {build,test,run}` invocation the server spawns.                                                                                              |
+| `extraArgs.build`                  | string[]          | `[]`        | Extra arguments appended to the on-save `hare build` type-check pass. Each element is one argv slot (no shell splitting). e.g. `["-lc"]` to link libc.                                              |
+| `extraArgs.test`                   | string[]          | `[]`        | Extra arguments appended to `hare test` invoked via the test codelens.                                                                                                                              |
+| `extraArgs.run`                    | string[]          | `[]`        | Extra arguments appended to `hare run` invoked via the run codelens.                                                                                                                                |
 | `diagnostics.debounceMs`           | number            | `300`       | Minimum ms between the last `didChange` and the next parse-diagnostics refresh.                                                                                                                     |
 | `diagnostics.enableBuild`          | boolean           | `true`      | Run `hare build` on save to surface type-check diagnostics (undefined names, type mismatches, etc.) on top of the in-process parse pass. Disable to skip the build pass; type errors then won't show up until you build manually. |
 | `diagnostics.buildTimeoutMs`       | number            | `60000`     | Max wall-clock ms to wait for `hare build` (or `hare test` / `hare run`) before SIGTERM. `0` disables the timeout.                                                                                  |
@@ -88,7 +96,7 @@ Settings are read from the `hare` namespace.
 | `inlayHints.parameterNames`        | boolean           | `true`      | Show parameter-name hints at call sites.                                                                                                                                                            |
 | `inlayHints.inferredTypes`         | boolean           | `true`      | Show inferred-type hints on `let`/`const`.                                                                                                                                                          |
 | `inlayHints.inferredTypesMaxDepth` | number            | `10`        | Max recursion depth for inferred-type hints; follows call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe.          |
-| `limits.maxTotalBufferBytes`       | number            | `268435456` | Cap on summed open-buffer bytes (256 MiB).                                                                                                                                                          |
+| `limits.maxTotalBufferBytes`       | number            | `268435456` | Cap on summed open-buffer bytes (256 MiB). A `didOpen` that would push past the cap is refused (with a `window/logMessage` warning); a `didChange` that pushes past the cap causes the document to be dropped from the server. |
 | `limits.maxDiagnosticsPerFile`     | number            | `1000`      | Cap on diagnostics published per file. Excess collapses into a single trailing diagnostic.                                                                                                          |
 
 The canonical JSON Schema for these settings is checked in at [editors/vscode/schemas/hare-settings.schema.json](editors/vscode/schemas/hare-settings.schema.json). Editor integrations and external tooling should treat that document as the source of truth.
@@ -98,7 +106,7 @@ The canonical JSON Schema for these settings is checked in at [editors/vscode/sc
 | Variable                  | Description                                                                                                                               |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `HARE_LSP_LOG_DIR`        | Absolute directory to tee the wire-protocol stream into `hare-lsp-{in,out,err}.log`. Useful for diagnosing handshake or framing issues.   |
-| `HARE_LSP_LOG_LEVEL`      | Minimum stderr-log severity. One of `debug`, `info`, `warn`, `error`. Defaults to `info`.                                                 |
+| `HARE_LSP_LOG_LEVEL`      | Minimum stderr-log severity. One of `debug`, `info`, `warn` (or `warning`), `error`. Defaults to `info`.                                  |
 | `HARE_LSP_MAX_BODY_BYTES` | Override the LSP transport's max request body size (default 32 MiB). Read at startup because the cap applies before `initialize` arrives. |
 
 ## `harefmt`: standalone formatter CLI

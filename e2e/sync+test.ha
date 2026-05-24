@@ -148,4 +148,3 @@ use strings;
 		));
 	free(wait_for_response(&s, 2504.0));
 };
-
