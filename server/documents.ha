@@ -38,8 +38,6 @@ export type document = struct {
 	// Timestamp of the last buffer-mutating event (didOpen/didChange/
 	// didSave). Used by the diagnostics debouncer.
 	last_edit_at: time::instant,
-	// Timestamp of the last published parse-diagnostics for this doc.
-	last_publish_at: time::instant,
 	// True when the doc has had a buffer mutation that hasn't yet been
 	// followed by a publishDiagnostics call (because the debounce
 	// suppressed it). Cleared whenever we actually publish.
@@ -245,7 +243,6 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 		prev_tokens = [],
 		prev_result_id = strings::dup("")!,
 		last_edit_at = now,
-		last_publish_at = time::INSTANT_ZERO,
 		diagnostics_pending = false,
 		parse_cache = null,
 		last_build_uris = [],
@@ -260,7 +257,6 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 	// didOpen always publishes immediately so the editor sees an initial
 	// diagnostic state.
 	refresh_diagnostics(s, stored);
-	stored.last_publish_at = time::now(time::clock::MONOTONIC);
 	stored.diagnostics_pending = false;
 };
 
@@ -376,7 +372,6 @@ fn maybe_flush_diagnostics(s: *server, doc: *document, force: bool) void = {
 		};
 	};
 	refresh_diagnostics(s, doc);
-	doc.last_publish_at = time::now(time::clock::MONOTONIC);
 	doc.diagnostics_pending = false;
 };
 
@@ -582,7 +577,6 @@ export fn handle_did_save(s: *server, n: lsp::notification) void = {
 	};
 	// Save bypasses the debounce: we want fresh diagnostics now.
 	refresh_diagnostics_with_build(s, doc);
-	doc.last_publish_at = time::now(time::clock::MONOTONIC);
 	doc.diagnostics_pending = false;
 };
 
