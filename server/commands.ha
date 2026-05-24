@@ -10,10 +10,8 @@ use lsp;
 use os;
 use os::exec;
 use strings;
-use time;
 use unix;
 use unix::poll;
-use unix::signal;
 
 // @param s: borrowed
 export fn handle_execute_command(s: *server, r: lsp::request) void = {
@@ -133,6 +131,13 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	let argv: []str = [];
 	defer free(argv);
 	append(argv, subcmd)!;
+	// Forward `hare.tags` as `-T <tag>` pairs so file selection in the
+	// spawned `hare test` / `hare run` matches the user's diagnostics
+	// build (see run_build_obj in dep_build.ha).
+	for (let i = 0z; i < len(s.config.tags); i += 1) {
+		append(argv, "-T")!;
+		append(argv, s.config.tags[i])!;
+	};
 	for (let i = 0z; i < len(extra); i += 1) {
 		append(argv, extra[i])!;
 	};
@@ -158,6 +163,16 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	if (len(dir) > 0) {
 		exec::chdir(&cmd, dir);
 	};
+	// Mirror the HAREPATH the server uses for `hare build` diagnostics
+	// so "Run test" / "Run program" resolve `use` declarations through
+	// the same search path the user configured via `hare.harepath`.
+	const harepath = server_harepath_for(s);
+	defer free(harepath);
+	if (len(harepath) > 0) {
+		match (exec::setenv(&cmd, "HAREPATH", harepath)) {
+		case => void;
+		};
+	};
 	exec::addfile(&cmd, os::stderr_file, write_fd)!;
 	exec::addfile(&cmd, os::stdout_file, write_fd)!;
 	exec::addfile(&cmd, os::stdin_file, exec::nullfd)!;
@@ -173,31 +188,14 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 	};
 	lsp::safe_close(write_fd);
 
-	// Stream output via a deadline-bounded poll loop. Same shape as
-	// run_build's drain in build.ha — see there for rationale. A hung
-	// `hare test` won't freeze the LSP main loop.
+	// Stream output via an indefinite poll loop. Unlike the build path,
+	// runTest / runModule run user code that may legitimately take
+	// arbitrarily long; the user invokes them explicitly, so we wait
+	// until the process exits naturally.
 	let buf: []u8 = [];
 	defer free(buf);
 	let chunk: [4096]u8 = [0...];
-	const timeout_ms = s.config.build_timeout_ms;
-	const deadline_abs = if (timeout_ms > 0) {
-		yield time::add(time::now(time::clock::MONOTONIC),
-			timeout_ms: i64 * time::MILLISECOND);
-	} else {
-		yield time::instant { sec = 0, nsec = 0 };
-	};
-	let timed_out = false;
 	for (true) {
-		const remaining: time::duration = if (timeout_ms == 0) {
-			yield poll::INDEF;
-		} else {
-			const now = time::now(time::clock::MONOTONIC);
-			yield time::diff(now, deadline_abs);
-		};
-		if (timeout_ms > 0 && remaining <= 0) {
-			timed_out = true;
-			break;
-		};
 		let pfds: [1]poll::pollfd = [
 			poll::pollfd {
 				fd = read_fd,
@@ -205,16 +203,13 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 				revents = 0,
 			},
 		];
-		const n = match (poll::poll(pfds[..], remaining)) {
+		const n = match (poll::poll(pfds[..], poll::INDEF)) {
 		case let n: uint =>
 			yield n;
 		case poll::error =>
 			break;
 		};
-		if (n == 0) {
-			timed_out = true;
-			break;
-		};
+		if (n == 0) break;
 		match (io::read(read_fd, chunk[..])) {
 		case let n: size =>
 			append(buf, chunk[..n]...)!;
@@ -225,12 +220,6 @@ fn run_hare_command(s: *server, subcmd: str, dir: str, extra: []str) void = {
 		};
 	};
 	lsp::safe_close(read_fd);
-	if (timed_out) {
-		match (exec::sig(proc, signal::sig::TERM)) {
-		case => void;
-		};
-		log_warning(s, "hare command timed out and was terminated");
-	};
 	match (exec::wait(&proc)) {
 	case => void;
 	};

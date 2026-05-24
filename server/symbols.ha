@@ -949,10 +949,13 @@ export fn find_module(
 	const harepath = strings::join(":", parts...)!;
 	defer free(harepath);
 
+	let mod_tags = config_tags_to_module_tags(s.config.tags);
+	defer free(mod_tags);
+
 	const ctx = module::context {
 		harepath = harepath,
 		harecache = "",
-		tags = [],
+		tags = mod_tags,
 	};
 	match (module::find(&ctx, ident: ast::ident)) {
 	case let pair: (str, module::srcset) =>
@@ -960,6 +963,46 @@ export fn find_module(
 	case module::error =>
 		return void;
 	};
+};
+
+// Translates the LSP's user-facing tag list (entries shaped like
+// "+linux" / "-libc", as passed verbatim to `hare build -T`) into the
+// `[]str` shape `module::context.tags` expects: bare names of the
+// tags the user has *enabled*. Filename tagsets parsed by
+// `hare::module::parse_tags` carry the `+`/`-` prefix; the context's
+// `tags` list does NOT — see `tags_compat` in
+// /usr/local/src/hare/stdlib/hare/module/srcs.ha, which compares each
+// `have` (context) entry by name to a parsed tag's `name`.
+//
+// Conversion rules:
+//   - `+foo`  -> include `foo` in the enabled set.
+//   - `-foo`  -> drop (a `-`-prefixed tag means "the build wants this
+//                tag NOT set", which is already the default in the
+//                bare-name model).
+//   - `foo`   -> treat as `+foo` (defensive: clients may omit the
+//                prefix for the inclusive case).
+//
+// The returned slice borrows from `cfg_tags` and lives only as long
+// as the caller's reference to `cfg_tags`. Caller frees the slice
+// itself.
+//
+// @param cfg_tags: borrowed
+// @returns: borrowed-from-cfg_tags slice; free the slice but not its
+// entries
+fn config_tags_to_module_tags(cfg_tags: []str) []str = {
+	let out: []str = [];
+	for (let i = 0z; i < len(cfg_tags); i += 1) {
+		const t = cfg_tags[i];
+		if (len(t) == 0) continue;
+		if (strings::hasprefix(t, "+")) {
+			append(out, strings::sub(t, 1, strings::end))!;
+		} else if (strings::hasprefix(t, "-")) {
+			continue;
+		} else {
+			append(out, t)!;
+		};
+	};
+	return out;
 };
 
 // @param s: borrowed
