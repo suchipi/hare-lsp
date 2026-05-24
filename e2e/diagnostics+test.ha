@@ -459,6 +459,157 @@ use strings;
 	};
 };
 
+// Pull-mode with build diagnostics enabled: the saved-on-disk file
+// has a parse-clean but type-broken body (calls an undefined symbol);
+// `textDocument/diagnostic` must include the build diagnostic alongside
+// any parse diagnostics. Without the pull-build wiring the response
+// would only carry parse results, so an editor that relies solely on
+// pull diagnostics would never see the type error.
+@test fn e2e_pull_diagnostic_includes_build_when_enabled() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-pull-build-enabled")!;
+	defer free(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
+
+	match (os::mkdirs(root, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
+	};
+	const main_path = strings::concat(root, "/main.ha")!;
+	defer free(main_path);
+	// Parse-clean but type-broken: `undefined_symbol` is not defined,
+	// so the parser is happy but `hare build` reports an Unknown
+	// object error.
+	const body = "export fn m() void = undefined_symbol();\n";
+	write_test_file(main_path, body);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init_with_workspace(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const main_uri = strings::concat("file://", main_path)!;
+	defer free(main_uri);
+	open_doc(&s, main_uri, body);
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	const req =
+		strings::concat(
+			`{"jsonrpc":"2.0","id":2000,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":"`,
+			main_uri, `"}}}`)!;
+	defer free(req);
+	send(&s, strings::toutf8(req));
+
+	const resp = wait_for_response(&s, 2000.0);
+	defer free(resp);
+	const text = strings::fromutf8(resp)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj =
+		*(json::get(&obj, "result") as *json::value) as json::object;
+	const items =
+		*(json::get(&result_obj, "items") as *json::value) as []json::value;
+	let saw_build_diag = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const d = items[i] as json::object;
+		const src = match (json::get(&d, "source")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str =>
+				yield s;
+			case =>
+				yield "";
+			};
+		case =>
+			yield "";
+		};
+		if (src == "hare-lsp/build") {
+			saw_build_diag = true;
+			break;
+		};
+	};
+	assert(
+		saw_build_diag,
+		"pull diagnostic must include a hare-lsp/build entry when diagnostics.enableBuild is true and the file has type errors"
+	);
+};
+
+// Companion: with `diagnostics.enableBuild` set to false, the pull
+// response carries only parse diagnostics (and unused-import hints) -
+// no build entries.
+@test fn e2e_pull_diagnostic_excludes_build_when_disabled() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-pull-build-disabled")!;
+	defer free(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
+
+	match (os::mkdirs(root, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
+	};
+	const main_path = strings::concat(root, "/main.ha")!;
+	defer free(main_path);
+	const body = "export fn m() void = undefined_symbol();\n";
+	write_test_file(main_path, body);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init_with_workspace(&s, root);
+	drain_until_indexed_ref(&s);
+
+	// Flip the config off via didChangeConfiguration.
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"hare":{"diagnostics":{"enableBuild":false}}}}}`
+		));
+
+	const main_uri = strings::concat("file://", main_path)!;
+	defer free(main_uri);
+	open_doc(&s, main_uri, body);
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	const req =
+		strings::concat(
+			`{"jsonrpc":"2.0","id":2001,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":"`,
+			main_uri, `"}}}`)!;
+	defer free(req);
+	send(&s, strings::toutf8(req));
+
+	const resp = wait_for_response(&s, 2001.0);
+	defer free(resp);
+	const text = strings::fromutf8(resp)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj =
+		*(json::get(&obj, "result") as *json::value) as json::object;
+	const items =
+		*(json::get(&result_obj, "items") as *json::value) as []json::value;
+	for (let i = 0z; i < len(items); i += 1) {
+		const d = items[i] as json::object;
+		const src = match (json::get(&d, "source")) {
+		case let p: *json::value =>
+			yield match (*p) {
+			case let s: str =>
+				yield s;
+			case =>
+				yield "";
+			};
+		case =>
+			yield "";
+		};
+		assert(
+			src != "hare-lsp/build",
+			"pull diagnostic must not include hare-lsp/build entries when diagnostics.enableBuild is false"
+		);
+	};
+};
+
 // Push-style: opening a broken doc produces a publishDiagnostics
 // notification carrying at least one error-severity entry. Drain frames
 // until we see it.

@@ -21,7 +21,7 @@ use strings;
 // @param s: borrowed
 // @param doc: borrowed
 export fn refresh_diagnostics(s: *server, doc: *document) void = {
-	let arr = parse_diagnostics_for_doc(s, doc);
+	let arr = assemble_diagnostics_for_doc(s, doc, []);
 	publish_diagnostics(s, doc.uri, doc.version, arr);
 };
 
@@ -33,8 +33,26 @@ export fn refresh_diagnostics(s: *server, doc: *document) void = {
 // @param s: borrowed
 // @param doc: borrowed
 export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
-	let parse_arr = parse_diagnostics_for_doc(s, doc);
+	let arr = compute_doc_diagnostics_with_optional_build(s, doc);
+	publish_diagnostics(s, doc.uri, doc.version, arr);
+};
 
+// Shared between the push (didSave) and pull
+// (textDocument/diagnostic, workspace/diagnostic) paths: returns the
+// final, capped diagnostic list for `doc.uri`. When
+// `enable_build_diagnostics` is true, runs the dep build, publishes
+// sibling-URI buckets via the push channel as a side effect, and clears
+// stale sibling publishes from previous passes. When false, just
+// returns parse + unused (still capped) and clears any lingering
+// sibling diagnostics from a prior enabled pass.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @returns: owned
+fn compute_doc_diagnostics_with_optional_build(
+	s: *server,
+	doc: *document,
+) []json::value = {
 	if (!s.config.enable_build_diagnostics) {
 		// User just toggled build diagnostics off — any URIs we
 		// published for in previous passes (sibling files in the
@@ -42,8 +60,7 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 		// client forever. Clear them once, then drop the tracking
 		// set.
 		clear_stale_build_uris(s, doc, [doc.uri]);
-		publish_diagnostics(s, doc.uri, doc.version, parse_arr);
-		return;
+		return assemble_diagnostics_for_doc(s, doc, []);
 	};
 
 	// Walk the saved module's dep graph and run `hare build -t o`
@@ -57,8 +74,6 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 	let by_uri = group_build_diagnostics_by_uri(build_diags);
 	defer finish_uri_buckets(by_uri);
 
-	// Merge: doc.uri's build diagnostics get appended to its parse
-	// diagnostics. Other URIs publish their own list.
 	let doc_uri_bucket: int = -1;
 	for (let i = 0z; i < len(by_uri); i += 1) {
 		if (by_uri[i].0 == doc.uri) {
@@ -78,40 +93,64 @@ export fn refresh_diagnostics_with_build(s: *server, doc: *document) void = {
 		append(current_uris, strings::dup(by_uri[i].0)!)!;
 	};
 
+	// Extract doc.uri's build bucket (ownership transfers out of by_uri).
+	let doc_build: []json::value = [];
 	if (doc_uri_bucket >= 0) {
-		let merged = parse_arr;
 		const idx = doc_uri_bucket: size;
-		for (let i = 0z; i < len(by_uri[idx].1); i += 1) {
-			append(merged, by_uri[idx].1[i])!;
-		};
-		// Take ownership so the deferred bucket free doesn't double-free.
+		doc_build = by_uri[idx].1;
 		by_uri[idx].1 = [];
-		publish_diagnostics(s, doc.uri, doc.version, merged);
-	} else {
-		publish_diagnostics(s, doc.uri, doc.version, parse_arr);
 	};
 
-	// Publish remaining buckets (other files).
-	for (let i = 0z; i < len(by_uri); i += 1) {
+	// Publish remaining buckets (sibling files in the dep walk).
+	publish_sibling_buckets(s, &by_uri, doc_uri_bucket);
+
+	// Clear lingering diagnostics on URIs the previous pass
+	// published to but this pass didn't, then remember the new set.
+	clear_stale_build_uris(s, doc, current_uris);
+	doc.last_build_uris = current_uris;
+
+	return assemble_diagnostics_for_doc(s, doc, doc_build);
+};
+
+// Publishes each sibling-URI bucket (every entry except the doc's own
+// bucket) as a capped diagnostic list. Hands off ownership of each
+// bucket's inner slice; the caller's deferred [[finish_uri_buckets]]
+// will see an empty `.1` and skip it.
+//
+// @param s: borrowed
+// @param by_uri: borrowed
+fn publish_sibling_buckets(
+	s: *server,
+	by_uri: *[](str, []json::value),
+	doc_uri_bucket: int,
+) void = {
+	let bu = *by_uri;
+	const cap = s.config.limits.max_diagnostics_per_file;
+	for (let i = 0z; i < len(bu); i += 1) {
 		if (i: int == doc_uri_bucket) continue;
 		// Look up version for this URI if it's an open document.
-		const other_doc = find_document(s, by_uri[i].0);
+		const other_doc = find_document(s, bu[i].0);
 		const ver = match (other_doc) {
 		case let p: *document =>
 			yield p.version;
 		case null =>
 			yield 0i64;
 		};
-		// Hand off ownership of the inner slice.
-		const bucket = by_uri[i].1;
-		by_uri[i].1 = [];
-		publish_diagnostics(s, by_uri[i].0, ver, bucket);
+		// For an open sibling we can place the truncation marker at
+		// the file's EOF; for an unopened one we don't have its
+		// content, so fall back to (0, 0).
+		const eof_pos = match (other_doc) {
+		case let p: *document =>
+			yield doc_eof_position(s, p);
+		case null =>
+			yield lsp::position { line = 0, character = 0 };
+		};
+		// Hand off ownership of the inner slice into the helper.
+		const bucket = bu[i].1;
+		bu[i].1 = [];
+		let capped = assemble_capped_diagnostics(cap, bucket, [], [], eof_pos);
+		publish_diagnostics(s, bu[i].0, ver, capped);
 	};
-
-	// Clear lingering diagnostics on URIs the previous pass
-	// published to but this pass didn't, then remember the new set.
-	clear_stale_build_uris(s, doc, current_uris);
-	doc.last_build_uris = current_uris;
 };
 
 // Buckets `build_diags` by file URI. The result is owned: caller must
@@ -191,33 +230,21 @@ fn find_or_create_uri_bucket(by_uri: *[](str, []json::value), uri: str) size = {
 	return len(bu) - 1;
 };
 
-// Computes parse-only diagnostics for a document and returns a slice of
-// json::value Diagnostic objects. Caller takes ownership.
-//
-// Output is capped at [[MAX_DIAGNOSTICS_PER_FILE]]; when the parser
-// produced more errors than that, a synthetic trailing diagnostic at the
-// end of the buffer notes the truncation count.
+// Returns the uncapped list of parse-error diagnostics for a document.
+// No unused-import diagnostics, no truncation marker — the assembler
+// applies those concerns after combining with build diagnostics.
 //
 // @param s: borrowed
 // @param doc: borrowed
 // @returns: owned
-fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
+fn raw_parse_diagnostics(s: *server, doc: *document) []json::value = {
 	const cache = parse_of(doc);
 	const r = &cache.pr;
-
 	let arr: []json::value = [];
 	const enc = position_encoding(s);
 	const data = analysis::bytes(&doc.buf);
 	const idx = doc.buf.line_index;
-
-	const total = len(r.errors);
-	const cap = s.config.limits.max_diagnostics_per_file;
-	const limit = if (total > cap) {
-		yield cap;
-	} else {
-		yield total;
-	};
-	for (let i = 0z; i < limit; i += 1) {
+	for (let i = 0z; i < len(r.errors); i += 1) {
 		const e = r.errors[i];
 		const start = analysis::byte_to_position(data, idx, enc,
 			e.location.off: size);
@@ -244,38 +271,191 @@ fn parse_diagnostics_for_doc(s: *server, doc: *document) []json::value = {
 		apply_unnecessary_tag_if_match(&d, e.message);
 		append(arr, d: json::value)!;
 	};
-	if (total > limit) {
-		const eof_pos = analysis::byte_to_position(data, idx, enc, len(data));
-		let d = json::newobject();
-		json::put(&d, "range",
-			encode_range(lsp::range {
-					start = lsp::position {
-						line = eof_pos.line,
-						character = eof_pos.character,
-					},
-					end = lsp::position {
-						line = eof_pos.line,
-						character = eof_pos.character,
-					},
-				}))!;
-		json::put(&d, "severity", severity_for("diagnostics truncated"))!;
-		json::set(&d, "source", "hare-lsp/parse": json::value)!;
-		json::set(&d, "code", "diagnostics-truncated": json::value)!;
-		const msg =
-			fmt::asprintf("({} more parse errors not shown; {} of {} reported)",
-				total - limit, limit, total)!;
-		json::set(&d, "message", msg: json::value)!;
-		free(msg);
-		append(arr, d: json::value)!;
-	};
-	// Stylistic findings (unused imports) sit alongside parse errors so
-	// editors get them in the same publishDiagnostics batch.
-	let unused = unused_import_diagnostics(s, doc);
-	defer free(unused);
-	for (let i = 0z; i < len(unused); i += 1) {
-		append(arr, unused[i])!;
-	};
 	return arr;
+};
+
+// Returns the LSP position at the end of the document's buffer. Used as
+// the anchor for synthetic diagnostics (the truncation marker).
+//
+// @param s: borrowed
+// @param doc: borrowed
+fn doc_eof_position(s: *server, doc: *document) lsp::position = {
+	const enc = position_encoding(s);
+	const data = analysis::bytes(&doc.buf);
+	const idx = doc.buf.line_index;
+	const p = analysis::byte_to_position(data, idx, enc, len(data));
+	return lsp::position {
+		line = p.line,
+		character = p.character,
+	};
+};
+
+// Combines parse, unused-import and build diagnostics for a doc, then
+// caps them as a single set via [[assemble_capped_diagnostics]]. `build`
+// is consumed (typically the doc.uri bucket from the dep-build pass; pass
+// `[]` for the parse-only path).
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param build: owned
+// @returns: owned
+fn assemble_diagnostics_for_doc(
+	s: *server,
+	doc: *document,
+	build: []json::value,
+) []json::value = {
+	const parse = raw_parse_diagnostics(s, doc);
+	const unused = unused_import_diagnostics(s, doc);
+	const eof_pos = doc_eof_position(s, doc);
+	const cap = s.config.limits.max_diagnostics_per_file;
+	return assemble_capped_diagnostics(cap, build, unused, parse, eof_pos);
+};
+
+// Builds the final, capped diagnostic list from build / unused / parse
+// inputs, honouring the priority order build > unused > parse. The
+// most-important kinds are kept first; if the cap is tight, parse
+// errors get dropped before unused, and unused before build. A single
+// trailing "diagnostics-truncated" marker is appended whenever anything
+// gets dropped (and itself counts against the cap).
+//
+// All three input slices are consumed: dropped entries are freed inside
+// the helper so callers don't need to track partial ownership.
+//
+// `cap` of 0 produces an empty list (no marker either).
+//
+// @param build: owned
+// @param unused: owned
+// @param parse: owned
+// @returns: owned
+fn assemble_capped_diagnostics(
+	cap: size,
+	build: []json::value,
+	unused: []json::value,
+	parse: []json::value,
+	eof_pos: lsp::position,
+) []json::value = {
+	const total = len(build) + len(unused) + len(parse);
+
+	if (cap == 0) {
+		free_diag_slice(build);
+		free_diag_slice(unused);
+		free_diag_slice(parse);
+		return [];
+	};
+
+	if (total <= cap) {
+		let out: []json::value = [];
+		for (let i = 0z; i < len(build); i += 1) {
+			append(out, build[i])!;
+		};
+		free(build);
+		for (let i = 0z; i < len(unused); i += 1) {
+			append(out, unused[i])!;
+		};
+		free(unused);
+		for (let i = 0z; i < len(parse); i += 1) {
+			append(out, parse[i])!;
+		};
+		free(parse);
+		return out;
+	};
+
+	// Cap is tight; reserve one slot for the trailing marker.
+	const effective = cap - 1;
+	let out: []json::value = [];
+	let kept: size = 0;
+
+	const take_build = if (len(build) <= effective) {
+		yield len(build);
+	} else {
+		yield effective;
+	};
+	for (let i = 0z; i < take_build; i += 1) {
+		append(out, build[i])!;
+	};
+	for (let i = take_build; i < len(build); i += 1) {
+		json::finish(build[i]);
+	};
+	free(build);
+	kept += take_build;
+
+	let remaining = if (effective > kept) effective - kept else 0z;
+	const take_unused = if (len(unused) <= remaining) {
+		yield len(unused);
+	} else {
+		yield remaining;
+	};
+	for (let i = 0z; i < take_unused; i += 1) {
+		append(out, unused[i])!;
+	};
+	for (let i = take_unused; i < len(unused); i += 1) {
+		json::finish(unused[i]);
+	};
+	free(unused);
+	kept += take_unused;
+
+	remaining = if (effective > kept) effective - kept else 0z;
+	const take_parse = if (len(parse) <= remaining) {
+		yield len(parse);
+	} else {
+		yield remaining;
+	};
+	for (let i = 0z; i < take_parse; i += 1) {
+		append(out, parse[i])!;
+	};
+	for (let i = take_parse; i < len(parse); i += 1) {
+		json::finish(parse[i]);
+	};
+	free(parse);
+	kept += take_parse;
+
+	const dropped = total - kept;
+	append(out, truncation_marker(eof_pos, dropped, kept, total))!;
+	return out;
+};
+
+// Builds the synthetic trailing diagnostic that signals the cap was hit.
+// Anchored at `eof_pos`; uses a neutral source ("hare-lsp") because the
+// marker can now stand in for parse, unused or build truncation.
+//
+// @returns: owned
+fn truncation_marker(
+	eof_pos: lsp::position,
+	dropped: size,
+	reported: size,
+	total: size,
+) json::value = {
+	let d = json::newobject();
+	json::put(&d, "range",
+		encode_range(lsp::range {
+				start = lsp::position {
+					line = eof_pos.line,
+					character = eof_pos.character,
+				},
+				end = lsp::position {
+					line = eof_pos.line,
+					character = eof_pos.character,
+				},
+			}))!;
+	json::put(&d, "severity", severity_for("diagnostics truncated"))!;
+	json::set(&d, "source", "hare-lsp": json::value)!;
+	json::set(&d, "code", "diagnostics-truncated": json::value)!;
+	const msg =
+		fmt::asprintf("({} more diagnostics not shown; {} of {} reported)", dropped,
+			reported, total)!;
+	json::set(&d, "message", msg: json::value)!;
+	free(msg);
+	return d: json::value;
+};
+
+// Frees every diagnostic in `arr`, then the slice itself.
+//
+// @param arr: owned
+fn free_diag_slice(arr: []json::value) void = {
+	for (let i = 0z; i < len(arr); i += 1) {
+		json::finish(arr[i]);
+	};
+	free(arr);
 };
 
 // Maps an error message to an LSP severity level. Parse errors are
@@ -428,7 +608,10 @@ export fn clear_diagnostics(s: *server, uri: str) void = {
 
 // --- pull-model diagnostics -----------------------------------------
 // Handles textDocument/diagnostic. The client wants the current diagnostic
-// state for a single document.
+// state for a single document. When `enable_build_diagnostics` is true,
+// the dep build runs synchronously and build errors for sibling URIs are
+// pushed via publishDiagnostics (textDocument/diagnostic is single-doc
+// and can't carry them inline).
 //
 // @param s: borrowed
 export fn handle_textdocument_diagnostic(s: *server, r: lsp::request) void = {
@@ -460,7 +643,7 @@ export fn handle_textdocument_diagnostic(s: *server, r: lsp::request) void = {
 		send_to_client(s, r.id, full_report([]));
 		return;
 	};
-	let diags = parse_diagnostics_for_doc(s, doc);
+	let diags = compute_doc_diagnostics_with_optional_build(s, doc);
 	send_to_client(s, r.id, full_report(diags));
 };
 
@@ -469,11 +652,17 @@ export fn handle_textdocument_diagnostic(s: *server, r: lsp::request) void = {
 // diagnostics for every file in the workspace on demand would parse
 // each one and is rarely what clients actually want.
 //
+// When `enable_build_diagnostics` is true, this runs the dep build for
+// each open doc. Potentially expensive (the push path runs only on
+// save), but workspace pulls are rare — clients invoke them after a
+// refresh request. Sibling-URI build errors get pushed via
+// publishDiagnostics as a side effect.
+//
 // @param s: borrowed
 export fn handle_workspace_diagnostic(s: *server, r: lsp::request) void = {
 	let items: []json::value = [];
 	for (let i = 0z; i < len(s.documents); i += 1) {
-		let diags = parse_diagnostics_for_doc(s, &s.documents[i]);
+		let diags = compute_doc_diagnostics_with_optional_build(s, &s.documents[i]);
 		let report = json::newobject();
 		json::set(&report, "kind", "full": json::value)!;
 		json::set(&report, "uri", s.documents[i].uri: json::value)!;

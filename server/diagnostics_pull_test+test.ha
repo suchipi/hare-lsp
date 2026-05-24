@@ -57,6 +57,10 @@ fn next_pull_msg(data: []u8) (json::value, size) = {
 @test fn textdocument_diagnostic_returns_full_report() void = {
 	let (s, scan, in_buf, out) = pull_test_server();
 	defer pull_test_cleanup(&s, scan, in_buf, out);
+	// Skip the `hare build` pass — this test only exercises the
+	// parse-error path; spawning the compiler against `/x.ha` would
+	// slow the suite and add nondeterministic stderr noise.
+	s.config.enable_build_diagnostics = false;
 
 	// Open a file with a syntax error.
 	const open =
@@ -126,6 +130,8 @@ fn next_pull_msg(data: []u8) (json::value, size) = {
 @test fn workspace_diagnostic_returns_per_doc_reports() void = {
 	let (s, scan, in_buf, out) = pull_test_server();
 	defer pull_test_cleanup(&s, scan, in_buf, out);
+	// Skip the build pass for the same reason as the single-doc test.
+	s.config.enable_build_diagnostics = false;
 
 	// Open two files.
 	for (let i = 0z; i < 2; i += 1) {
