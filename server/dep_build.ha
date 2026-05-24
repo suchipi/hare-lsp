@@ -187,6 +187,25 @@ fn dep_resolver_fn(ctx: *opaque, ident: []str) (str | void) = {
 	return dir_copy;
 };
 
+// Composes the HAREPATH string for any subprocess spawned by the server
+// (build diagnostics, runTest, runModule, etc.): workspace folders first
+// so local-module `use` names win, then the stdlib search paths the
+// server already computes from `hare.harepath` / $HAREPATH / built-in
+// defaults. Caller frees.
+//
+// @param s: borrowed
+// @returns: owned
+export fn server_harepath_for(s: *server) str = {
+	let folders: []str = [];
+	defer strings::freeall(folders);
+	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
+		append(folders, lsp::uri_decode_path(s.workspace_folders[i].uri))!;
+	};
+	const stdlib = stdlib_search_paths(s);
+	defer strings::freeall(stdlib);
+	return compose_harepath(folders, stdlib);
+};
+
 // Joins workspace-folder paths and stdlib search paths with `:` into a
 // single HAREPATH string. Caller frees.
 //
