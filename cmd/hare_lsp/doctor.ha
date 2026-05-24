@@ -17,6 +17,8 @@ use fs;
 use io;
 use os;
 use os::exec;
+use server;
+use strconv;
 use strings;
 use unix;
 
@@ -199,6 +201,68 @@ export fn run_doctor() int = {
 		fmt::println(
 			"[OK] HARE_LSP_LOG_DIR not set "
 			"(wire-protocol logging disabled)")!;
+	};
+
+	// 7. HARE_LSP_LOG_LEVEL sanity. Mirrors server::log_level_from_env:
+	// unset / empty -> default (info); recognized name -> OK; anything
+	// else -> WARN (server still runs, just at the default level).
+	match (os::getenv("HARE_LSP_LOG_LEVEL")) {
+	case let s: str =>
+		if (len(s) == 0) {
+			fmt::println("[OK] HARE_LSP_LOG_LEVEL not set "
+				"(defaults to info)")!;
+		} else {
+			match (server::parse_log_level(s)) {
+			case server::log_level =>
+				fmt::printfln("[OK] HARE_LSP_LOG_LEVEL={}", s)!;
+			case void =>
+				fmt::printfln(
+					"[WARN] HARE_LSP_LOG_LEVEL={} is not "
+					"recognized; the server will fall back "
+					"to info", s)!;
+			};
+		};
+	case void =>
+		fmt::println("[OK] HARE_LSP_LOG_LEVEL not set "
+			"(defaults to info)")!;
+	};
+
+	// 8. HARE_LSP_MAX_BODY_BYTES sanity. Mirrors read_max_body_env in
+	// main.ha: unset / empty -> default 32 MiB; positive integer -> OK
+	// (pretty-printed as MiB when it's a whole MiB); 0 -> WARN (rejects
+	// every message); non-integer -> WARN (server falls back to 32 MiB).
+	match (os::getenv("HARE_LSP_MAX_BODY_BYTES")) {
+	case let s: str =>
+		if (len(s) == 0) {
+			fmt::println(
+				"[OK] HARE_LSP_MAX_BODY_BYTES not set "
+				"(defaults to 32 MiB)")!;
+		} else {
+			match (strconv::stoz(s)) {
+			case let n: size =>
+				if (n == 0) {
+					fmt::printfln(
+						"[WARN] HARE_LSP_MAX_BODY_BYTES=0 "
+						"will reject every message; "
+						"unset it or pick a positive "
+						"value")!;
+				} else if (n % (1024 * 1024) == 0) {
+					fmt::printfln("[OK] HARE_LSP_MAX_BODY_BYTES={} "
+						"({} MiB)", n, n / (1024 * 1024))!;
+				} else {
+					fmt::printfln("[OK] HARE_LSP_MAX_BODY_BYTES={}", n)!;
+				};
+			case =>
+				fmt::printfln(
+					"[WARN] HARE_LSP_MAX_BODY_BYTES={} is "
+					"not a valid integer; the server will "
+					"fall back to 32 MiB", s)!;
+			};
+		};
+	case void =>
+		fmt::println(
+			"[OK] HARE_LSP_MAX_BODY_BYTES not set "
+			"(defaults to 32 MiB)")!;
 	};
 
 	fmt::println()!;

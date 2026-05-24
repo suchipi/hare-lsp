@@ -31,20 +31,25 @@ export type log_level = enum {
 export def DEFAULT_LOG_LEVEL: log_level = log_level::INFO;
 
 // Reads `HARE_LSP_LOG_LEVEL` from the environment and returns the parsed
-// level. Unknown values fall back to [[DEFAULT_LOG_LEVEL]] so a typo
-// doesn't silence everything.
+// level. Unknown values fall back to [[DEFAULT_LOG_LEVEL]] and emit a
+// stderr warning so a typo doesn't silently silence the level config.
+// Empty-string values are treated like unset (no warning).
 export fn log_level_from_env() log_level = {
 	const v = match (os::getenv("HARE_LSP_LOG_LEVEL")) {
 	case let s: str =>
+		if (len(s) == 0) return DEFAULT_LOG_LEVEL;
 		yield s;
 	case void =>
 		return DEFAULT_LOG_LEVEL;
 	};
-	return match (parse_log_level(v)) {
+	match (parse_log_level(v)) {
 	case let l: log_level =>
-		yield l;
+		return l;
 	case void =>
-		yield DEFAULT_LOG_LEVEL;
+		fmt::fprintfln(os::stderr,
+			"hare-lsp: ignoring invalid HARE_LSP_LOG_LEVEL={}; "
+			"using default", v)!;
+		return DEFAULT_LOG_LEVEL;
 	};
 };
 
