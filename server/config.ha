@@ -52,10 +52,12 @@ export type config = struct {
 	// Whether to render inlay hints for parameter names and inferred types.
 	inlay_hints_parameter_names: bool,
 	inlay_hints_inferred_types: bool,
-	// Max recursion depth for inferred-type hints. 0 disables anything
-	// beyond literals + declared types; higher values follow function-
-	// call return types, identifier bindings, and type aliases. Alias
-	// chains are also cycle-guarded by visited-set tracking in
+	// Max recursion depth for inferred-type label rendering. 0 disables
+	// inlay-hint inferred types entirely; higher values let the renderer
+	// walk further along function-call return types, local-identifier
+	// bindings (via `infer_access_expr_type` in navigation.ha — affects
+	// hover for local lets too, not just inlay hints), and type aliases.
+	// Alias chains are also cycle-guarded by visited-set tracking in
 	// [[follow_alias_chain]], so an unbounded value won't loop.
 	inlay_hints_inferred_types_max_depth: u32,
 	// Configurable resource caps. See [[limits]] / [[default_limits]].
