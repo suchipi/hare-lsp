@@ -38,8 +38,6 @@ export type document = struct {
 	// Timestamp of the last buffer-mutating event (didOpen/didChange/
 	// didSave). Used by the diagnostics debouncer.
 	last_edit_at: time::instant,
-	// Timestamp of the last published parse-diagnostics for this doc.
-	last_publish_at: time::instant,
 	// True when the doc has had a buffer mutation that hasn't yet been
 	// followed by a publishDiagnostics call (because the debounce
 	// suppressed it). Cleared whenever we actually publish.
@@ -245,7 +243,6 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 		prev_tokens = [],
 		prev_result_id = strings::dup("")!,
 		last_edit_at = now,
-		last_publish_at = time::INSTANT_ZERO,
 		diagnostics_pending = false,
 		parse_cache = null,
 		last_build_uris = [],
@@ -260,7 +257,6 @@ export fn handle_did_open(s: *server, n: lsp::notification) void = {
 	// didOpen always publishes immediately so the editor sees an initial
 	// diagnostic state.
 	refresh_diagnostics(s, stored);
-	stored.last_publish_at = time::now(time::clock::MONOTONIC);
 	stored.diagnostics_pending = false;
 };
 
@@ -357,9 +353,10 @@ export fn handle_did_change(s: *server, n: lsp::notification) void = {
 };
 
 // Publishes diagnostics for `doc` if the configured debounce window since
-// the last publish has elapsed. Otherwise leaves diagnostics_pending true
-// so a subsequent message will flush. `force` bypasses the debounce check
-// (used by the shutdown path so the client receives final state).
+// the last edit has elapsed. Otherwise leaves diagnostics_pending true
+// so a subsequent message (or the main loop's trailing-flush wait) will
+// flush. `force` bypasses the debounce check (used by the shutdown path
+// so the client receives final state).
 //
 // @param s: borrowed
 // @param doc: borrowed
@@ -368,14 +365,13 @@ fn maybe_flush_diagnostics(s: *server, doc: *document, force: bool) void = {
 	if (!force) {
 		const debounce_ms = s.config.diagnostics_debounce_ms: i64;
 		const now = time::now(time::clock::MONOTONIC);
-		const since_publish_ns = time::diff(doc.last_publish_at, now);
+		const since_edit_ns = time::diff(doc.last_edit_at, now);
 		const debounce_ns = debounce_ms * time::MILLISECOND;
-		if (since_publish_ns < debounce_ns) {
+		if (since_edit_ns < debounce_ns) {
 			return;
 		};
 	};
 	refresh_diagnostics(s, doc);
-	doc.last_publish_at = time::now(time::clock::MONOTONIC);
 	doc.diagnostics_pending = false;
 };
 
@@ -401,6 +397,46 @@ export fn drain_pending_diagnostics(s: *server) void = {
 	for (let i = 0z; i < len(s.documents); i += 1) {
 		maybe_flush_diagnostics(s, &s.documents[i], true);
 	};
+};
+
+// Returns the smallest remaining milliseconds until any open document's
+// debounce window expires, across all docs with `diagnostics_pending`
+// = true. Returns `void` when no doc has anything pending, or `0` when
+// at least one deadline has already passed (caller should flush
+// immediately). The caller uses the result as a timeout for the
+// main-loop poll so the trailing edit publishes even when no further
+// LSP message arrives. Multiple pending docs collapse to the soonest
+// deadline; later docs catch up on the next loop iteration.
+//
+// @param s: borrowed
+export fn next_trailing_flush_deadline_ms(s: *server) (i64 | void) = {
+	const debounce_ms = s.config.diagnostics_debounce_ms: i64;
+	const debounce_ns = debounce_ms * time::MILLISECOND;
+	const now = time::now(time::clock::MONOTONIC);
+	let earliest: (i64 | void) = void;
+	for (let i = 0z; i < len(s.documents); i += 1) {
+		const doc = &s.documents[i];
+		if (!doc.diagnostics_pending) continue;
+		const since_edit_ns = time::diff(doc.last_edit_at, now);
+		const remaining_ns = debounce_ns - since_edit_ns;
+		const remaining_ms: i64 = if (remaining_ns <= 0) {
+			yield 0i64;
+		} else {
+			// Round up so a sub-millisecond remainder still
+			// gets a full 1ms wait instead of collapsing to a
+			// zero-timeout spin that flushes before the
+			// debounce check would accept.
+			yield (remaining_ns + time::MILLISECOND - 1) /
+				time::MILLISECOND;
+		};
+		match (earliest) {
+		case void =>
+			earliest = remaining_ms;
+		case let cur: i64 =>
+			if (remaining_ms < cur) earliest = remaining_ms;
+		};
+	};
+	return earliest;
 };
 
 // @param s: borrowed
@@ -541,7 +577,6 @@ export fn handle_did_save(s: *server, n: lsp::notification) void = {
 	};
 	// Save bypasses the debounce: we want fresh diagnostics now.
 	refresh_diagnostics_with_build(s, doc);
-	doc.last_publish_at = time::now(time::clock::MONOTONIC);
 	doc.diagnostics_pending = false;
 };
 

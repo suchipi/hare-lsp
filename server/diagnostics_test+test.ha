@@ -10,6 +10,7 @@ use lsp;
 use memio;
 use strconv;
 use strings;
+use time;
 
 fn diag_test_server(
 
@@ -183,6 +184,116 @@ fn next_msg(data: []u8) (json::value, size) = {
 	case null => abort("doc missing");
 	};
 	assert(doc.diagnostics_pending);
+};
+
+@test fn trailing_flush_deadline_math() void = {
+	let (s, scan, in_buf, out) = diag_test_server();
+	defer diag_test_cleanup(&s, scan, in_buf, out);
+	s.config.diagnostics_debounce_ms = 500;
+
+	// No documents at all: nothing pending.
+	assert(next_trailing_flush_deadline_ms(&s) is void);
+
+	// Open a doc. didOpen publishes immediately and clears
+	// diagnostics_pending, so still nothing pending.
+	const open =
+		`{"textDocument":{"uri":"file:///x.ha","languageId":"hare","version":1,"text":"fn a() void = void;\n"}}`;
+	let pv1 = json::loadstr(open)!;
+	const n1 = lsp::notification {
+		method = strings::dup("textDocument/didOpen")!,
+		params = pv1,
+	};
+	defer {
+		free(n1.method);
+		json::finish(pv1);
+	};
+	handle_did_open(&s, n1);
+	assert(next_trailing_flush_deadline_ms(&s) is void);
+
+	const doc = match (find_document(&s, "file:///x.ha")) {
+	case let p: *document =>
+		yield p;
+	case null => abort("doc missing");
+	};
+
+	// Pretend the last edit just happened: remaining should be very
+	// close to the full 500ms window (allow some scheduler slack).
+	doc.diagnostics_pending = true;
+	doc.last_edit_at = time::now(time::clock::MONOTONIC);
+	const remaining = match (next_trailing_flush_deadline_ms(&s)) {
+	case let n: i64 =>
+		yield n;
+	case void => abort("expected pending doc to produce a deadline");
+	};
+	assert(remaining > 0);
+	assert(remaining <= 500);
+
+	// Push last_edit_at far enough into the past that the window has
+	// already elapsed: should return 0.
+	doc.last_edit_at = time::add(time::now(time::clock::MONOTONIC),
+		-2 * time::SECOND);
+	const elapsed = match (next_trailing_flush_deadline_ms(&s)) {
+	case let n: i64 =>
+		yield n;
+	case void => abort("expected elapsed doc to produce a deadline");
+	};
+	assert(elapsed == 0);
+
+	// Clearing the pending flag drops the doc out of the calculation.
+	doc.diagnostics_pending = false;
+	assert(next_trailing_flush_deadline_ms(&s) is void);
+};
+
+@test fn trailing_flush_deadline_picks_soonest_doc() void = {
+	let (s, scan, in_buf, out) = diag_test_server();
+	defer diag_test_cleanup(&s, scan, in_buf, out);
+	s.config.diagnostics_debounce_ms = 1000;
+
+	const open_a =
+		`{"textDocument":{"uri":"file:///alpha.ha","languageId":"hare","version":1,"text":"fn a() void = void;\n"}}`;
+	let pv_a = json::loadstr(open_a)!;
+	const na = lsp::notification {
+		method = strings::dup("textDocument/didOpen")!,
+		params = pv_a,
+	};
+	defer {
+		free(na.method);
+		json::finish(pv_a);
+	};
+	handle_did_open(&s, na);
+
+	const open_b =
+		`{"textDocument":{"uri":"file:///beta.ha","languageId":"hare","version":1,"text":"fn b() void = void;\n"}}`;
+	let pv_b = json::loadstr(open_b)!;
+	const nb = lsp::notification {
+		method = strings::dup("textDocument/didOpen")!,
+		params = pv_b,
+	};
+	defer {
+		free(nb.method);
+		json::finish(pv_b);
+	};
+	handle_did_open(&s, nb);
+
+	const doc_a = find_document(&s, "file:///alpha.ha") as *document;
+	const doc_b = find_document(&s, "file:///beta.ha") as *document;
+
+	const now = time::now(time::clock::MONOTONIC);
+	// alpha was edited 900ms ago (100ms remain), beta was edited
+	// 200ms ago (800ms remain). The minimum (100ms) wins.
+	doc_a.diagnostics_pending = true;
+	doc_a.last_edit_at = time::add(now, -900 * time::MILLISECOND);
+	doc_b.diagnostics_pending = true;
+	doc_b.last_edit_at = time::add(now, -200 * time::MILLISECOND);
+
+	const earliest = match (next_trailing_flush_deadline_ms(&s)) {
+	case let n: i64 =>
+		yield n;
+	case void => abort("expected pending docs to produce a deadline");
+	};
+	// Allow scheduler slack: should be well under 200ms.
+	assert(earliest >= 0);
+	assert(earliest < 200);
 };
 
 @test fn changing_to_broken_publishes_diagnostic() void = {

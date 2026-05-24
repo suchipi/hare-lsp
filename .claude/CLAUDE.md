@@ -77,7 +77,7 @@ Parser, buffer, indices, type queries. None of this depends on `lsp` or `server`
 
 Owns the `server` struct (state, open documents, indices, pending requests, etc.) and dispatches incoming messages to per-feature files. [server/server.ha](server/server.ha) is the dispatch table: see `handle_request` and `handle_notification` for the full method list. Each LSP feature lives in its own file (`completion.ha`, `hover.ha`, `formatting.ha`, …) with a matching `*_test+test.ha`.
 
-Key flow: `run` loops on `lsp::read` → `lsp::decode` → `dispatch` → `flush_pending_diagnostics`. Diagnostics are debounced (`hare.diagnostics.debounceMs`) and flushed after every message — rapid `didChange` traffic naturally coalesces and a trailing edit publishes once any later message arrives.
+Key flow: `run` loops on `lsp::read` → `lsp::decode` → `dispatch` → `flush_pending_diagnostics`. Diagnostics are debounced (`hare.diagnostics.debounceMs`) by time since the last edit. The main loop waits up to the remaining debounce window for the next LSP message; if the window expires first, the trailing edit publishes on its own.
 
 Lifecycle is gated in `handle_request`: `PRE_INIT` accepts only `initialize`; `SHUTTING_DOWN`/`EXITED` reject everything except `exit`.
 
