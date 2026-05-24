@@ -194,7 +194,7 @@
             "type": "number",
             "default": 10,
             "minimum": 0,
-            "description": "Maximum recursion depth for inferred-type hints. 0 disables inference beyond declared types + literals; higher values follow function-call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe."
+            "description": "Maximum recursion depth for inferred-type hints. 0 disables inferred-type hints entirely. 1 emits first-hop labels only (literals, casts, call return types) without following identifier bindings or type aliases. Higher values follow function-call return types, identifier bindings, and type aliases. Alias-chain cycles are guarded by a visited set, so larger values are safe."
           },
           "hare.limits.maxTotalBufferBytes": {
             "type": "number",
