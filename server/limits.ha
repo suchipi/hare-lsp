@@ -13,7 +13,7 @@
 //
 // - `max_diagnostics_per_file` is a UX truncation: a file with
 //   thousands of parse errors produces a useless diagnostic list and
-//   a huge publishDiagnostics payload, so [[parse_diagnostics_for_doc]]
+//   a huge publishDiagnostics payload, so [[assemble_capped_diagnostics]]
 //   truncates and appends a single synthesised "diagnostics-truncated"
 //   diagnostic at EOF. Hitting it is normal for pathological inputs,
 //   not an error condition.

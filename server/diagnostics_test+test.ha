@@ -4,6 +4,7 @@
 use bufio;
 use bytes;
 use encoding::json;
+use fmt;
 use io;
 use lsp;
 use memio;
@@ -319,4 +320,182 @@ fn next_msg(data: []u8) (json::value, size) = {
 		*(json::get(&(v2 as json::object), "params") as *json::value) as json::object;
 	const d2 = *(json::get(&p2, "diagnostics") as *json::value) as []json::value;
 	assert(len(d2) == 0);
+};
+
+// --- assemble_capped_diagnostics --------------------------------------
+// Builds a synthetic diagnostic with the given `code` field so tests can
+// tell which input slice each output entry came from.
+fn mk_test_diag(code: str) json::value = {
+	let d = json::newobject();
+	let r = json::newobject();
+	let p = json::newobject();
+	json::put(&p, "line", 0.0)!;
+	json::put(&p, "character", 0.0)!;
+	json::put(&r, "start", p)!;
+	let p2 = json::newobject();
+	json::put(&p2, "line", 0.0)!;
+	json::put(&p2, "character", 0.0)!;
+	json::put(&r, "end", p2)!;
+	json::put(&d, "range", r)!;
+	json::put(&d, "severity", 1.0)!;
+	json::set(&d, "code", code: json::value)!;
+	json::set(&d, "message", code: json::value)!;
+	return d: json::value;
+};
+
+fn mk_test_diag_slice(code: str, n: size) []json::value = {
+	let out: []json::value = [];
+	for (let i = 0z; i < n; i += 1) {
+		append(out, mk_test_diag(code))!;
+	};
+	return out;
+};
+
+fn diag_code(v: json::value) str = {
+	const o = v as json::object;
+	return *(json::get(&o, "code") as *json::value) as str;
+};
+
+fn finish_diag_slice(arr: []json::value) void = {
+	for (let i = 0z; i < len(arr); i += 1) {
+		json::finish(arr[i]);
+	};
+	free(arr);
+};
+
+@test fn capped_diags_pass_through_under_cap() void = {
+	const build = mk_test_diag_slice("b", 2);
+	const unused = mk_test_diag_slice("u", 1);
+	const parse = mk_test_diag_slice("p", 3);
+	const out = assemble_capped_diagnostics(100, build, unused, parse,
+		lsp::position { line = 0, character = 0 });
+	defer finish_diag_slice(out);
+	// Under-cap path returns everything in priority order: build,
+	// then unused, then parse - no truncation marker.
+	assert(len(out) == 6);
+	assert(diag_code(out[0]) == "b");
+	assert(diag_code(out[1]) == "b");
+	assert(diag_code(out[2]) == "u");
+	assert(diag_code(out[3]) == "p");
+	assert(diag_code(out[4]) == "p");
+	assert(diag_code(out[5]) == "p");
+};
+
+@test fn capped_diags_drops_parse_first() void = {
+	// 2 build + 1 unused + 5 parse = 8 total; cap = 5.
+	// Effective = 4. Build all kept (2). Unused all kept (1). Parse
+	// gets remaining 1 slot. Marker appended in the 5th slot.
+	// Dropped = 8 - 4 = 4 (the 4 parse errors that didn't fit).
+	const build = mk_test_diag_slice("b", 2);
+	const unused = mk_test_diag_slice("u", 1);
+	const parse = mk_test_diag_slice("p", 5);
+	const out = assemble_capped_diagnostics(5, build, unused, parse,
+		lsp::position { line = 7, character = 0 });
+	defer finish_diag_slice(out);
+	assert(len(out) == 5);
+	assert(diag_code(out[0]) == "b");
+	assert(diag_code(out[1]) == "b");
+	assert(diag_code(out[2]) == "u");
+	assert(diag_code(out[3]) == "p");
+	assert(diag_code(out[4]) == "diagnostics-truncated");
+	const marker = out[4] as json::object;
+	const msg = *(json::get(&marker, "message") as *json::value) as str;
+	// 4 dropped, 4 of 8 reported.
+	const want =
+		fmt::asprintf("({} more diagnostics not shown; {} of {} reported)", 4u, 4u,
+			8u)!;
+	defer free(want);
+	assert(msg == want, msg);
+};
+
+@test fn capped_diags_drops_unused_then_build_when_tight() void = {
+	// 5 build + 3 unused + 2 parse = 10 total; cap = 4.
+	// Effective = 3. Build takes 3, unused 0, parse 0. Marker fills
+	// slot 4. Dropped = 7.
+	const build = mk_test_diag_slice("b", 5);
+	const unused = mk_test_diag_slice("u", 3);
+	const parse = mk_test_diag_slice("p", 2);
+	const out = assemble_capped_diagnostics(4, build, unused, parse,
+		lsp::position { line = 0, character = 0 });
+	defer finish_diag_slice(out);
+	assert(len(out) == 4);
+	assert(diag_code(out[0]) == "b");
+	assert(diag_code(out[1]) == "b");
+	assert(diag_code(out[2]) == "b");
+	assert(diag_code(out[3]) == "diagnostics-truncated");
+};
+
+@test fn capped_diags_zero_cap_returns_empty() void = {
+	const build = mk_test_diag_slice("b", 2);
+	const unused = mk_test_diag_slice("u", 1);
+	const parse = mk_test_diag_slice("p", 3);
+	const out = assemble_capped_diagnostics(0, build, unused, parse,
+		lsp::position { line = 0, character = 0 });
+	defer finish_diag_slice(out);
+	assert(len(out) == 0);
+};
+
+@test fn capped_diags_marker_counts_only_truncated() void = {
+	// All-parse pathological case: 1000 parse errors, cap = 10. Should
+	// keep 9 parse + marker; marker says 991 dropped, 9 of 1000.
+	const parse = mk_test_diag_slice("p", 1000);
+	const out = assemble_capped_diagnostics(10, [], [], parse,
+		lsp::position { line = 0, character = 0 });
+	defer finish_diag_slice(out);
+	assert(len(out) == 10);
+	assert(diag_code(out[9]) == "diagnostics-truncated");
+	const marker = out[9] as json::object;
+	const msg = *(json::get(&marker, "message") as *json::value) as str;
+	const want =
+		fmt::asprintf("({} more diagnostics not shown; {} of {} reported)", 991u, 9u,
+			1000u)!;
+	defer free(want);
+	assert(msg == want, msg);
+};
+
+// End-to-end via the assembly entry point: open a file with parse and
+// unused diagnostics, set a tight cap, and check the published list
+// honours the priority order and shape.
+@test fn publish_respects_max_diagnostics_per_file_cap() void = {
+	let (s, scan, in_buf, out) = diag_test_server();
+	defer diag_test_cleanup(&s, scan, in_buf, out);
+	// 4 imports + a hard parse error => 1 unused (one used) + 1 parse.
+	// Cap = 2: should keep 1 unused + marker, drop the parse error.
+	// We'll instead pick a simpler fixture: many parse errors + 1
+	// unused import + cap = 3. Unused must survive; parse gets
+	// truncated.
+	s.config.limits.max_diagnostics_per_file = 3;
+	// `use foo;` is unused; the trailing garbage forces multiple
+	// parse errors.
+	const open =
+		`{"textDocument":{"uri":"file:///cap.ha","languageId":"hare","version":1,"text":"use foo;\nexport fn a( = void;\nexport fn b( = void;\nexport fn c( = void;\n"}}`;
+	let pv = json::loadstr(open)!;
+	const n = lsp::notification {
+		method = strings::dup("textDocument/didOpen")!,
+		params = pv,
+	};
+	defer {
+		free(n.method);
+		json::finish(pv);
+	};
+	handle_did_open(&s, n);
+
+	const data = memio::buffer(out);
+	const (v, _) = next_msg(data);
+	defer json::finish(v);
+	const params =
+		*(json::get(&(v as json::object), "params") as *json::value) as json::object;
+	const diags =
+		*(json::get(&params, "diagnostics") as *json::value) as []json::value;
+	assert(len(diags) == 3);
+	// First entry must be the unused-import diagnostic (build > unused
+	// > parse; with no build, unused leads).
+	const d0 = diags[0] as json::object;
+	assert(*(json::get(&d0, "code") as *json::value) as str == "unused-import");
+	// Last entry is the truncation marker.
+	const d_last = diags[len(diags) - 1] as json::object;
+	assert(
+		*(json::get(&d_last,
+			"code") as *json::value) as str == "diagnostics-truncated"
+	);
 };
