@@ -1279,14 +1279,18 @@ fn infer_type_from_init_at(
 	case let m: ast::match_expr =>
 		return infer_match_expr_type(srv, doc, &m);
 	case let ie: ast::if_expr =>
-		match (infer_type_from_init_at(srv, doc, ie.tbranch, depth)) {
+		// The compiler removes `never` when reducing the if/else result
+		// type, so a diverging true branch (`if (c) abort() else x`)
+		// must fall through to the false branch instead of surfacing as
+		// `never`. See drop_never.
+		match (drop_never(infer_type_from_init_at(srv, doc, ie.tbranch, depth))) {
 		case let t: str =>
 			return t;
 		case void => void;
 		};
 		match (ie.fbranch) {
 		case let fb: *ast::expr =>
-			return infer_type_from_init_at(srv, doc, fb, depth);
+			return drop_never(infer_type_from_init_at(srv, doc, fb, depth));
 		case null =>
 			return void;
 		};
@@ -1469,6 +1473,28 @@ fn walk_for_local_binding_node(
 	};
 };
 
+// `never` is the bottom type: the compiler drops it when reducing a
+// result type (harec type_store_reduce_result, "Remove never"), so a
+// diverging sub-expression - a `never`-returning call like
+// `fmt::fatal(...)`, `abort()`, `os::exit(...)` - contributes nothing to
+// a `match` union or an `if`/`else` result. Frees and discards a "never"
+// inference (returning void); otherwise passes the owned string through.
+//
+// @param t: owned
+// @returns: owned
+fn drop_never(t: (str | void)) (str | void) = {
+	match (t) {
+	case let s: str =>
+		if (s == "never") {
+			free(s);
+			return void;
+		};
+		return s;
+	case void =>
+		return void;
+	};
+};
+
 // Best-effort type for a match expression: the union of each case's
 // contributed value type, deduplicated. Cases whose body always diverges
 // (return / abort) contribute nothing. Returns void if no case yields a
@@ -1486,7 +1512,7 @@ fn infer_match_expr_type(
 	defer analysis::free_str_slice(parts);
 	for (let i = 0z; i < len(m.cases); i += 1) {
 		const mc = &m.cases[i];
-		match (infer_case_value_type(srv, doc, mc)) {
+		match (drop_never(infer_case_value_type(srv, doc, mc))) {
 		case let t: str =>
 			if (!contains_str(parts, t)) {
 				append(parts, t)!;
