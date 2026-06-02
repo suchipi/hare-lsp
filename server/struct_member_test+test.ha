@@ -525,3 +525,198 @@ use strings;
 	assert(*(json::get(&start, "line") as *json::value) as f64 == 0.0);
 	assert(*(json::get(&start, "character") as *json::value) as f64 == 29.0);
 };
+
+@test fn hover_on_tuple_member_shows_element_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// A tuple-index access `pair.N` should hover as the Nth element's
+	// type. The receiver name is multi-char so byte/rune offset math
+	// isn't masked by a single-character identifier. Both `.0` and a
+	// non-zero index `.1` are exercised so the index extraction isn't
+	// silently hard-coded to 0.
+	const src =
+		"export fn f(pair: (int, uint)) void = {\\n\\tlet _ = pair.0;\\n\\tlet _ = pair.1;\\n};\\n";
+	nav_open(&s, "file:///tuple_hover.ha", src);
+
+	const (line0, col0) = find_pos(src, "pair.0");
+	const md0 = nav_hover_contents(&s, out, "file:///tuple_hover.ha", line0,
+		col0 + len("pair.0"): u32 - 1, 650.0);
+	defer free(md0);
+	assert(strings::contains(md0, "(tuple field 0)"));
+	assert(strings::contains(md0, "int"));
+
+	const (line1, col1) = find_pos(src, "pair.1");
+	const md1 = nav_hover_contents(&s, out, "file:///tuple_hover.ha", line1,
+		col1 + len("pair.1"): u32 - 1, 651.0);
+	defer free(md1);
+	assert(strings::contains(md1, "(tuple field 1)"));
+	assert(strings::contains(md1, "uint"));
+};
+
+@test fn definition_on_tuple_member_jumps_to_element_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// A tuple element has no name decl, so go-to-definition lands on the
+	// element's type node within the tuple type. In `(int, uint)`, `int`
+	// starts at column 19 and `uint` at column 24.
+	const src = "export fn f(pair: (int, uint)) void = { let _ = pair.0; };\\n";
+	nav_open(&s, "file:///tuple_def.ha", src);
+
+	const (line, col) = find_pos(src, "pair.0");
+	const params = pos_params("file:///tuple_def.ha", line,
+		col + len("pair.0"): u32 - 1);
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 660.0,
+		method = strings::dup("textDocument/definition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_definition(&s, r);
+
+	const v = skip_to_response(out, 660.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const uri = *(json::get(&result, "uri") as *json::value) as str;
+	assert(uri == "file:///tuple_def.ha");
+	const range = *(json::get(&result, "range") as *json::value) as json::object;
+	const start = *(json::get(&range, "start") as *json::value) as json::object;
+	assert(*(json::get(&start, "line") as *json::value) as f64 == 0.0);
+	assert(*(json::get(&start, "character") as *json::value) as f64 == 19.0);
+};
+
+@test fn type_definition_on_tuple_member_alias_jumps_to_decl() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// Element 0 is the named alias `id`; go-to-type-definition should jump
+	// to the `type id` declaration on line 0 (the access is on line 1).
+	const src =
+		"type id = int;\\nexport fn f(pair: (id, str)) void = { let _ = pair.0; };\\n";
+	nav_open(&s, "file:///tuple_tdef.ha", src);
+
+	const (line, col) = find_pos(src, "pair.0");
+	const params = pos_params("file:///tuple_tdef.ha", line,
+		col + len("pair.0"): u32 - 1);
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 661.0,
+		method = strings::dup("textDocument/typeDefinition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_type_definition(&s, r);
+
+	const v = skip_to_response(out, 661.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const uri = *(json::get(&result, "uri") as *json::value) as str;
+	assert(uri == "file:///tuple_tdef.ha");
+	const range = *(json::get(&result, "range") as *json::value) as json::object;
+	const start = *(json::get(&range, "start") as *json::value) as json::object;
+	assert(*(json::get(&start, "line") as *json::value) as f64 == 0.0);
+};
+
+@test fn type_definition_on_tuple_member_builtin_returns_null() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// Element 0 is the builtin `int`, which has no declaration to jump to,
+	// so type-definition must return null rather than fall through to a
+	// bare-identifier lookup of the digit token.
+	const src = "export fn f(pair: (int, str)) void = { let _ = pair.0; };\\n";
+	nav_open(&s, "file:///tuple_tdef_builtin.ha", src);
+
+	const (line, col) = find_pos(src, "pair.0");
+	const params = pos_params("file:///tuple_tdef_builtin.ha", line,
+		col + len("pair.0"): u32 - 1);
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 662.0,
+		method = strings::dup("textDocument/typeDefinition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_type_definition(&s, r);
+
+	const v = skip_to_response(out, 662.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value);
+	assert(result is json::_null);
+};
+
+@test fn type_definition_on_struct_member_alias_jumps_to_decl() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// The unified member type-definition path also serves struct fields:
+	// field `v` has the named type `id`, so type-definition jumps to the
+	// `type id` declaration on line 0.
+	const src =
+		"type id = int;\\ntype pt = struct { v: id };\\nfn f(p: pt) void = { let _ = p.v; };\\n";
+	nav_open(&s, "file:///sm_tdef.ha", src);
+
+	const (line, col) = find_pos(src, "p.v");
+	const params = pos_params("file:///sm_tdef.ha", line,
+		col + len("p.v"): u32 - 1);
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 663.0,
+		method = strings::dup("textDocument/typeDefinition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_type_definition(&s, r);
+
+	const v = skip_to_response(out, 663.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const uri = *(json::get(&result, "uri") as *json::value) as str;
+	assert(uri == "file:///sm_tdef.ha");
+	const range = *(json::get(&result, "range") as *json::value) as json::object;
+	const start = *(json::get(&range, "start") as *json::value) as json::object;
+	assert(*(json::get(&start, "line") as *json::value) as f64 == 0.0);
+};
+
+@test fn definition_on_out_of_range_tuple_member_returns_null() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// `pair.5` indexes past the end of a 2-element tuple. The element type
+	// can't be resolved, so navigation must degrade to null rather than
+	// crash or point somewhere wrong.
+	const src = "export fn f(pair: (int, uint)) void = { let _ = pair.5; };\\n";
+	nav_open(&s, "file:///tuple_oob.ha", src);
+
+	const (line, col) = find_pos(src, "pair.5");
+	const params = pos_params("file:///tuple_oob.ha", line,
+		col + len("pair.5"): u32 - 1);
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 664.0,
+		method = strings::dup("textDocument/definition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_definition(&s, r);
+
+	const v = skip_to_response(out, 664.0);
+	defer json::finish(v);
+	const result = *(json::get(&(v as json::object), "result") as *json::value);
+	assert(result is json::_null);
+};
