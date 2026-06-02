@@ -1676,7 +1676,7 @@ fn resolve_file_local(s: *server, uri: str, name: str) ((str, str) | void) = {
 		case void =>
 			return void;
 		};
-		const sig = render_decl_signature(&cache.pr.subunit.decls[decl_idx]);
+		const sig = render_decl_signature(s, doc, &cache.pr.subunit.decls[decl_idx]);
 		const docs = strings::dup(sym.docs)!;
 		return (sig, docs);
 	case void =>
@@ -1723,7 +1723,8 @@ fn resolve_workspace_entry(
 	case void =>
 		return void;
 	};
-	const sig = render_decl_signature(&fpe.pr.subunit.decls[decl_idx]);
+	// Cross-file decl: no open document for initializer inference.
+	const sig = render_decl_signature(s, null, &fpe.pr.subunit.decls[decl_idx]);
 	const docs = strings::dup(entry.docs)!;
 	return (sig, docs);
 };

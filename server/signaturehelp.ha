@@ -60,7 +60,7 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	// render_decl_signature in navigation.ha. Reusing it here keeps the
 	// two surfaces consistent — neither should dump the function body
 	// into the editor's signature popup.
-	const sig = render_decl_signature(&cache.pr.subunit.decls[decl_idx]);
+	const sig = render_decl_signature(s, doc, &cache.pr.subunit.decls[decl_idx]);
 	defer free(sig);
 
 	let signatures: []json::value = [];

@@ -13,6 +13,7 @@ use hare::ast;
 use hare::unparse;
 use lsp;
 use memio;
+use strconv;
 use strings;
 
 // Handles textDocument/hover. Returns a MarkupContent with the symbol's
@@ -106,7 +107,7 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 			match (find_decl_by_name(&cache.pr.subunit, ident_str)) {
 			case let i: size =>
 				const d = &cache.pr.subunit.decls[i];
-				sig = render_decl_signature(d);
+				sig = render_decl_signature(s, doc, d);
 				docs = strings::dup(p.docs)!;
 				analysis::finish_ownership_fact(&fact);
 				fact = ownership_for_local_symbol(p);
@@ -572,7 +573,9 @@ fn workspace_hover(
 		return void;
 	};
 	const d = &fpe.pr.subunit.decls[decl_idx];
-	const sig = render_decl_signature(d);
+	// Cross-file decl: no open document to resolve the initializer against,
+	// so pass a null doc and keep the written-type-only signature.
+	const sig = render_decl_signature(s, null, d);
 	const docs = strings::dup(fpe.pr.subunit.decls[decl_idx].docs)!;
 	const fact = ownership_for_workspace_entry(entry);
 	return (sig, docs, fact);
@@ -616,6 +619,37 @@ fn send_location(
 	};
 };
 
+// Appends `: <inferred>` to `buf` for a top-level decl whose type was
+// omitted, inferring it from `init`. A no-op when there's no document
+// context (cross-file signature lookups pass a null doc) or inference fails.
+//
+// @param buf: borrowed
+// @param srv: borrowed
+// @param doc: borrowed
+// @param init: borrowed
+fn append_inferred_decl_type(
+	buf: *memio::stream,
+	srv: *server,
+	doc: nullable *document,
+	init: *ast::expr,
+) void = {
+	const d = match (doc) {
+	case let d: *document =>
+		yield d;
+	case null =>
+		return;
+	};
+	match (infer_type_from_init(srv, d, init)) {
+	case let t: str =>
+		defer free(t);
+		match (memio::concat(buf, ": ", t)) {
+		case size => void;
+		case => void;
+		};
+	case void => void;
+	};
+};
+
 // Renders the declaration's signature without its body (for fn) or
 // initializer (for global / def). For type aliases we keep the RHS
 // because that *is* the type. The intent is that hover shows just what
@@ -623,8 +657,20 @@ fn send_location(
 //   `export fn main() void`   (not `... = { let scan = ...; ... }`)
 //   `let stdout_file: io::file`  (not `... = rt::STDOUT_FILENO`)
 //
+// When a top-level `def`/`let`/`const` omits its type, the type is inferred
+// from the initializer (best-effort) so hover shows e.g. `def PI: f64` rather
+// than a bare `def PI`. Inference requires the document context, so it only
+// fires when `doc` is non-null (the decl lives in the open file); cross-file
+// signature lookups pass null and keep the written-type-only behavior.
+//
+// @param srv: borrowed
+// @param doc: borrowed
 // @param d: borrowed
-fn render_decl_signature(d: *ast::decl) str = {
+fn render_decl_signature(
+	srv: *server,
+	doc: nullable *document,
+	d: *ast::decl,
+) str = {
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
 
@@ -659,7 +705,9 @@ fn render_decl_signature(d: *ast::decl) str = {
 			case size => void;
 			case => void;
 			};
-		case null => void;
+		case null =>
+			// No written type: infer one from the initializer.
+			append_inferred_decl_type(&buf, srv, doc, c.init);
 		};
 		return strings::dup(memio::string(&buf)!)!;
 	case let f: ast::decl_func =>
@@ -696,6 +744,16 @@ fn render_decl_signature(d: *ast::decl) str = {
 		case size => void;
 		case =>
 			return strings::dup("<unparse error>")!;
+		};
+		// With the init stripped and no written type, unparse ends right
+		// after the name, so we can append the inferred type. (When a type
+		// was written, it's already rendered above.)
+		if (g._type is null) {
+			match (g.init) {
+			case let ini: *ast::expr =>
+				append_inferred_decl_type(&buf, srv, doc, ini);
+			case null => void;
+			};
 		};
 	// Type alias / assert — keep as-is. For a type alias, the
 	// RHS *is* the type definition, so we want to show it.
@@ -1332,10 +1390,15 @@ fn infer_type_from_init_at(
 ) (str | void) = {
 	match (init.expr) {
 	case let l: ast::literal_expr =>
-		return type_label_for_literal(l);
+		return type_label_for_literal(srv, doc, l, depth);
 	case let c: ast::call_expr =>
 		return infer_call_return_type(srv, doc, &c);
 	case let c: ast::cast_expr =>
+		// `x is T` is a type test that yields bool, not T. Only the
+		// `x: T` (CAST) and `x as T` (ASSERTION) forms take on T.
+		if (c.kind == ast::cast_kind::TEST) {
+			return strings::dup("bool")!;
+		};
 		let buf = memio::dynamic();
 		defer lsp::safe_close(&buf);
 		match (unparse::_type(&buf, &unparse::syn_nowrap, c._type)) {
@@ -1350,6 +1413,10 @@ fn infer_type_from_init_at(
 		return infer_unwrapped_init(srv, doc, p: *ast::expr);
 	case let m: ast::match_expr =>
 		return infer_match_expr_type(srv, doc, &m);
+	case let sw: ast::switch_expr =>
+		return infer_switch_expr_type(srv, doc, &sw, depth);
+	case let cmp: ast::compound_expr =>
+		return infer_block_value_type(srv, doc, cmp.exprs, cmp.label, depth);
 	case let ie: ast::if_expr =>
 		// The compiler removes `never` when reducing the if/else result
 		// type, so a diverging true branch (`if (c) abort() else x`)
@@ -1368,10 +1435,38 @@ fn infer_type_from_init_at(
 		};
 	case ast::len_expr =>
 		return strings::dup("size")!;
+	case ast::size_expr =>
+		return strings::dup("size")!;
+	case ast::align_expr =>
+		return strings::dup("size")!;
+	case ast::offset_expr =>
+		return strings::dup("size")!;
 	case let ba: ast::binarithm_expr =>
 		return infer_binarithm_type(srv, doc, ba, depth);
-	case let a: ast::access_expr =>
-		return infer_access_expr_type(srv, doc, a, init.loc.start.off: size, depth);
+	case let u: ast::unarithm_expr =>
+		return infer_unarithm_type(srv, doc, u, init, depth);
+	case let sl: ast::slice_expr =>
+		return infer_slice_expr_type(srv, doc, sl, depth);
+	case let al: ast::alloc_expr =>
+		return infer_alloc_expr_type(srv, doc, al, depth);
+	case let va: ast::variadic_expr =>
+		return infer_variadic_expr_type(va);
+	case ast::access_expr =>
+		return infer_access_expr_type(srv, doc, init, depth);
+	case =>
+		return void;
+	};
+};
+
+// Best-effort type of a C-variadic expression. `vaarg(ap, T)` yields the
+// explicit type `T`; `vastart()` / `vaend(ap)` aren't useful binding
+// initializers, so we decline them.
+//
+// @param va: borrowed
+fn infer_variadic_expr_type(va: ast::variadic_expr) (str | void) = {
+	match (va) {
+	case let arg: ast::vaarg_expr =>
+		return render_type_plain(arg._type);
 	case =>
 		return void;
 	};
@@ -1411,47 +1506,213 @@ fn infer_binarithm_type(
 	};
 };
 
-// Resolves a bare identifier to a same-file local `let`/`const` binding and
-// returns its declared or inferred type. Qualified accesses (`foo::bar`,
-// `obj.field`, indexing) are out of scope here.
+// Best-effort type of a unary arithmetic expression:
+//   &x  ->  *T  (a pointer to the operand's type)
+//   *p  ->  the referent type (pointer dereference)
+//   -x  ->  the operand's type (numeric negation)
+//   ~x  ->  the operand's type (bitwise complement)
+//   !x  ->  bool (logical negation)
+// The `&`/`*` arms route the operand through the receiver-resolution engine
+// (which knows how to resolve lvalues and chase pointer/alias wrappers);
+// `-`/`~` recurse through the string engine, which handles the wider set of
+// numeric operand forms.
 //
 // @param srv: borrowed
 // @param doc: borrowed
-// @param a: borrowed
-fn infer_access_expr_type(
+// @param u: borrowed
+// @param init: borrowed
+fn infer_unarithm_type(
 	srv: *server,
 	doc: *document,
-	a: ast::access_expr,
-	off: size,
+	u: ast::unarithm_expr,
+	init: *ast::expr,
 	depth: u32,
 ) (str | void) = {
-	if (depth >= srv.config.inlay_hints_inferred_types_max_depth) return void;
-	const id = match (a) {
-	case let id: ast::access_identifier =>
-		yield id;
-	case =>
-		return void;
+	switch (u.op) {
+	case ast::unarithm_op::LNOT =>
+		return strings::dup("bool")!;
+	case ast::unarithm_op::MINUS, ast::unarithm_op::BNOT =>
+		return infer_type_from_init_at(srv, doc, u.operand, depth);
+	case ast::unarithm_op::ADDR =>
+		const cache = parse_of(doc);
+		const lt = match (type_of_expr(srv, doc, &cache.pr.subunit, u.operand,
+			depth: int)) {
+		case let lt: located_type =>
+			yield lt;
+		case void =>
+			return void;
+		};
+		const inner = match (render_type_plain(lt.t)) {
+		case let s: str =>
+			yield s;
+		case void =>
+			return void;
+		};
+		defer free(inner);
+		return strings::concat("*", inner)!;
+	case ast::unarithm_op::DEREF =>
+		// type_of_expr already resolves `*p` (DEREF) to the referent.
+		const cache = parse_of(doc);
+		match (type_of_expr(srv, doc, &cache.pr.subunit, init, depth: int)) {
+		case let lt: located_type =>
+			return render_type_plain(lt.t);
+		case void =>
+			return void;
+		};
 	};
-	if (len(id) != 1) return void;
+};
+
+// Best-effort type of a slice expression (`obj[a..b]`): a slice of the
+// object's element type, regardless of whether the object is a slice, an
+// array, an unbounded array, or a pointer to one. Resolves the object's
+// element type through the receiver-resolution engine (which chases
+// alias / pointer wrappers) and wraps it in `[]`.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param sl: borrowed
+fn infer_slice_expr_type(
+	srv: *server,
+	doc: *document,
+	sl: ast::slice_expr,
+	depth: u32,
+) (str | void) = {
 	const cache = parse_of(doc);
-	const b = match (find_local_binding_node(&cache.pr.subunit, id[0], off)) {
-	case let b: *ast::binding =>
-		yield b;
+	const obj = match (type_of_expr(srv, doc, &cache.pr.subunit, sl.object,
+		depth: int)) {
+	case let lt: located_type =>
+		yield lt;
 	case void =>
 		return void;
 	};
-	match (b._type) {
-	case let t: *ast::_type =>
-		let buf = memio::dynamic();
-		defer lsp::safe_close(&buf);
-		match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
-		case size => void;
-		case =>
+	const elem = match (element_type_in_type(srv, obj, depth: int)) {
+	case let e: located_type =>
+		yield e;
+	case void =>
+		return void;
+	};
+	const inner = match (render_type_plain(elem.t)) {
+	case let s: str =>
+		yield s;
+	case void =>
+		return void;
+	};
+	defer free(inner);
+	return strings::concat("[]", inner)!;
+};
+
+// Best-effort type of an allocation expression. Every `alloc(...)` in Hare
+// v0.26.0 yields a `(... | nomem)` tagged union (see harec check_expr_alloc):
+//   alloc(x)            -> (*T | nomem)   (object: T is x's type)
+//   alloc(x...)         -> ([]T | nomem)  (slice copy: T is x's element type)
+//   alloc(x, cap)       -> ([]T | nomem)  (slice with capacity; also COPY form)
+// The object form uses the string engine on the initializer (so literals,
+// calls, etc. resolve); the slice forms resolve the initializer's element
+// type through the receiver engine (the initializer is a slice/array lvalue).
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param al: borrowed
+fn infer_alloc_expr_type(
+	srv: *server,
+	doc: *document,
+	al: ast::alloc_expr,
+	depth: u32,
+) (str | void) = {
+	switch (al.form) {
+	case ast::alloc_form::OBJECT =>
+		const inner = match (infer_type_from_init_at(srv, doc, al.init, depth)) {
+		case let s: str =>
+			yield s;
+		case void =>
 			return void;
 		};
-		return strings::dup(memio::string(&buf)!)!;
-	case null =>
-		return infer_type_from_init_at(srv, doc, b.init, depth + 1);
+		defer free(inner);
+		return strings::concat("(*", inner, " | nomem)")!;
+	case ast::alloc_form::COPY =>
+		const cache = parse_of(doc);
+		const lt = match (type_of_expr(srv, doc, &cache.pr.subunit, al.init,
+			depth: int)) {
+		case let lt: located_type =>
+			yield lt;
+		case void =>
+			return void;
+		};
+		const elem = match (element_type_in_type(srv, lt, depth: int)) {
+		case let e: located_type =>
+			yield e;
+		case void =>
+			return void;
+		};
+		const inner = match (render_type_plain(elem.t)) {
+		case let s: str =>
+			yield s;
+		case void =>
+			return void;
+		};
+		defer free(inner);
+		return strings::concat("([]", inner, " | nomem)")!;
+	};
+};
+
+// Infers the type of an access-expression init: a bare identifier (`x`), a
+// qualified identifier (`pkg::y`), struct/union field access (`recv.field`),
+// index access (`xs[i]`), or tuple field access (`tup.N`).
+//
+// A single-segment identifier that names a same-file local `let`/`const`/`def`
+// binding is resolved through the string engine, which understands more init
+// forms (literals, `match`, `if`, binary arithmetic, ...) than `type_of_expr`.
+// Everything else — qualified identifiers, single-segment globals, and the
+// field / index / tuple access forms — is routed through the receiver-
+// resolution engine (`type_of_expr`) and its located type rendered, so these
+// forms reuse Engine B's resolvers instead of re-implementing them here.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param init: borrowed
+fn infer_access_expr_type(
+	srv: *server,
+	doc: *document,
+	init: *ast::expr,
+	depth: u32,
+) (str | void) = {
+	if (depth >= srv.config.inlay_hints_inferred_types_max_depth) return void;
+	const cache = parse_of(doc);
+	const a = match (init.expr) {
+	case let a: ast::access_expr =>
+		yield a;
+	case =>
+		return void;
+	};
+	match (a) {
+	case let id: ast::access_identifier =>
+		if (len(id) == 1) {
+			match (find_local_binding_node(&cache.pr.subunit, id[0],
+				init.loc.start.off: size)) {
+			case let b: *ast::binding =>
+				match (b._type) {
+				case let t: *ast::_type =>
+					return render_type_plain(t);
+				case null =>
+					return infer_type_from_init_at(srv, doc, b.init, depth + 1);
+				};
+			case void => void;
+			// Not a local binding: fall through to
+			// type_of_expr, which resolves globals /
+			// workspace / stdlib decls.
+
+			};
+		};
+	case => void;
+	};
+	// Qualified identifier, single-segment global, or field / index /
+	// tuple access: delegate to the receiver-resolution engine and render
+	// the located type.
+	match (type_of_expr(srv, doc, &cache.pr.subunit, init, depth: int)) {
+	case let lt: located_type =>
+		return render_type_plain(lt.t);
+	case void =>
+		return void;
 	};
 };
 
@@ -1711,6 +1972,171 @@ fn contains_str(haystack: []str, needle: str) bool = {
 	return false;
 };
 
+// Best-effort value type of a compound block (or a match/switch case body,
+// which Hare lowers to a compound — see harec check_expr_match /
+// check_expr_switch). A block's value is the union of the value types of the
+// `yield` statements that target it, plus `void` when control can fall off
+// the end (Hare inserts an implicit `yield void` there). A bare trailing
+// expression is NOT the block's value: only an explicit `yield` contributes.
+// Diverging statements contribute nothing. Only top-level yields are
+// considered; yields nested in deeper branches or blocks target those scopes
+// and are a best-effort gap.
+//
+// `depth` is the current inference depth; it is threaded through the yield /
+// fall-through helpers (which recurse via infer_type_from_init_at at
+// depth + 1) so a self- or mutually-referential binding reached through a
+// yield trips the cycle guard in infer_access_expr_type instead of recursing
+// until the stack overflows.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param exprs: borrowed
+// @param label: borrowed
+fn infer_block_value_type(
+	srv: *server,
+	doc: *document,
+	exprs: []*ast::expr,
+	label: ast::label,
+	depth: u32,
+) (str | void) = {
+	let parts: []str = [];
+	defer analysis::free_str_slice(parts);
+	for (let i = 0z; i < len(exprs); i += 1) {
+		const y = match (exprs[i].expr) {
+		case let y: ast::yield_expr =>
+			yield y;
+		case =>
+			continue;
+		};
+		// An unlabeled yield targets the innermost block (this one); a
+		// labeled yield targets this block only if the labels match.
+		if (len(y.label) != 0 && y.label != label) {
+			continue;
+		};
+		match (drop_never(type_of_yield_expr_value(srv, doc, y, depth))) {
+		case let t: str =>
+			if (!contains_str(parts, t)) {
+				append(parts, t)!;
+			} else {
+				free(t);
+			};
+		case void => void;
+		};
+	};
+	// Implicit `yield void` if control can reach the end of the block.
+	if (len(exprs) == 0 ||
+			block_falls_through(srv, doc, exprs[len(exprs) - 1], depth)) {
+		const v = strings::dup("void")!;
+		if (!contains_str(parts, v)) {
+			append(parts, v)!;
+		} else {
+			free(v);
+		};
+	};
+	if (len(parts) == 0) return void;
+	if (len(parts) == 1) return strings::dup(parts[0])!;
+	const joined = strings::join(" | ", parts...)!;
+	defer free(joined);
+	return strings::concat("(", joined, ")")!;
+};
+
+// Type of a `yield <value>`'s value, or void for a bare `yield` (which
+// contributes void). Recurses at depth + 1 so cycles through the yield value
+// are bounded by the inference depth guard. Caller frees.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+fn type_of_yield_expr_value(
+	srv: *server,
+	doc: *document,
+	y: ast::yield_expr,
+	depth: u32,
+) (str | void) = {
+	match (y.value) {
+	case let v: *ast::expr =>
+		return infer_type_from_init_at(srv, doc, v, depth + 1);
+	case null =>
+		return strings::dup("void")!;
+	};
+};
+
+// True when control can fall through past the block's last statement `last`
+// to the end of the block (so the block contributes an implicit `yield void`).
+// Control-transfer statements (yield / return / break / continue) and the
+// always-diverging `abort()` form never fall through; neither does a trailing
+// expression whose type is `never` (e.g. a never-returning call).
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param last: borrowed
+fn block_falls_through(
+	srv: *server,
+	doc: *document,
+	last: *ast::expr,
+	depth: u32,
+) bool = {
+	match (last.expr) {
+	case ast::yield_expr =>
+		return false;
+	case ast::return_expr =>
+		return false;
+	case ast::break_expr =>
+		return false;
+	case ast::continue_expr =>
+		return false;
+	case let a: ast::assert_expr =>
+		// `abort()` / `abort("msg")` (no condition) always diverges;
+		// `assert(cond)` can pass and fall through.
+		return !(a.cond is null);
+	case => void;
+	};
+	// Recurse at depth + 1 so a self-referential trailing expression is
+	// bounded by the inference depth guard rather than overflowing.
+	match (infer_type_from_init_at(srv, doc, last, depth + 1)) {
+	case let t: str =>
+		defer free(t);
+		return t != "never";
+	case void =>
+		return true;
+	};
+};
+
+// Best-effort type for a switch expression: the union of each case's value
+// type, deduplicated. Each case body is a compound block (see harec
+// check_expr_switch), so its value is computed the same way as any block.
+// Cases that always diverge contribute nothing.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param sw: borrowed
+fn infer_switch_expr_type(
+	srv: *server,
+	doc: *document,
+	sw: *ast::switch_expr,
+	depth: u32,
+) (str | void) = {
+	let parts: []str = [];
+	defer analysis::free_str_slice(parts);
+	for (let i = 0z; i < len(sw.cases); i += 1) {
+		const sc = &sw.cases[i];
+		match (drop_never(
+			infer_block_value_type(srv, doc, sc.exprs, sw.label, depth))) {
+		case let t: str =>
+			if (!contains_str(parts, t)) {
+				append(parts, t)!;
+			} else {
+				free(t);
+			};
+		case void => void;
+		};
+	};
+	if (len(parts) == 0) return void;
+	if (len(parts) == 1) return strings::dup(parts[0])!;
+	const joined = strings::join(" | ", parts...)!;
+	defer free(joined);
+	return strings::concat("(", joined, ")")!;
+};
+
 // Infers the type of an init expression after stripping any error-flagged
 // variants from its resulting type. Used for the inner expression of `?` and
 // `!`, which both yield the non-error component of the inner type.
@@ -1739,8 +2165,15 @@ fn infer_unwrapped_init(
 	return render_type_without_errors(srv, doc, result_t);
 };
 
+// @param srv: borrowed
+// @param doc: borrowed
 // @param l: borrowed
-fn type_label_for_literal(l: ast::literal_expr) (str | void) = {
+fn type_label_for_literal(
+	srv: *server,
+	doc: *document,
+	l: ast::literal_expr,
+	depth: u32,
+) (str | void) = {
 	match (l) {
 	case let p: ast::plain_literal =>
 		// unparse::builtin_type aborts on the untyped const storages
@@ -1756,13 +2189,90 @@ fn type_label_for_literal(l: ast::literal_expr) (str | void) = {
 		case =>
 			return strings::dup(unparse::builtin_type(p.storage))!;
 		};
-	case ast::array_literal =>
-		return strings::dup("[_]_")!;
-	case ast::struct_literal =>
-		return strings::dup("struct { ... }")!;
-	case ast::tuple_literal =>
-		return strings::dup("(...)")!;
+	case let arr: ast::array_literal =>
+		return array_literal_label(srv, doc, arr, depth);
+	case let st: ast::struct_literal =>
+		return struct_literal_label(st);
+	case let tup: ast::tuple_literal =>
+		return tuple_literal_label(srv, doc, tup, depth);
 	};
+};
+
+// D1: renders an array literal's type as `[N]T` (or `[_]T` for an expanding
+// `[v...]` literal whose length is contextual). T is the type of the first
+// element. Falls back to `[_]_` for an empty literal or an unresolvable
+// element type.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param arr: borrowed
+fn array_literal_label(
+	srv: *server,
+	doc: *document,
+	arr: ast::array_literal,
+	depth: u32,
+) (str | void) = {
+	if (len(arr.values) == 0) return strings::dup("[_]_")!;
+	const elem = match (infer_type_from_init_at(srv, doc, arr.values[0], depth)) {
+	case let s: str =>
+		yield s;
+	case void =>
+		return strings::dup("[_]_")!;
+	};
+	defer free(elem);
+	// `[v...]` repeats its last value to fill a context-sized array, so the
+	// length isn't known from the literal alone.
+	if (arr.expand) {
+		return strings::concat("[_]", elem)!;
+	};
+	return strings::concat("[", strconv::ztos(len(arr.values)), "]", elem)!;
+};
+
+// D2: renders a struct literal's type. A named literal (`point { ... }`)
+// shows the type name; an anonymous `struct { ... }` literal keeps the
+// generic label.
+//
+// @param st: borrowed
+fn struct_literal_label(st: ast::struct_literal) (str | void) = {
+	if (len(st.alias) == 0) {
+		return strings::dup("struct { ... }")!;
+	};
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	match (unparse::ident(&buf, st.alias)) {
+	case size => void;
+	case =>
+		return strings::dup("struct { ... }")!;
+	};
+	return strings::dup(memio::string(&buf)!)!;
+};
+
+// D3: renders a tuple literal's type as `(T, U, ...)` with each element's
+// inferred type. Falls back to `(...)` if any element type can't be resolved.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param tup: borrowed
+fn tuple_literal_label(
+	srv: *server,
+	doc: *document,
+	tup: ast::tuple_literal,
+	depth: u32,
+) (str | void) = {
+	if (len(tup) == 0) return strings::dup("(...)")!;
+	let parts: []str = [];
+	defer analysis::free_str_slice(parts);
+	for (let i = 0z; i < len(tup); i += 1) {
+		match (infer_type_from_init_at(srv, doc, tup[i], depth)) {
+		case let s: str =>
+			append(parts, s)!;
+		case void =>
+			return strings::dup("(...)")!;
+		};
+	};
+	const joined = strings::join(", ", parts...)!;
+	defer free(joined);
+	return strings::concat("(", joined, ")")!;
 };
 
 // Resolves the callee of a direct call expression and renders its return
@@ -1773,6 +2283,41 @@ fn type_label_for_literal(l: ast::literal_expr) (str | void) = {
 // @param doc: borrowed
 // @param c: borrowed
 fn infer_call_return_type(
+	srv: *server,
+	doc: *document,
+	c: *ast::call_expr,
+) (str | void) = {
+	// A direct call to a named workspace/stdlib function.
+	match (infer_direct_call_return_type(srv, doc, c)) {
+	case let s: str =>
+		return s;
+	case void => void;
+	};
+	// A12: an indirect call through a local function pointer. Resolve the
+	// callee expression's type and read the function's result type.
+	const cache = parse_of(doc);
+	const lt = match (type_of_expr(srv, doc, &cache.pr.subunit, c.lvalue, 0)) {
+	case let lt: located_type =>
+		yield lt;
+	case void =>
+		return void;
+	};
+	match (func_result_type(srv, lt, 0)) {
+	case let rt: located_type =>
+		return render_type_plain(rt.t);
+	case void =>
+		return void;
+	};
+};
+
+// Resolves a direct call whose callee is a named workspace/stdlib function
+// declaration, returning the rendered result type. Returns void for indirect
+// callees (handled by the function-pointer fallback in the caller).
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param c: borrowed
+fn infer_direct_call_return_type(
 	srv: *server,
 	doc: *document,
 	c: *ast::call_expr,

@@ -447,6 +447,68 @@ export fn main() void = {
 	);
 };
 
+// A4: a local bound to a stdlib-qualified global (`os::args`, declared
+// `[]str`) should infer that global's type rather than echoing the
+// `= os::args` source. Exercises the qualified-identifier delegation in
+// infer_access_expr_type against the real stdlib (lazy module indexing).
+@test fn e2e_hover_binding_init_qualified_global_infers_type() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample =
+		`use os;
+export fn main() void = {
+	let mirror = os::args;
+	let _ = mirror;
+};
+`;
+	const did_open = build_did_open("file:///qualified_global.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `mirror` in `let _ = mirror`. Line 3, char 9.
+	const hover_req =
+		`{"jsonrpc":"2.0","id":540,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///qualified_global.ha"},"position":{"line":3,"character":9}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 540.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			fmt::fatalf("e2e: qualified-global hover returned null. body={}", text);
+		};
+	case void =>
+		fmt::fatalf("e2e: qualified-global hover missing result: {}", text);
+	};
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "let mirror: []str"),
+		"hover on a local bound to os::args should infer `[]str`"
+	);
+	assert(
+		!strings::contains(md, "= os::arg"),
+		"inferred type should replace the qualified-init source fallback"
+	);
+};
+
 // Hover on a local `let` binding inside a function body. Before this was
 // supported, the handler only looked at top-level decls and returned null.
 // e2e check for struct-member hover. Two things that previously failed:

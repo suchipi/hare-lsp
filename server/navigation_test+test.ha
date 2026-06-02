@@ -2540,6 +2540,552 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(value, ": bool"));
 };
 
+// A1: a binding initialized from a struct field access resolves to the
+// field's declared type, instead of echoing the (truncated) `= cfg.timeou`
+// source. The field name is multi-char so the loc.end rune bug can't hide.
+@test fn hover_binding_init_field_access_shows_field_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type config = struct { timeout: size }; export fn run(cfg: config) void = { let value = cfg.timeout; };`;
+	nav_open(&s, "file:///a1.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a1.ha", 0,
+		find_col(src, "value"), 730.0);
+	defer free(value);
+	assert(strings::contains(value, "let value"));
+	assert(strings::contains(value, "size"));
+	assert(!strings::contains(value, "cfg.timeou"));
+	assert(!strings::contains(value, "= cfg"));
+};
+
+// A2: a binding initialized from an index access resolves to the element
+// type of the indexed collection.
+@test fn hover_binding_init_index_access_shows_element_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run(items: []rune) void = { let elem = items[0]; };`;
+	nav_open(&s, "file:///a2.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a2.ha", 0,
+		find_col(src, "elem"), 731.0);
+	defer free(value);
+	assert(strings::contains(value, "let elem"));
+	assert(strings::contains(value, "rune"));
+	assert(!strings::contains(value, "items["));
+	assert(!strings::contains(value, "= items"));
+};
+
+// A3: a binding initialized from a tuple field access resolves to the type
+// of that tuple element.
+@test fn hover_binding_init_tuple_access_shows_field_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run(pair: (int, str)) void = { let second = pair.1; };`;
+	nav_open(&s, "file:///a3.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a3.ha", 0,
+		find_col(src, "second"), 732.0);
+	defer free(value);
+	assert(strings::contains(value, "let second"));
+	assert(strings::contains(value, "str"));
+	assert(!strings::contains(value, "pair.1"));
+	assert(!strings::contains(value, "= pair"));
+};
+
+// A4 (single-segment global): a binding aliasing a top-level global resolves
+// through the receiver engine to the global's declared type, rather than
+// bailing as a non-local identifier. (Qualified `pkg::name` forms are
+// covered by the e2e suite, which exercises real stdlib resolution.)
+@test fn hover_binding_init_global_ident_shows_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export let counter: size = 0z; export fn run() void = { let mirror = counter; };`;
+	nav_open(&s, "file:///a4.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a4.ha", 0,
+		find_col(src, "mirror"), 733.0);
+	defer free(value);
+	assert(strings::contains(value, "let mirror"));
+	assert(strings::contains(value, "size"));
+	assert(!strings::contains(value, "= counter"));
+};
+
+// A5 (&): address-of yields a pointer to the operand's type.
+@test fn hover_binding_init_addr_of_shows_pointer_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(node: point) void = { let ptr = &node; };`;
+	nav_open(&s, "file:///a5addr.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a5addr.ha", 0,
+		find_col(src, "ptr"), 740.0);
+	defer free(value);
+	assert(strings::contains(value, "let ptr"));
+	assert(strings::contains(value, "*point"));
+	assert(!strings::contains(value, "= &node"));
+};
+
+// A5 (*): dereference yields the pointer's referent type.
+@test fn hover_binding_init_deref_shows_referent_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(handle: *point) void = { let target = *handle; };`;
+	nav_open(&s, "file:///a5deref.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a5deref.ha", 0,
+		find_col(src, "target"), 741.0);
+	defer free(value);
+	assert(strings::contains(value, "let target"));
+	assert(strings::contains(value, "point"));
+	// Must have actually dereferenced, not echoed `*handle` or kept `*point`.
+	assert(!strings::contains(value, "*point"));
+	assert(!strings::contains(value, "*handle"));
+};
+
+// A5 (-): numeric negation keeps the operand's type.
+@test fn hover_binding_init_negation_shows_operand_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run(count: i32) void = { let negated = -count; };`;
+	nav_open(&s, "file:///a5neg.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a5neg.ha", 0,
+		find_col(src, "negated"), 742.0);
+	defer free(value);
+	assert(strings::contains(value, "let negated"));
+	assert(strings::contains(value, "i32"));
+	assert(!strings::contains(value, "= -count"));
+};
+
+// A5 (~): bitwise complement keeps the operand's type.
+@test fn hover_binding_init_complement_shows_operand_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run(bits: u16) void = { let flipped = ~bits; };`;
+	nav_open(&s, "file:///a5cmpl.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a5cmpl.ha", 0,
+		find_col(src, "flipped"), 743.0);
+	defer free(value);
+	assert(strings::contains(value, "let flipped"));
+	assert(strings::contains(value, "u16"));
+	assert(!strings::contains(value, "= ~bits"));
+};
+
+// A5 (!): logical negation always yields bool.
+@test fn hover_binding_init_lnot_shows_bool() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run(flag: bool) void = { let toggled = !flag; };`;
+	nav_open(&s, "file:///a5lnot.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a5lnot.ha", 0,
+		find_col(src, "toggled"), 744.0);
+	defer free(value);
+	assert(strings::contains(value, "let toggled"));
+	assert(strings::contains(value, ": bool"));
+	assert(!strings::contains(value, "= !flag"));
+};
+
+// A6: slicing a slice yields a slice of the same element type.
+@test fn hover_binding_init_slice_expr_shows_slice_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(buffer: []u8) void = { let window = buffer[2..8]; };`;
+	nav_open(&s, "file:///a6slice.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a6slice.ha", 0,
+		find_col(src, "window"), 745.0);
+	defer free(value);
+	assert(strings::contains(value, "let window"));
+	assert(strings::contains(value, "[]u8"));
+	assert(!strings::contains(value, "buffer[2..8]"));
+};
+
+// A6: slicing an array yields a slice, not the array type.
+@test fn hover_binding_init_slice_of_array_shows_slice_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(block: [16]rune) void = { let region = block[..]; };`;
+	nav_open(&s, "file:///a6arr.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a6arr.ha", 0,
+		find_col(src, "region"), 746.0);
+	defer free(value);
+	assert(strings::contains(value, "let region"));
+	assert(strings::contains(value, "[]rune"));
+	// The result is a slice, not the original fixed-length array.
+	assert(!strings::contains(value, "[16]"));
+};
+
+// A9: size(T) yields `size`.
+@test fn hover_binding_init_size_expr_shows_size() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run() void = { let amount = size(u64); };`;
+	nav_open(&s, "file:///a9size.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a9size.ha", 0,
+		find_col(src, "amount"), 747.0);
+	defer free(value);
+	assert(strings::contains(value, "let amount"));
+	assert(strings::contains(value, ": size"));
+	assert(!strings::contains(value, "size(u64)"));
+};
+
+// A9: align(T) yields `size`.
+@test fn hover_binding_init_align_expr_shows_size() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run() void = { let boundary = align(u64); };`;
+	nav_open(&s, "file:///a9align.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a9align.ha", 0,
+		find_col(src, "boundary"), 748.0);
+	defer free(value);
+	assert(strings::contains(value, "let boundary"));
+	assert(strings::contains(value, ": size"));
+	assert(!strings::contains(value, "align(u64)"));
+};
+
+// A9: offset(field) yields `size`.
+@test fn hover_binding_init_offset_expr_shows_size() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type packet = struct { header: u32, payload: u64 }; export fn run(pkt: packet) void = { let spot = offset(pkt.payload); };`;
+	nav_open(&s, "file:///a9offset.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a9offset.ha", 0,
+		find_col(src, "spot"), 749.0);
+	defer free(value);
+	assert(strings::contains(value, "let spot"));
+	assert(strings::contains(value, ": size"));
+	assert(!strings::contains(value, "offset("));
+};
+
+// C1: `x is T` is a type test that yields bool, not T.
+@test fn hover_binding_init_is_test_shows_bool() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(value: (int | str)) void = { let matched = value is int; };`;
+	nav_open(&s, "file:///c1is.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///c1is.ha", 0,
+		find_col(src, "matched"), 751.0);
+	defer free(value);
+	assert(strings::contains(value, "let matched"));
+	assert(strings::contains(value, ": bool"));
+	// The test must not surface the target type `int`.
+	assert(!strings::contains(value, ": int"));
+};
+
+// C1 (control): `x as T` is an assertion that keeps the target type T.
+@test fn hover_binding_init_as_cast_keeps_target_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(value: (int | str)) void = { let widened = value as int; };`;
+	nav_open(&s, "file:///c1as.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///c1as.ha", 0,
+		find_col(src, "widened"), 752.0);
+	defer free(value);
+	assert(strings::contains(value, "let widened"));
+	assert(strings::contains(value, ": int"));
+	assert(!strings::contains(value, ": bool"));
+};
+
+// A7: a switch expression's type is the union of its cases' yielded values.
+@test fn hover_binding_init_switch_expr_unions_case_yields() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(choice: int) void = { let outcome = switch (choice) { case 1 => yield 42i32; case => yield 99u8; }; };`;
+	nav_open(&s, "file:///a7union.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a7union.ha", 0,
+		find_col(src, "outcome"), 760.0);
+	defer free(value);
+	assert(strings::contains(value, "let outcome"));
+	assert(strings::contains(value, "i32"));
+	assert(strings::contains(value, "u8"));
+	assert(strings::contains(value, "|"));
+	assert(!strings::contains(value, "switch"));
+};
+
+// A7: when every case yields the same type, the switch type is just that
+// type (deduplicated, no union).
+@test fn hover_binding_init_switch_expr_single_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(choice: int) void = { let chosen = switch (choice) { case 1 => yield 10i32; case => yield 20i32; }; };`;
+	nav_open(&s, "file:///a7single.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a7single.ha", 0,
+		find_col(src, "chosen"), 761.0);
+	defer free(value);
+	assert(strings::contains(value, "let chosen"));
+	assert(strings::contains(value, ": i32"));
+	assert(!strings::contains(value, "|"));
+};
+
+// A8: a compound block's type is its explicitly-yielded value's type.
+@test fn hover_binding_init_compound_yields_value_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(input: u32) void = { let computed = { let doubled = input * 2; yield doubled; }; };`;
+	nav_open(&s, "file:///a8yield.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a8yield.ha", 0,
+		find_col(src, "computed"), 762.0);
+	defer free(value);
+	assert(strings::contains(value, "let computed"));
+	assert(strings::contains(value, "u32"));
+	// Inference succeeded, so the block source is not echoed, and a block
+	// that ends in `yield` does not add the implicit `void`.
+	assert(!strings::contains(value, "= {"));
+	assert(!strings::contains(value, "void"));
+};
+
+// A8: a block with no yield falls through to an implicit `yield void`, so
+// its type is `void` rather than the last (discarded) expression's type.
+@test fn hover_binding_init_compound_no_yield_is_void() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run() void = { let nothing = { let temp = 5; }; };`;
+	nav_open(&s, "file:///a8void.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a8void.ha", 0,
+		find_col(src, "nothing"), 763.0);
+	defer free(value);
+	assert(strings::contains(value, "let nothing"));
+	assert(strings::contains(value, ": void"));
+};
+
+// C2: a top-level `def` with no written type infers it from the initializer.
+@test fn hover_top_level_def_infers_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export def PI = 3.14159;`;
+	nav_open(&s, "file:///c2def.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///c2def.ha", 0,
+		find_col(src, "PI"), 770.0);
+	defer free(value);
+	assert(strings::contains(value, "def PI"));
+	assert(strings::contains(value, ": f64"));
+};
+
+// C2: a top-level `let` global with no written type infers it too.
+@test fn hover_top_level_global_infers_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export let threshold = 0z;`;
+	nav_open(&s, "file:///c2let.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///c2let.ha", 0,
+		find_col(src, "threshold"), 771.0);
+	defer free(value);
+	assert(strings::contains(value, "let threshold"));
+	assert(strings::contains(value, ": size"));
+};
+
+// C2: a top-level `const` global with no written type infers it as well.
+@test fn hover_top_level_const_infers_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export const LIMIT = 100;`;
+	nav_open(&s, "file:///c2const.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///c2const.ha", 0,
+		find_col(src, "LIMIT"), 772.0);
+	defer free(value);
+	assert(strings::contains(value, "const LIMIT"));
+	assert(strings::contains(value, ": int"));
+};
+
+// A10: object allocation yields `(*T | nomem)`.
+@test fn hover_binding_init_alloc_object_shows_pointer_nomem() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(node: point) void = { let boxed = alloc(node); };`;
+	nav_open(&s, "file:///a10obj.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a10obj.ha", 0,
+		find_col(src, "boxed"), 780.0);
+	defer free(value);
+	assert(strings::contains(value, "let boxed"));
+	assert(strings::contains(value, "*point"));
+	assert(strings::contains(value, "nomem"));
+	assert(!strings::contains(value, "= alloc"));
+};
+
+// A10: object allocation from a literal infers the literal's type.
+@test fn hover_binding_init_alloc_literal_object() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run() void = { let boxed = alloc(42i32); };`;
+	nav_open(&s, "file:///a10lit.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a10lit.ha", 0,
+		find_col(src, "boxed"), 781.0);
+	defer free(value);
+	assert(strings::contains(value, "let boxed"));
+	assert(strings::contains(value, "*i32"));
+	assert(strings::contains(value, "nomem"));
+};
+
+// A10: slice-copy allocation (`x...`) yields `([]T | nomem)`.
+@test fn hover_binding_init_alloc_copy_shows_slice_nomem() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(items: []u8) void = { let copied = alloc(items...); };`;
+	nav_open(&s, "file:///a10copy.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a10copy.ha", 0,
+		find_col(src, "copied"), 782.0);
+	defer free(value);
+	assert(strings::contains(value, "let copied"));
+	assert(strings::contains(value, "[]u8"));
+	assert(strings::contains(value, "nomem"));
+};
+
+// A10: slice allocation with capacity (`x, cap`) also yields `([]T | nomem)`.
+@test fn hover_binding_init_alloc_cap_shows_slice_nomem() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(items: []rune) void = { let grown = alloc(items, 64z); };`;
+	nav_open(&s, "file:///a10cap.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a10cap.ha", 0,
+		find_col(src, "grown"), 783.0);
+	defer free(value);
+	assert(strings::contains(value, "let grown"));
+	assert(strings::contains(value, "[]rune"));
+	assert(strings::contains(value, "nomem"));
+};
+
+// A11: `vaarg(ap, T)` infers the explicit type `T`.
+@test fn hover_binding_init_vaarg_shows_explicit_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(ap: valist) void = { let extracted = vaarg(ap, i64); };`;
+	nav_open(&s, "file:///a11vaarg.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a11vaarg.ha", 0,
+		find_col(src, "extracted"), 784.0);
+	defer free(value);
+	assert(strings::contains(value, "let extracted"));
+	assert(strings::contains(value, ": i64"));
+	assert(!strings::contains(value, "vaarg"));
+};
+
+// A12: calling a local function pointer infers the function's result type.
+@test fn hover_binding_init_indirect_call_via_fn_pointer() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn target() i32 = 0i32; export fn run() void = { let handler: *fn() i32 = &target; let result = handler(); };`;
+	nav_open(&s, "file:///a12fnptr.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///a12fnptr.ha", 0,
+		find_col(src, "result"), 785.0);
+	defer free(value);
+	assert(strings::contains(value, "let result"));
+	assert(strings::contains(value, "i32"));
+	assert(!strings::contains(value, "handler()"));
+};
+
+// D1: an array literal renders as `[N]T` with the real element type.
+@test fn hover_binding_init_array_literal_shows_sized_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run() void = { let nums = [10, 20, 30]; };`;
+	nav_open(&s, "file:///d1arr.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///d1arr.ha", 0,
+		find_col(src, "nums"), 786.0);
+	defer free(value);
+	assert(strings::contains(value, "let nums"));
+	assert(strings::contains(value, "[3]int"));
+};
+
+// D2: a named struct literal renders as the type name, not `struct { ... }`.
+@test fn hover_binding_init_named_struct_literal_shows_alias() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run() void = { let origin = point { coord = 0 }; };`;
+	nav_open(&s, "file:///d2struct.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///d2struct.ha", 0,
+		find_col(src, "origin"), 787.0);
+	defer free(value);
+	assert(strings::contains(value, "let origin"));
+	assert(strings::contains(value, ": point"));
+	assert(!strings::contains(value, "struct {"));
+};
+
+// D3: a tuple literal renders as `(T, U, ...)` with real element types.
+@test fn hover_binding_init_tuple_literal_shows_element_types() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run() void = { let pair = (1, 2u8); };`;
+	nav_open(&s, "file:///d3tuple.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///d3tuple.ha", 0,
+		find_col(src, "pair"), 788.0);
+	defer free(value);
+	assert(strings::contains(value, "let pair"));
+	assert(strings::contains(value, "(int, u8)"));
+};
+
+// Regression: a self-referential binding reached through a compound-block
+// yield must not recurse forever. Block-value inference threads the depth so
+// the cycle guard in infer_access_expr_type trips instead of overflowing the
+// stack (this previously SIGSEGV'd). Hover returns gracefully (echoing the
+// unresolved init) rather than crashing.
+@test fn hover_self_referential_compound_yield_terminates() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run() void = { let cyclic = { yield cyclic; }; };`;
+	nav_open(&s, "file:///cycle1.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///cycle1.ha", 0,
+		find_col(src, "cyclic"), 796.0);
+	defer free(value);
+	assert(strings::contains(value, "let cyclic"));
+};
+
+// Same cycle reached through a switch yield (the other block form that
+// routes through infer_block_value_type).
+@test fn hover_self_referential_switch_yield_terminates() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn run(tag: int) void = { let cyclic = switch (tag) { case => yield cyclic; }; };`;
+	nav_open(&s, "file:///cycle2.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///cycle2.ha", 0,
+		find_col(src, "cyclic"), 797.0);
+	defer free(value);
+	assert(strings::contains(value, "let cyclic"));
+};
+
 // Chain: a -> 1; b -> a; c -> b. The local-identifier follow in
 // infer_access_expr_type is bounded by
 // `inlay_hints_inferred_types_max_depth`. With depth=1, walking from c

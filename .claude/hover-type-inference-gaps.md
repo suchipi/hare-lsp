@@ -4,6 +4,15 @@ Tracking doc for the syntax structures where **type hover falls back** instead o
 
 This is the follow-up to the for-each / iterator loop fix (PR #79): that fixed *one* form that hit the fallback. The rows here are the rest.
 
+## Status: RESOLVED
+
+**All rows in Tables A, B, C, and D are DONE** (PR #83). Each table is marked `✅ DONE` below with a note on what landed. Summary of the change:
+
+- **Engine A** (`infer_type_from_init_at`, navigation.ha) gained cases for unary ops, slice, switch, compound block, `size`/`align`/`offset`, `alloc`, and `vaarg`; the access sub-dispatcher (`infer_access_expr_type`) now delegates field/index/tuple/qualified-ident forms to Engine B and renders the result; `infer_call_return_type` resolves indirect calls through a local function-pointer binding; `type_label_for_literal` renders `[N]T`, the named struct alias, and `(T, U, ...)`; `render_decl_signature` infers omitted top-level `def`/`let`/`const` types; and the `is` type-test renders `bool`.
+- **Engine B** (`type_of_expr`, struct_member.ha) gained receiver cases for `if`/`else`, `match`, `switch`, compound block, slice, and address-of, and now declines the `is` type-test (which is `bool`, a member-less builtin) instead of resolving members against the target type.
+- Each row has unit-test coverage (`server/navigation_test+test.ha`, `server/struct_member_test+test.ha`); the qualified-identifier form (A4) also has an e2e test (`e2e/hover+test.ha`) exercising real stdlib resolution.
+- Notable semantics confirmed against harec v0.26.0: every `alloc(...)` yields `(... | nomem)`; compound/match/switch blocks take their value from explicit `yield` statements (plus implicit `yield void` on fall-through), **not** from a bare trailing expression; `size`/`align`/`offset`/`len` are all `size`; `match`/`switch`/compound receivers must be parenthesized to be valid postfix bases.
+
 ## Background: the two inference engines
 
 Hover type info comes from two separate best-effort engines. They have **different** fallback behaviors, so a gap shows up differently depending on which engine the cursor hits.
@@ -49,7 +58,9 @@ The whole receiver-resolution machinery already exists in Engine B. The recommen
 
 ---
 
-## Table A — Engine A fallbacks (binding hover + inlay hints)
+## Table A — Engine A fallbacks (binding hover + inlay hints) — ✅ DONE
+
+A1-A12 all resolved: access forms (A1-A4) delegate to `type_of_expr`; A5-A12 add the unary/slice/switch/compound/measure/alloc/vaarg/fn-pointer cases to `infer_type_from_init_at`.
 
 User-visible symptom: hovering `let/const/def NAME = <init>` shows the **echoed (often truncated) source** instead of a type; inlay hint is missing.
 
@@ -68,7 +79,9 @@ User-visible symptom: hovering `let/const/def NAME = <init>` shows the **echoed 
 | A11 | `vaarg(ap, T)` (`variadic_expr` → `vaarg_expr`) | `let a = vaarg(ap, int);` | echoes the source | the explicit type `T` (`vaarg_expr._type`) | add `variadic_expr` case; **low priority / rare** |
 | A12 | Call via local fn-pointer (`call_expr`, indirect callee) | `let y = handler();` where `handler` is a local of fn type | echoes the source | the fn pointer's result type | `infer_call_return_type` navigation.ha:1749 only resolves workspace/stdlib decls; also resolve a local binding whose type is `func_type`. **Edge case** |
 
-## Table B — Engine B fallbacks (member hover / completion receiver)
+## Table B — Engine B fallbacks (member hover / completion receiver) — ✅ DONE
+
+B1-B6 all resolved by adding the receiver cases to `type_of_expr`. Note: `match`/`switch`/compound receivers must be parenthesized (`(match ...).field`) to parse as a postfix base; `block_yield_located_type` represents a match/switch/compound by its first resolvable `yield` value; slice and address-of reuse the object/operand type directly (auto-deref / element-unwrap handle the rest, avoiding synthetic type nodes).
 
 User-visible symptom: hovering `recv.field` or invoking completion after `recv.` produces **nothing** when `recv` is one of these forms. Rarer in practice than Table A (these are receiver expressions, which are usually plain lvalues), but they're the same class of gap.
 
@@ -81,7 +94,9 @@ User-visible symptom: hovering `recv.field` or invoking completion after `recv.`
 | B5 | Slice expression (`slice_expr`) | `xs[a..b][0].field` | no result | `[]T` then element type on the following index | add `slice_expr` case to `type_of_expr` |
 | B6 | Address-of (`unarithm_expr` ADDR) | `(&val).field` | no result | pointer type `*T`, auto-deref to `T`'s members | extend the `unarithm_expr` arm in `type_of_expr` struct_member.ha:613 (currently DEREF-only) |
 
-## Table C — Wrong type (not a fallback, but incorrect hover)
+## Table C — Wrong type (not a fallback, but incorrect hover) — ✅ DONE
+
+C1 (is-test → `bool`) fixed in both engines; C2 (omitted top-level type) inferred in `render_decl_signature` for the open document.
 
 These produce a *confident, wrong* answer rather than a fallback. Same overall goal (correct hover types); worth fixing alongside.
 
@@ -90,7 +105,9 @@ These produce a *confident, wrong* answer rather than a fallback. Same overall g
 | C1 | `is` type-test cast (`cast_expr`, `cast_kind::TEST`) | `let b = x is int;` | `int` | `bool` | both cast arms ignore `cast_kind`: `infer_type_from_init_at` navigation.ha:1338-1346 and `type_of_expr` struct_member.ha:603-608. `is` → `bool`; `as`/`:` keep the target type |
 | C2 | Top-level `def`/`let`/`const` with omitted type | `def PI = 3.14159;` | `def PI` (no type) | `def PI: f64` (inferred) | `render_decl_signature` navigation.ha:627 never infers; the const/def branch (navigation.ha:632) and global branch (navigation.ha:684) only print a type when one was written. Could call `infer_type_from_init` on the init |
 
-## Table D — Coarse labels (low priority quality gaps)
+## Table D — Coarse labels (low priority quality gaps) — ✅ DONE
+
+D1-D3 resolved in `type_label_for_literal`: array literals render `[N]T` (`[_]T` for an expanding literal), named struct literals render the alias name, tuple literals render `(T, U, ...)`. Each falls back to the old coarse label when an element/field type can't be inferred.
 
 Handled (no fallback) but imprecise. Listed for completeness; fix only if cheap.
 

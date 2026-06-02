@@ -525,3 +525,101 @@ use strings;
 	assert(*(json::get(&start, "line") as *json::value) as f64 == 0.0);
 	assert(*(json::get(&start, "character") as *json::value) as f64 == 29.0);
 };
+
+// B1: member access through an if/else receiver resolves via the true branch.
+@test fn hover_member_through_if_else_receiver() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(base: point, other: point, flag: bool) void = { let _ = (if (flag) base else other).coord; };`;
+	nav_open(&s, "file:///b1if.ha", src);
+	const col = find_col(src, ".coord") + len(".coord"): u32 - 1;
+	const value = nav_hover_contents(&s, out, "file:///b1if.ha", 0, col, 790.0);
+	defer free(value);
+	assert(strings::contains(value, "(field)"));
+	assert(strings::contains(value, "coord"));
+	assert(strings::contains(value, "int"));
+};
+
+// B2: member access through a match receiver resolves via a case value.
+@test fn hover_member_through_match_receiver() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(base: point, opt: (point | void)) void = { let _ = (match (opt) { case void => yield base; case point => yield base; }).coord; };`;
+	nav_open(&s, "file:///b2match.ha", src);
+	const col = find_col(src, ".coord") + len(".coord"): u32 - 1;
+	const value = nav_hover_contents(&s, out, "file:///b2match.ha", 0, col, 791.0);
+	defer free(value);
+	assert(strings::contains(value, "(field)"));
+	assert(strings::contains(value, "coord"));
+	assert(strings::contains(value, "int"));
+};
+
+// B3: member access through a switch receiver resolves via a case value.
+@test fn hover_member_through_switch_receiver() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(base: point, tag: int) void = { let _ = (switch (tag) { case 1 => yield base; case => yield base; }).coord; };`;
+	nav_open(&s, "file:///b3switch.ha", src);
+	const col = find_col(src, ".coord") + len(".coord"): u32 - 1;
+	const value = nav_hover_contents(&s, out, "file:///b3switch.ha", 0, col,
+		792.0);
+	defer free(value);
+	assert(strings::contains(value, "(field)"));
+	assert(strings::contains(value, "coord"));
+	assert(strings::contains(value, "int"));
+};
+
+// B4: member access through a compound-block receiver resolves via its yield.
+@test fn hover_member_through_compound_receiver() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(base: point) void = { let _ = ({ yield base; }).coord; };`;
+	nav_open(&s, "file:///b4compound.ha", src);
+	const col = find_col(src, ".coord") + len(".coord"): u32 - 1;
+	const value = nav_hover_contents(&s, out, "file:///b4compound.ha", 0, col,
+		793.0);
+	defer free(value);
+	assert(strings::contains(value, "(field)"));
+	assert(strings::contains(value, "coord"));
+	assert(strings::contains(value, "int"));
+};
+
+// B5: member access through a slice-then-index receiver resolves the element.
+@test fn hover_member_through_slice_index_receiver() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(xs: []point) void = { let _ = xs[0..2][0].coord; };`;
+	nav_open(&s, "file:///b5slice.ha", src);
+	const col = find_col(src, ".coord") + len(".coord"): u32 - 1;
+	const value = nav_hover_contents(&s, out, "file:///b5slice.ha", 0, col, 794.0);
+	defer free(value);
+	assert(strings::contains(value, "(field)"));
+	assert(strings::contains(value, "coord"));
+	assert(strings::contains(value, "int"));
+};
+
+// B6: member access through an address-of receiver auto-derefs to the field.
+@test fn hover_member_through_addr_of_receiver() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(node: point) void = { let _ = (&node).coord; };`;
+	nav_open(&s, "file:///b6addr.ha", src);
+	const col = find_col(src, ".coord") + len(".coord"): u32 - 1;
+	const value = nav_hover_contents(&s, out, "file:///b6addr.ha", 0, col, 795.0);
+	defer free(value);
+	assert(strings::contains(value, "(field)"));
+	assert(strings::contains(value, "coord"));
+	assert(strings::contains(value, "int"));
+};
