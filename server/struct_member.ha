@@ -661,7 +661,7 @@ fn element_type_in_type(
 			}, depth + 1);
 	case let a: ast::alias_type =>
 		const lookup_doc = find_doc_for_uri(s, holder.uri);
-		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
 		case let d: *ast::decl =>
 			yield d;
 		case void =>
@@ -706,7 +706,7 @@ fn tuple_field_type(
 		};
 	case let a: ast::alias_type =>
 		const lookup_doc = find_doc_for_uri(s, holder.uri);
-		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
 		case let d: *ast::decl =>
 			yield d;
 		case void =>
@@ -749,7 +749,7 @@ fn deref_pointer_type(
 		};
 	case let a: ast::alias_type =>
 		const lookup_doc = find_doc_for_uri(s, holder.uri);
-		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
 		case let d: *ast::decl =>
 			yield d;
 		case void =>
@@ -1472,7 +1472,7 @@ fn lookup_member_in_type(
 			// lookup_decl_by_ident handles workspace fallback.
 			yield null: nullable *document;
 		};
-		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
 		case let d: *ast::decl =>
 			yield d;
 		case void =>
@@ -1497,15 +1497,20 @@ fn lookup_member_in_type(
 };
 
 // Resolves an alias ident to its decl. Tries the open document (if
-// provided) first, then the workspace and stdlib indexes.
+// provided) first; otherwise, for a qualified ident, the workspace and
+// stdlib module indexes, and for a bare ident, the file at `owner_uri`
+// (where a same-module alias is defined) before a workspace short-name
+// search.
 //
 // @param s: borrowed
 // @param doc: borrowed
+// @param owner_uri: borrowed
 // @param id: borrowed
 // @returns: borrowed
 fn resolve_alias_decl(
 	s: *server,
 	doc: nullable *document,
+	owner_uri: str,
 	id: ast::ident,
 ) (*ast::decl | void) = {
 	match (doc) {
@@ -1533,18 +1538,50 @@ fn resolve_alias_decl(
 		};
 		return void;
 	};
+	// Single-segment alias: being unqualified, it's defined in the same
+	// file that references it (a same-module reference, e.g. `command` in
+	// getopt's `parse() command`). Resolve it there precisely via the
+	// parse cache. A bare short-name search across the indexes would be
+	// ambiguous - both getopt and os::exec export a type named `command`.
+	match (resolve_type_decl_in_cached_file(s, owner_uri, name)) {
+	case let d: *ast::decl =>
+		return d;
+	case void => void;
+	};
 	match (analysis::find_first_by_short_name(&s.workspace_index, name)) {
 	case let e: *analysis::workspace_entry =>
 		return decl_from_workspace_entry(s, e, name);
-	case void => void;
+	case void =>
+		return void;
 	};
-	// A single-segment alias referenced from a stdlib / third-party file
-	// (e.g. `command` in getopt's `parse() command`) lives in a module
-	// that's already been indexed for some earlier lookup, but never in
-	// the workspace. Fall back to the stdlib index by short name.
-	match (analysis::find_first_by_short_name(&s.stdlib_index, name)) {
-	case let e: *analysis::workspace_entry =>
-		return decl_from_workspace_entry(s, e, name);
+};
+
+// Resolves a type decl named `name` within the file identified by `uri`,
+// reading and parsing it through the file parse cache. This is how a
+// single-segment, same-module alias (e.g. getopt's `command`) resolves to
+// its own module's definition rather than a same-named type elsewhere.
+// Returns void when the file can't be read or has no such decl.
+//
+// @param s: borrowed
+// @param uri: borrowed
+// @param name: borrowed
+// @returns: borrowed
+fn resolve_type_decl_in_cached_file(
+	s: *server,
+	uri: str,
+	name: str,
+) (*ast::decl | void) = {
+	const path = lsp::uri_decode_path(uri);
+	defer free(path);
+	const fpe = match (cached_parse_or_drop_stale(s, path)) {
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
+	};
+	match (find_decl_by_name(&fpe.pr.subunit, name)) {
+	case let i: size =>
+		return &fpe.pr.subunit.decls[i];
 	case void =>
 		return void;
 	};

@@ -384,7 +384,7 @@ fn try_send_type_def_via_binding(
 		return false;
 	};
 	const lookup_doc = find_doc_for_uri(s, lt.uri);
-	const d = match (resolve_alias_decl(s, lookup_doc, alias)) {
+	const d = match (resolve_alias_decl(s, lookup_doc, lt.uri, alias)) {
 	case let d: *ast::decl =>
 		yield d;
 	case void =>

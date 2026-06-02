@@ -1962,6 +1962,52 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(value, "int"));
 };
 
+// A single-segment type alias (e.g. `command` in `parse() command`) must
+// resolve within the module that *defines* it, not via a name search that
+// could match a same-named type in another module. Two modules export a
+// type `command`; only the imported one has an `opts` field. The decoy is
+// indexed first, so a short-name search would mis-resolve `command` and the
+// element type would be lost. This is the bug that surfaced in CI, where
+// the stdlib defines both `getopt::command` and `os::exec::command`.
+@test fn hover_on_for_each_binding_resolves_alias_in_owning_module() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const real_path = ".tmp/feamb_real/lib.ha";
+	const decoy_path = ".tmp/feamb_decoy/lib.ha";
+	const real_text =
+		"export type command = struct { opts: [](rune, str) };\nexport fn parse() command = command { opts = [] };\n";
+	const decoy_text = "export type command = struct { other: int };\n";
+	nav_write_dir(".tmp/feamb_real");
+	nav_write_dir(".tmp/feamb_decoy");
+	let _ = match (nav_write(real_path, real_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write");
+	};
+	let _ = match (nav_write(decoy_path, decoy_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write");
+	};
+	defer nav_rm(real_path);
+	defer nav_rm(decoy_path);
+	// Index the decoy first: a short-name search would return it.
+	analysis::index_file(&s.workspace_index, decoy_path,
+		strings::toutf8(decoy_text));
+	analysis::index_file(&s.workspace_index, real_path,
+		strings::toutf8(real_text));
+
+	const src =
+		`use feamb_real; export fn f() void = { const cmd = feamb_real::parse(); for (let opt .. cmd.opts) { let _ = opt; }; };`;
+	nav_open(&s, "file:///fe_amb_main.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///fe_amb_main.ha", 0,
+		find_col(src, "opt"), 706.0);
+	defer free(value);
+	assert(strings::contains(value, "let opt"));
+	assert(strings::contains(value, "(rune, str)"));
+};
+
 @test fn definition_disambiguates_by_imported_module() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
