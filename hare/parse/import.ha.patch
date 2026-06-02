@@ -4,81 +4,86 @@ Sibling of parse.ha.patch; applied by the Makefile's hare/parse/.stamp
 target on top of a fresh copy of $(STDLIB)/hare/parse/import.ha.
 
 What it changes:
-  In imports(), record the location of the closing `;` token while
-  parsing each import and assign that to `import.loc.end` instead of
-  the post-parse mkloc(lexer).
+  In imports(), set each `import.loc.end` to the location of the closing
+  `;` token, captured via `lex::prevloc(lexer)` right after the `;` is
+  consumed - replacing the stdlib's post-parse `mkloc(lexer)`.
 
 Why:
   Stdlib sets `loc.end` via mkloc(lexer) after the `use` statement
-  finishes parsing. mkloc returns the position of the lexer's NEXT
-  real token, and the LSP parses without COMMENTS mode, so "next
-  token" can be code several lines below the import, across blank
-  lines and intervening `//` comments. That makes loc.end extend over
-  those comments. Downstream, textDocument/documentLink emits one
-  link per import using `imp.loc.end.off`, so the link's range covers
-  the import AND every comment until the next decl - VS Code then
-  renders the entire first comment after each `use` block as a
-  cmd+clickable underline that navigates into the imported module.
-  Folding-range and a few related features have the same problem.
+  finishes parsing. mkloc returns the position of the lexer's NEXT real
+  token, and the LSP parses without COMMENTS mode, so "next token" can be
+  code several lines below the import, across blank lines and intervening
+  `//` comments. That makes loc.end extend over those comments.
+  Downstream, textDocument/documentLink emits one link per import using
+  `imp.loc.end.off`, so the link's range covers the import AND every
+  comment until the next decl - VS Code then renders the entire first
+  comment after each `use` block as a cmd+clickable underline that
+  navigates into the imported module. Folding-range, unused-import code
+  actions, and a few related features have the same problem.
 
-  Capturing the closing `;` token's own location avoids the lookahead.
+  `lex::prevloc(lexer)` returns the location of the last consumed rune,
+  so capturing it immediately after the closing `;` yields that `;`'s
+  position without the lookahead. We read it per-branch, before any
+  intervening `mkloc()` (which peeks and would advance the lexer state)
+  can run.
+
+Why prevloc rather than the matched token's own location:
+  An earlier version of this patch stored `want(...)?.2` (the matched
+  token's location field) into a `lex::location { ... }` local. That
+  read correctly on the local toolchain but produced layout-dependent
+  garbage on Alpine's hare=0.26.0.1-r0 (musl) - loc.end sometimes pointed
+  at the next token instead of the `;`, so the unused-import quickfix
+  range check fired on the wrong line. Reading lexer state through
+  `lex::prevloc` is exactly how the stdlib's own loc_from() computes
+  every other decl/expr end location, so it stays correct across stdlib
+  and toolchain variants.
 
 To refresh for a new Hare release: same procedure as parse.ha.patch;
 see hare/parse/README.md.
 
-Apply with: `patch -p1 -d hare/parse < hare/parse/import.ha.patch`
+Apply with: `patch -N -p1 -d hare/parse < hare/parse/import.ha.patch`
 
 --- a/import.ha
 +++ b/import.ha
-@@ -40,16 +40,29 @@
- 		import.loc.start = mkloc(lexer);
- 		let (name, trailing) = ident_trailing(lexer)?;
- 		import.ident = name;
--		switch (want(lexer, ltok::SEMICOLON, ltok::LBRACE,
--			ltok::EQUAL, ltok::TIMES)?.0) {
-+		// hare-lsp patch: capture the location of the closing `;`
-+		// so loc.end can be set to it. Stdlib uses mkloc(lexer)
-+		// after the parse finishes, but mkloc returns the position
-+		// of the lexer's NEXT token. The LSP parses without
-+		// COMMENTS mode, so the next token is whatever real code
-+		// comes after the `use`, possibly several lines later -
-+		// loc.end then extends across blank lines and intervening
-+		// comments, which makes textDocument/documentLink emit a
-+		// link covering the next comment, underlining it as
-+		// cmd+clickable in VS Code.
-+		let semi_loc: lex::location = lex::location { ... };
-+		const next_tok = want(lexer, ltok::SEMICOLON, ltok::LBRACE,
-+			ltok::EQUAL, ltok::TIMES)?;
-+		switch (next_tok.0) {
+@@ -43,6 +43,15 @@
+ 		switch (want(lexer, ltok::SEMICOLON, ltok::LBRACE,
+ 			ltok::EQUAL, ltok::TIMES)?.0) {
  		case ltok::SEMICOLON =>
++			// hare-lsp patch (see import.ha.patch): capture loc.end
++			// at the ';' just consumed via lex::prevloc (location of
++			// the last consumed rune), before the mkloc() below peeks
++			// the next real token and drags loc.end across blank
++			// lines and comments. prevloc reads lexer state the same
++			// way the stdlib's loc_from() does for every other end
++			// location, so it stays correct across stdlib variants -
++			// unlike copying the matched token's own location field.
++			import.loc.end = lex::prevloc(lexer);
  			synassert(mkloc(lexer), !trailing,
  				"Unexpected trailing :: in ident")?;
-+			semi_loc = next_tok.2;
  		case ltok::LBRACE =>
- 			synassert(mkloc(lexer), trailing,
+@@ -50,6 +59,7 @@
  				"Expected trailing :: in ident")?;
  			import.bindings = name_list(lexer)?;
--			want(lexer, ltok::SEMICOLON)?;
-+			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
+ 			want(lexer, ltok::SEMICOLON)?;
++			import.loc.end = lex::prevloc(lexer);
  		case ltok::EQUAL =>
  			synassert(mkloc(lexer),
  				len(name) == 1 && !trailing,
-@@ -57,15 +70,15 @@
- 			import.bindings = name[0];
+@@ -58,14 +68,16 @@
  			free(name);
  			import.ident = ident(lexer)?;
--			want(lexer, ltok::SEMICOLON)?;
-+			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
+ 			want(lexer, ltok::SEMICOLON)?;
++			import.loc.end = lex::prevloc(lexer);
  		case ltok::TIMES =>
  			synassert(mkloc(lexer), trailing,
  				"Expected trailing :: in ident")?;
  			import.bindings = ast::import_wildcard;
--			want(lexer, ltok::SEMICOLON)?;
-+			semi_loc = want(lexer, ltok::SEMICOLON)?.2;
+ 			want(lexer, ltok::SEMICOLON)?;
++			import.loc.end = lex::prevloc(lexer);
  		case => abort(); // Unreachable
  		};
 -		import.loc.end = mkloc(lexer);
-+		import.loc.end = semi_loc;
++		// loc.end is set per-branch above, from each closing ';'.
  	};
  	return imports;
  };

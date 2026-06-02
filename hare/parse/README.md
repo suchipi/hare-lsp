@@ -47,11 +47,21 @@ Stdlib sets each import's `loc.end` via `mkloc(lexer)` after the parse
 finishes, which returns the position of the lexer's NEXT real token.
 The LSP parses without `COMMENTS` mode, so "next token" can be code
 several lines down, across blank lines and `//` comments. The patch
-captures the closing `;` token's own location while parsing and uses
-that. Without the fix, `textDocument/documentLink` and folding ranges
-extend past the `use` statement into the following comment, which VS
-Code renders as a cmd-clickable underline navigating into the imported
-module.
+instead sets `loc.end` to `lex::prevloc(lexer)` (the location of the
+last consumed rune) right after each closing `;`, reading lexer state
+the same way the stdlib's `loc_from()` computes every other end
+location. Without the fix, `textDocument/documentLink` and folding
+ranges extend past the `use` statement into the following comment, which
+VS Code renders as a cmd-clickable underline navigating into the
+imported module.
+
+An earlier version of the patch instead copied the matched `;` token's
+own location field (`want(...)?.2`) into a local. That read correctly
+on the local toolchain but produced layout-dependent garbage on Alpine's
+`hare=0.26.0.1-r0` (musl) - `loc.end` sometimes landed on the next token
+instead of the `;`, breaking the unused-import quickfix range check.
+Reading `lex::prevloc` from lexer state is robust across toolchains, so
+verify this patch on the Alpine CI image (musl), not just locally.
 
 See `parse.ha.patch` and `import.ha.patch` for the patches themselves;
 the headers at the top of each file document the change in detail.
