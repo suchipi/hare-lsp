@@ -2136,6 +2136,111 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::contains(value, "|"));
 };
 
+// Regression: a match case that diverges via a never-returning call
+// (here `boom()`, standing in for `fmt::fatal`) must not leak `never`
+// into the binding's inferred type. The compiler reduces `(never | str)`
+// to `str` (harec type_store_reduce_result drops `never`), so hover must
+// show `str`, not `(never | str)`. See navigation.ha infer_match_expr_type.
+@test fn hover_const_match_init_drops_never_branch() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const def_path = ".tmp/hare-lsp-nav-hover-match-never.ha";
+	const def_text = "export fn boom() never = abort();\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
+
+	// Only the `str` case yields a value; the default diverges via a
+	// never-returning call, so the inferred type is just `str`.
+	const src =
+		"fn caller() void = { const input = match (2z: (str | void)) { case let joined: str => yield joined; case => boom(); }; };\\n";
+	nav_open(&s, "file:///mn.ha", src);
+
+	// Cursor on `input` (line 0, char 29).
+	const params =
+		`{"textDocument":{"uri":"file:///mn.ha"},"position":{"line":0,"character":29}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 493.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 493.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "const input"));
+	assert(strings::contains(value, ": str"));
+	// The diverging never-call case must not contribute `never`, and the
+	// init must not be echoed (which would mean inference failed).
+	assert(!strings::contains(value, "never"));
+	assert(!strings::contains(value, "match"));
+};
+
+// Regression: an `if`/`else` whose true branch diverges via a
+// never-returning call must infer the false branch's type, not `never`.
+// The compiler reduces `(never | int)` to `int`. See navigation.ha
+// infer_type_from_init_at (if_expr) and drop_never.
+@test fn hover_if_else_drops_never_true_branch() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const def_path = ".tmp/hare-lsp-nav-hover-if-never.ha";
+	const def_text = "export fn boom() never = abort();\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
+
+	// The true branch diverges, so the inferred type is the false
+	// branch's `int`, not `never`.
+	const src =
+		"fn caller() void = { const outcome = if (true) boom() else 5; };\\n";
+	nav_open(&s, "file:///in.ha", src);
+
+	// Cursor on `outcome` (line 0, char 29).
+	const params =
+		`{"textDocument":{"uri":"file:///in.ha"},"position":{"line":0,"character":29}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 494.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 494.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "const outcome"));
+	assert(strings::contains(value, ": int"));
+	// The diverging true branch must not surface as `never`, and the
+	// init must not be echoed (which would mean inference failed).
+	assert(!strings::contains(value, "never"));
+	assert(!strings::contains(value, "if ("));
+};
+
 // Mirrors `let s = if (start > len(b)) len(b) else start;` from
 // analysis/buffer.ha line 76. Both branches yield `size`, so the binding's
 // inferred type is `size` — not an echo of the if-else source.
