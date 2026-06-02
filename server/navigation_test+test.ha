@@ -1849,6 +1849,165 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(!strings::contains(value, "want()"));
 };
 
+// Reproduces the reported bug: hovering the loop variable of a by-value
+// for-each loop echoed the iterable expression instead of the element
+// type (and the loc.end-is-last-rune truncation rendered `cmd.opts` as
+// `cmd.opt`). `cmd.opts` is `[](rune, str)`, so `item` is `(rune, str)`.
+@test fn hover_on_for_each_value_binding_shows_element_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type command = struct { opts: [](rune, str) }; export fn run(cmd: command) void = { for (let item .. cmd.opts) void; };`;
+	nav_open(&s, "file:///fe_value.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///fe_value.ha", 0,
+		find_col(src, "item"), 700.0);
+	defer free(value);
+	assert(strings::contains(value, "let item"));
+	assert(strings::contains(value, "(rune, str)"));
+	// Must not echo the iterable expression nor its truncated form.
+	assert(!strings::contains(value, "cmd.opt"));
+	assert(!strings::contains(value, "= cmd"));
+};
+
+// A by-value for-each over a `[]int` binds the loop variable to `int`.
+@test fn hover_on_for_each_value_slice_binding_shows_int() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run(xs: []int) void = { for (let item .. xs) void; };`;
+	nav_open(&s, "file:///fe_slice.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///fe_slice.ha", 0,
+		find_col(src, "item"), 701.0);
+	defer free(value);
+	assert(strings::contains(value, "let item"));
+	assert(strings::contains(value, "int"));
+	assert(!strings::contains(value, "[]"));
+	assert(!strings::contains(value, "= xs"));
+};
+
+// A by-pointer for-each (`&..`) binds the loop variable to a pointer to
+// the element, so the hover shows `*int`, not `int` or the iterable.
+@test fn hover_on_for_each_pointer_binding_shows_pointer_type() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src = `export fn run(xs: []int) void = { for (let item &.. xs) void; };`;
+	nav_open(&s, "file:///fe_ptr.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///fe_ptr.ha", 0,
+		find_col(src, "item"), 702.0);
+	defer free(value);
+	assert(strings::contains(value, "let item"));
+	assert(strings::contains(value, "*int"));
+	assert(!strings::contains(value, "= xs"));
+};
+
+// An iterator for-each (`=>`) binds the loop variable to the generator's
+// value with the `done` sentinel stripped: `gen()` returns `(int | done)`,
+// so `item` is `int`.
+@test fn hover_on_for_iterator_binding_strips_done() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export fn gen() (int | done) = 0; export fn run() void = { for (let item => gen()) void; };`;
+	nav_open(&s, "file:///fe_iter.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///fe_iter.ha", 0,
+		find_col(src, "item"), 703.0);
+	defer free(value);
+	assert(strings::contains(value, "let item"));
+	assert(strings::contains(value, "int"));
+	assert(!strings::contains(value, "done"));
+	assert(!strings::contains(value, "gen()"));
+};
+
+// Hare's `=>` loop strips only the `done` sentinel and keeps every other
+// variant, errors included: a generator typed `(int | done | myerr)` binds
+// the loop variable as `(int | myerr)`. Since that union can't be rendered
+// from a single existing AST node, hover declines to a bare `let item`
+// rather than narrowing to the wrong `int` (dropping `myerr`).
+@test fn hover_on_for_iterator_binding_keeps_error_variants() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type myerr = !void; export fn gen() (int | done | myerr) = 0; export fn run() void = { for (let item => gen()) void; };`;
+	nav_open(&s, "file:///fe_iter_err.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///fe_iter_err.ha", 0,
+		find_col(src, "item"), 705.0);
+	defer free(value);
+	assert(strings::contains(value, "let item"));
+	// Must not collapse to the bare value type `int` and drop `myerr`.
+	assert(!strings::contains(value, "let item: int"));
+};
+
+// Member access through a for-each loop variable resolves to the element
+// type's field: `pts` is `[]point`, so `p` is `point` and `p.coord` is the
+// struct field. This exercises the struct-member type resolver's
+// for-each awareness (distinct from the hover-the-binding path above).
+@test fn hover_on_field_of_for_each_loop_var_resolves_element() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type point = struct { coord: int }; export fn run(pts: []point) void = { for (let p .. pts) { let _ = p.coord; }; };`;
+	nav_open(&s, "file:///fe_member.ha", src);
+	// Land on the last rune of `coord` in `p.coord` (loc.end semantics).
+	const col = find_col(src, "p.coord") + len("p.coord"): u32 - 1;
+	const value = nav_hover_contents(&s, out, "file:///fe_member.ha", 0, col,
+		704.0);
+	defer free(value);
+	assert(strings::contains(value, "(field)"));
+	assert(strings::contains(value, "coord"));
+	assert(strings::contains(value, "int"));
+};
+
+// A single-segment type alias (e.g. `command` in `parse() command`) must
+// resolve within the module that *defines* it, not via a name search that
+// could match a same-named type in another module. Two modules export a
+// type `command`; only the imported one has an `opts` field. The decoy is
+// indexed first, so a short-name search would mis-resolve `command` and the
+// element type would be lost. This is the bug that surfaced in CI, where
+// the stdlib defines both `getopt::command` and `os::exec::command`.
+@test fn hover_on_for_each_binding_resolves_alias_in_owning_module() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const real_path = ".tmp/feamb_real/lib.ha";
+	const decoy_path = ".tmp/feamb_decoy/lib.ha";
+	const real_text =
+		"export type command = struct { opts: [](rune, str) };\nexport fn parse() command = command { opts = [] };\n";
+	const decoy_text = "export type command = struct { other: int };\n";
+	nav_write_dir(".tmp/feamb_real");
+	nav_write_dir(".tmp/feamb_decoy");
+	let _ = match (nav_write(real_path, real_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write");
+	};
+	let _ = match (nav_write(decoy_path, decoy_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write");
+	};
+	defer nav_rm(real_path);
+	defer nav_rm(decoy_path);
+	// Index the decoy first: a short-name search would return it.
+	analysis::index_file(&s.workspace_index, decoy_path,
+		strings::toutf8(decoy_text));
+	analysis::index_file(&s.workspace_index, real_path,
+		strings::toutf8(real_text));
+
+	const src =
+		`use feamb_real; export fn f() void = { const cmd = feamb_real::parse(); for (let opt .. cmd.opts) { let _ = opt; }; };`;
+	nav_open(&s, "file:///fe_amb_main.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///fe_amb_main.ha", 0,
+		find_col(src, "opt"), 706.0);
+	defer free(value);
+	assert(strings::contains(value, "let opt"));
+	assert(strings::contains(value, "(rune, str)"));
+};
+
 @test fn definition_disambiguates_by_imported_module() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
@@ -2674,6 +2833,40 @@ fn find_col(src: str, needle: str) u32 = {
 fn pos_params(uri: str, line: u32, ch: u32) str = {
 	return strings::concat(`{"textDocument":{"uri":"`, uri,
 		`"},"position":{"line":`, fmt_u32(line), `,"character":`, fmt_u32(ch), `}}`)!;
+};
+
+// Sends a `textDocument/hover` at (line, ch) and returns the response's
+// `contents.value` markdown string. Assumes the document is already open.
+// Aborts if the response isn't a hover result. Caller frees.
+//
+// @returns: owned
+fn nav_hover_contents(
+	s: *server,
+	out: *memio::stream,
+	uri: str,
+	line: u32,
+	ch: u32,
+	id: f64,
+) str = {
+	const params = pos_params(uri, line, ch);
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = id,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(s, r);
+	const v = skip_to_response(out, id);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	return strings::dup(value)!;
 };
 
 // --- fixture helpers ---

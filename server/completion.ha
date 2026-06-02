@@ -1273,7 +1273,7 @@ fn emit_struct_member_completions(
 			}, partial, arr, seen, depth + 1);
 	case let a: ast::alias_type =>
 		const lookup_doc: nullable *document = find_doc_for_uri(s, holder.uri);
-		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
 		case let d: *ast::decl =>
 			yield d;
 		case void =>
@@ -1331,7 +1331,7 @@ fn emit_members_from_list(
 				}, partial, arr, seen, depth + 1);
 		case let alias: ast::struct_alias =>
 			const lookup_doc: nullable *document = find_doc_for_uri(s, holder.uri);
-			const d = match (resolve_alias_decl(s, lookup_doc, alias)) {
+			const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, alias)) {
 			case let d: *ast::decl =>
 				yield d;
 			case void =>

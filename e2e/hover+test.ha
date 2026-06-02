@@ -89,6 +89,74 @@ export fn main() void = {
 	);
 };
 
+// The reported bug: hovering the loop variable of a by-value for-each
+// loop (`for (let opt .. cmd.opts)`) echoed the iterable expression
+// instead of the element type. With the real stdlib on HAREPATH,
+// `getopt::command.opts` is `[](rune, str)`, so `opt` is `(rune, str)`.
+// This exercises the full stdlib alias-resolution path the synthetic unit
+// tests can't reach.
+@test fn e2e_hover_for_each_binding_infers_element_type() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample =
+		`use getopt;
+use os;
+export fn main() void = {
+	const cmd = getopt::parse(os::args);
+	for (let opt .. cmd.opts) {
+		let _ = opt;
+	};
+};
+`;
+	const did_open = build_did_open("file:///for_each.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on `opt` in the for-header. Line 4, char 11.
+	const hover_req =
+		`{"jsonrpc":"2.0","id":520,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///for_each.ha"},"position":{"line":4,"character":11}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 520.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			fmt::fatalf("e2e: for-each hover returned null. body={}", text);
+		};
+	case void =>
+		fmt::fatalf("e2e: for-each hover missing result: {}", text);
+	};
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "let opt: (rune, str)"),
+		"for-each loop var should render the iterable's element type"
+	);
+	// Must not echo the iterable expression nor the loc.end-truncated form.
+	assert(
+		!strings::contains(md, "cmd.opt"),
+		"for-each hover must not echo the iterable expression"
+	);
+};
+
 // Top-level hover should render the signature only — no `= body`. The
 // previous behavior dumped the full unparsed decl including the function
 // body, which was useless noise for anything bigger than a one-liner.

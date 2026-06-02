@@ -661,7 +661,7 @@ fn element_type_in_type(
 			}, depth + 1);
 	case let a: ast::alias_type =>
 		const lookup_doc = find_doc_for_uri(s, holder.uri);
-		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
 		case let d: *ast::decl =>
 			yield d;
 		case void =>
@@ -706,7 +706,7 @@ fn tuple_field_type(
 		};
 	case let a: ast::alias_type =>
 		const lookup_doc = find_doc_for_uri(s, holder.uri);
-		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
 		case let d: *ast::decl =>
 			yield d;
 		case void =>
@@ -749,7 +749,7 @@ fn deref_pointer_type(
 		};
 	case let a: ast::alias_type =>
 		const lookup_doc = find_doc_for_uri(s, holder.uri);
-		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
 		case let d: *ast::decl =>
 			yield d;
 		case void =>
@@ -994,6 +994,14 @@ fn walk_for_binding_type(
 			return void;
 		};
 	case let fr: ast::for_expr =>
+		// For-each / iterator loops rebind the loop variable to an
+		// element of the iterable (or the generator's value), not to
+		// the iterable / generator expression itself. Resolve that so
+		// member access and go-to-type-definition see the element type.
+		// ACCUMULATOR loops fall through to the generic binding walk.
+		if (for_loop_binds_each(fr, name)) {
+			return for_each_binding_type(s, doc, su, fr, name, depth);
+		};
 		match (fr.bindings) {
 		case let bb: *ast::expr =>
 			match (walk_for_binding_type(s, doc, su, bb, name, off, depth)) {
@@ -1071,6 +1079,205 @@ fn binding_type(
 		};
 	case null =>
 		return type_of_expr(s, doc, su, bd.init, depth + 1);
+	};
+};
+
+// Returns the (binding kind, single binding) of a for loop's binding
+// clause. For-each and iterator loops always have exactly one binding
+// (the parser rejects multiple), though that binding may name several
+// variables via tuple destructuring. Returns void when the loop has no
+// binding clause (a bare `for (cond)`) or the AST is malformed.
+//
+// @param fr: borrowed
+// @returns: borrowed from fr
+fn for_binding_and_kind(
+	fr: ast::for_expr,
+) ((ast::binding_kind, *ast::binding) | void) = {
+	const be = match (fr.bindings) {
+	case let b: *ast::expr =>
+		yield b;
+	case null =>
+		return void;
+	};
+	const bexpr = match (be.expr) {
+	case let b: ast::binding_expr =>
+		yield b;
+	case =>
+		return void;
+	};
+	if (len(bexpr.bindings) == 0) return void;
+	return (bexpr.kind, &bexpr.bindings[0]);
+};
+
+// @param names: borrowed
+// @param name: borrowed
+fn index_of_binding_name(names: []str, name: str) (size | void) = {
+	for (let i = 0z; i < len(names); i += 1) {
+		if (names[i] == name) return i;
+	};
+	return void;
+};
+
+// True when `fr` is a for-each / iterator loop (`..`, `&..`, `=>`) that
+// binds a variable named `name`. The C-style ACCUMULATOR form binds an
+// ordinary `let`/`const`, resolved through the normal binding path, so it
+// returns false.
+//
+// @param fr: borrowed
+// @param name: borrowed
+fn for_loop_binds_each(fr: ast::for_expr, name: str) bool = {
+	switch (fr.kind) {
+	case ast::for_kind::EACH_VALUE,
+	ast::for_kind::EACH_POINTER,
+	ast::for_kind::ITERATOR => void;
+	case ast::for_kind::ACCUMULATOR =>
+		return false;
+	};
+	const bd = match (for_binding_and_kind(fr)) {
+	case let v: (ast::binding_kind, *ast::binding) =>
+		yield v.1;
+	case void =>
+		return false;
+	};
+	return index_of_binding_name(bd.names, name) is size;
+};
+
+// Resolves the type a for-each / iterator loop variable named `name` takes
+// on each iteration. For EACH_VALUE / EACH_POINTER it is the element type
+// of the iterable; the leading `*` for pointer iteration is a rendering
+// concern the hover layer adds, so it is NOT included here (member access
+// and go-to-type-definition both want to see through to the element). For
+// ITERATOR it is the generator's value type with the `done` sentinel and
+// any error variants removed. An explicit binding type, when the source
+// wrote one, wins. For a destructuring loop (`for (let (a, b) .. pairs)`)
+// the matching tuple field is returned. Returns void when the type can't
+// be resolved. Assumes `fr` binds `name` (see [[for_loop_binds_each]]).
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param fr: borrowed
+// @param name: borrowed
+// @returns: borrowed
+fn for_each_binding_type(
+	s: *server,
+	doc: *document,
+	su: *ast::subunit,
+	fr: ast::for_expr,
+	name: str,
+	depth: int,
+) (located_type | void) = {
+	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return void;
+	const bd = match (for_binding_and_kind(fr)) {
+	case let v: (ast::binding_kind, *ast::binding) =>
+		yield v.1;
+	case void =>
+		return void;
+	};
+	const elem = match (bd._type) {
+	case let t: *ast::_type =>
+		// The source spelled out the element type.
+		yield located_type {
+			t = t,
+			text = analysis::bytes(&doc.buf),
+			uri = doc.uri,
+		};
+	case null =>
+		yield match (infer_for_each_element(s, doc, su, fr.kind, bd.init, depth)) {
+		case let lt: located_type =>
+			yield lt;
+		case void =>
+			return void;
+		};
+	};
+	// Destructuring loop: map `name` to its tuple field.
+	if (len(bd.names) > 1) {
+		const idx = match (index_of_binding_name(bd.names, name)) {
+		case let i: size =>
+			yield i;
+		case void =>
+			return void;
+		};
+		return tuple_field_type(s, elem, idx, depth + 1);
+	};
+	return elem;
+};
+
+// Per-iteration element / value type of a for-each or iterator loop whose
+// binding has no explicit type. EACH_VALUE / EACH_POINTER yield the
+// iterable's element type; ITERATOR yields the generator's value with
+// `done` / errors stripped.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param init: borrowed
+// @returns: borrowed
+fn infer_for_each_element(
+	s: *server,
+	doc: *document,
+	su: *ast::subunit,
+	kind: ast::for_kind,
+	init: *ast::expr,
+	depth: int,
+) (located_type | void) = {
+	const it = match (type_of_expr(s, doc, su, init, depth + 1)) {
+	case let lt: located_type =>
+		yield lt;
+	case void =>
+		return void;
+	};
+	switch (kind) {
+	case ast::for_kind::EACH_VALUE, ast::for_kind::EACH_POINTER =>
+		return element_type_in_type(s, it, depth + 1);
+	case ast::for_kind::ITERATOR =>
+		return iterator_value_type(it, depth + 1);
+	case ast::for_kind::ACCUMULATOR =>
+		return void;
+	};
+};
+
+// Strips the `done` sentinel from an iterator generator's result type
+// `(T | done)`, returning the value type `T`. Hare's `=>` loop strips only
+// `done` and keeps every other variant, errors included, so a generator
+// typed `(int | done | myerr)` binds the loop variable as `(int | myerr)`.
+// A located_type can hold only a single existing AST node, so when more
+// than one non-`done` variant remains we decline (return void) rather than
+// report a too-narrow type. A non-tagged type is returned unchanged.
+//
+// @param lt: borrowed
+// @returns: borrowed
+fn iterator_value_type(lt: located_type, depth: int) (located_type | void) = {
+	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return void;
+	match (lt.t.repr) {
+	case let tag: ast::tagged_type =>
+		let kept: *ast::_type = lt.t;
+		let count = 0;
+		for (let i = 0z; i < len(tag); i += 1) {
+			if (is_done_type(tag[i].0)) continue;
+			kept = tag[i].0;
+			count += 1;
+		};
+		if (count != 1) return void;
+		return located_type {
+			t = kept,
+			text = lt.text,
+			uri = lt.uri,
+		};
+	case =>
+		return lt;
+	};
+};
+
+// True when `t` is the `done` builtin type.
+//
+// @param t: borrowed
+fn is_done_type(t: *ast::_type) bool = {
+	match (t.repr) {
+	case let b: ast::builtin_type =>
+		return b == ast::builtin_type::DONE;
+	case =>
+		return false;
 	};
 };
 
@@ -1265,7 +1472,7 @@ fn lookup_member_in_type(
 			// lookup_decl_by_ident handles workspace fallback.
 			yield null: nullable *document;
 		};
-		const d = match (resolve_alias_decl(s, lookup_doc, a)) {
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
 		case let d: *ast::decl =>
 			yield d;
 		case void =>
@@ -1290,15 +1497,20 @@ fn lookup_member_in_type(
 };
 
 // Resolves an alias ident to its decl. Tries the open document (if
-// provided) first, then the workspace and stdlib indexes.
+// provided) first; otherwise, for a qualified ident, the workspace and
+// stdlib module indexes, and for a bare ident, the file at `owner_uri`
+// (where a same-module alias is defined) before a workspace short-name
+// search.
 //
 // @param s: borrowed
 // @param doc: borrowed
+// @param owner_uri: borrowed
 // @param id: borrowed
 // @returns: borrowed
 fn resolve_alias_decl(
 	s: *server,
 	doc: nullable *document,
+	owner_uri: str,
 	id: ast::ident,
 ) (*ast::decl | void) = {
 	match (doc) {
@@ -1326,9 +1538,50 @@ fn resolve_alias_decl(
 		};
 		return void;
 	};
+	// Single-segment alias: being unqualified, it's defined in the same
+	// file that references it (a same-module reference, e.g. `command` in
+	// getopt's `parse() command`). Resolve it there precisely via the
+	// parse cache. A bare short-name search across the indexes would be
+	// ambiguous - both getopt and os::exec export a type named `command`.
+	match (resolve_type_decl_in_cached_file(s, owner_uri, name)) {
+	case let d: *ast::decl =>
+		return d;
+	case void => void;
+	};
 	match (analysis::find_first_by_short_name(&s.workspace_index, name)) {
 	case let e: *analysis::workspace_entry =>
 		return decl_from_workspace_entry(s, e, name);
+	case void =>
+		return void;
+	};
+};
+
+// Resolves a type decl named `name` within the file identified by `uri`,
+// reading and parsing it through the file parse cache. This is how a
+// single-segment, same-module alias (e.g. getopt's `command`) resolves to
+// its own module's definition rather than a same-named type elsewhere.
+// Returns void when the file can't be read or has no such decl.
+//
+// @param s: borrowed
+// @param uri: borrowed
+// @param name: borrowed
+// @returns: borrowed
+fn resolve_type_decl_in_cached_file(
+	s: *server,
+	uri: str,
+	name: str,
+) (*ast::decl | void) = {
+	const path = lsp::uri_decode_path(uri);
+	defer free(path);
+	const fpe = match (cached_parse_or_drop_stale(s, path)) {
+	case let p: *file_parse_entry =>
+		yield p;
+	case null =>
+		return void;
+	};
+	match (find_decl_by_name(&fpe.pr.subunit, name)) {
+	case let i: size =>
+		return &fpe.pr.subunit.decls[i];
 	case void =>
 		return void;
 	};

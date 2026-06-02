@@ -384,7 +384,7 @@ fn try_send_type_def_via_binding(
 		return false;
 	};
 	const lookup_doc = find_doc_for_uri(s, lt.uri);
-	const d = match (resolve_alias_decl(s, lookup_doc, alias)) {
+	const d = match (resolve_alias_decl(s, lookup_doc, lt.uri, alias)) {
 	case let d: *ast::decl =>
 		yield d;
 	case void =>
@@ -1055,6 +1055,15 @@ fn walk_for_local(
 			return void;
 		};
 	case let fr: ast::for_expr =>
+		// For-each / iterator loops rebind the loop variable to an
+		// element of the iterable (`..`), a pointer to one (`&..`), or
+		// the generator's unwrapped value (`=>`), not to the iterable /
+		// generator expression itself. Render the element type rather
+		// than echoing that expression. ACCUMULATOR loops fall through
+		// to the generic binding walk.
+		if (for_loop_binds_each(fr, name)) {
+			return render_for_each_binding(srv, doc, fr, name);
+		};
 		match (fr.bindings) {
 		case let b: *ast::expr =>
 			match (walk_for_local(srv, doc, data, b, name, off)) {
@@ -1218,6 +1227,69 @@ fn render_local_binding(
 				};
 			};
 		};
+	};
+	return strings::dup(memio::string(&buf)!)!;
+};
+
+// Renders the hover signature for a for-each / iterator loop variable
+// named `name`. Unlike an ordinary binding, the loop variable is rebound
+// each iteration to an element of the iterable (`..`), a pointer to one
+// (`&..`), or the generator's unwrapped value (`=>`) — never the iterable
+// expression itself. Falls back to a bare `let <name>` (with no echoed
+// initializer) when the element type can't be resolved. Assumes `fr` binds
+// `name` (see [[for_loop_binds_each]]). Caller frees.
+//
+// @param srv: borrowed
+// @param doc: borrowed
+// @param fr: borrowed
+// @param name: borrowed
+// @returns: owned
+fn render_for_each_binding(
+	srv: *server,
+	doc: *document,
+	fr: ast::for_expr,
+	name: str,
+) str = {
+	const (kind, bd) = match (for_binding_and_kind(fr)) {
+	case let v: (ast::binding_kind, *ast::binding) =>
+		yield v;
+	case void =>
+		return strings::dup(name)!;
+	};
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	const kw = switch (kind) {
+	case ast::binding_kind::LET =>
+		yield "let ";
+	case ast::binding_kind::CONST =>
+		yield "const ";
+	case ast::binding_kind::DEF =>
+		yield "def ";
+	};
+	match (memio::concat(&buf, kw, name)) {
+	case size => void;
+	case =>
+		return strings::dup(name)!;
+	};
+	const cache = parse_of(doc);
+	match (for_each_binding_type(srv, doc, &cache.pr.subunit, fr, name, 0)) {
+	case let lt: located_type =>
+		match (render_type_plain(lt.t)) {
+		case let ts: str =>
+			defer free(ts);
+			// Pointer iteration binds a pointer to the element; an
+			// explicitly-typed binding already spells out its own
+			// type, so only synthesize the `*` for inferred element
+			// types.
+			const ptr = fr.kind == ast::for_kind::EACH_POINTER && bd._type is null;
+			const sep = if (ptr) ": *" else ": ";
+			match (memio::concat(&buf, sep, ts)) {
+			case size => void;
+			case => void;
+			};
+		case void => void;
+		};
+	case void => void;
 	};
 	return strings::dup(memio::string(&buf)!)!;
 };
