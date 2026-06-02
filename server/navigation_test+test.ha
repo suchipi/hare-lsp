@@ -1921,6 +1921,26 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(!strings::contains(value, "gen()"));
 };
 
+// Hare's `=>` loop strips only the `done` sentinel and keeps every other
+// variant, errors included: a generator typed `(int | done | myerr)` binds
+// the loop variable as `(int | myerr)`. Since that union can't be rendered
+// from a single existing AST node, hover declines to a bare `let item`
+// rather than narrowing to the wrong `int` (dropping `myerr`).
+@test fn hover_on_for_iterator_binding_keeps_error_variants() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const src =
+		`export type myerr = !void; export fn gen() (int | done | myerr) = 0; export fn run() void = { for (let item => gen()) void; };`;
+	nav_open(&s, "file:///fe_iter_err.ha", src);
+	const value = nav_hover_contents(&s, out, "file:///fe_iter_err.ha", 0,
+		find_col(src, "item"), 705.0);
+	defer free(value);
+	assert(strings::contains(value, "let item"));
+	// Must not collapse to the bare value type `int` and drop `myerr`.
+	assert(!strings::contains(value, "let item: int"));
+};
+
 // Member access through a for-each loop variable resolves to the element
 // type's field: `pts` is `[]point`, so `p` is `point` and `p.coord` is the
 // struct field. This exercises the struct-member type resolver's

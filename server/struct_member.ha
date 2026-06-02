@@ -1231,28 +1231,23 @@ fn infer_for_each_element(
 	case ast::for_kind::EACH_VALUE, ast::for_kind::EACH_POINTER =>
 		return element_type_in_type(s, it, depth + 1);
 	case ast::for_kind::ITERATOR =>
-		return iterator_value_type(s, doc, it, depth + 1);
+		return iterator_value_type(it, depth + 1);
 	case ast::for_kind::ACCUMULATOR =>
 		return void;
 	};
 };
 
-// Strips the `done` sentinel and error variants from an iterator
-// generator's result type `(T | done)` / `(T | done | someerror)`,
-// returning the remaining value type `T`. Returns void unless exactly one
-// non-`done`, non-error variant remains (the well-formed iterator case); a
-// non-tagged type is returned unchanged.
+// Strips the `done` sentinel from an iterator generator's result type
+// `(T | done)`, returning the value type `T`. Hare's `=>` loop strips only
+// `done` and keeps every other variant, errors included, so a generator
+// typed `(int | done | myerr)` binds the loop variable as `(int | myerr)`.
+// A located_type can hold only a single existing AST node, so when more
+// than one non-`done` variant remains we decline (return void) rather than
+// report a too-narrow type. A non-tagged type is returned unchanged.
 //
-// @param s: borrowed
-// @param doc: borrowed
 // @param lt: borrowed
 // @returns: borrowed
-fn iterator_value_type(
-	s: *server,
-	doc: *document,
-	lt: located_type,
-	depth: int,
-) (located_type | void) = {
+fn iterator_value_type(lt: located_type, depth: int) (located_type | void) = {
 	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return void;
 	match (lt.t.repr) {
 	case let tag: ast::tagged_type =>
@@ -1260,7 +1255,6 @@ fn iterator_value_type(
 		let count = 0;
 		for (let i = 0z; i < len(tag); i += 1) {
 			if (is_done_type(tag[i].0)) continue;
-			if (alias_is_error(s, doc, tag[i].0, 0)) continue;
 			kept = tag[i].0;
 			count += 1;
 		};
