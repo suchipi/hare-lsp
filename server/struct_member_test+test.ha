@@ -531,10 +531,11 @@ use strings;
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
 	// A tuple-index access `pair.N` should hover as the Nth element's
-	// type. The receiver name is multi-char so byte/rune offset math
-	// isn't masked by a single-character identifier. Both `.0` and a
-	// non-zero index `.1` are exercised so the index extraction isn't
-	// silently hard-coded to 0.
+	// type. Both `.0` and a non-zero index `.1` are exercised so the
+	// resolved index isn't silently hard-coded to 0. These single-digit
+	// indices do NOT exercise the `field_start + last_rune_offset(name)`
+	// term in the tuple match (that offset is 0 for one-rune tokens);
+	// hover_on_multi_digit_tuple_index_covers_offset_math covers it.
 	const src =
 		"export fn f(pair: (int, uint)) void = {\\n\\tlet _ = pair.0;\\n\\tlet _ = pair.1;\\n};\\n";
 	nav_open(&s, "file:///tuple_hover.ha", src);
@@ -552,6 +553,28 @@ use strings;
 	defer free(md1);
 	assert(strings::contains(md1, "(tuple field 1)"));
 	assert(strings::contains(md1, "uint"));
+};
+
+@test fn hover_on_multi_digit_tuple_index_covers_offset_math() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// A two-digit index (`.10`) is the only thing that exercises the
+	// `field_start + last_rune_offset(name)` term in the tuple match: for
+	// single-digit indices that offset is always 0, so a regression that
+	// dropped the term would still pass every other tuple test. The tuple
+	// has 11 elements (indices 0..10), and element 10 is `bool` so the
+	// resolved type is unambiguous (every other element is `int`).
+	const src =
+		"export fn f(t: (int, int, int, int, int, int, int, int, int, int, bool)) void = {\\n\\tlet _ = t.10;\\n};\\n";
+	nav_open(&s, "file:///tuple_multidigit.ha", src);
+
+	const (line, col) = find_pos(src, "t.10");
+	const md = nav_hover_contents(&s, out, "file:///tuple_multidigit.ha", line,
+		col + len("t.10"): u32 - 1, 652.0);
+	defer free(md);
+	assert(strings::contains(md, "(tuple field 10)"));
+	assert(strings::contains(md, "bool"));
 };
 
 @test fn definition_on_tuple_member_jumps_to_element_type() void = {
