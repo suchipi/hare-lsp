@@ -622,6 +622,12 @@ fn type_of_expr(
 	case let c: ast::call_expr =>
 		return call_return_located_type(s, doc, su, &c, depth);
 	case let ca: ast::cast_expr =>
+		// `x is T` yields bool (a member-less builtin), not T; decline
+		// rather than resolving members against the test's target type.
+		// `x: T` (CAST) and `x as T` (ASSERTION) do take on T.
+		if (ca.kind == ast::cast_kind::TEST) {
+			return void;
+		};
 		return located_type {
 			t = ca._type,
 			text = analysis::bytes(&doc.buf),
@@ -632,10 +638,11 @@ fn type_of_expr(
 	case let p: ast::error_assert_expr =>
 		return strip_errors_located(s, doc, su, p: *ast::expr, depth);
 	case let u: ast::unarithm_expr =>
-		// `*p` (DEREF) — referent of a pointer. Other unary operators
-		// effectively never appear as the receiver of a member access:
-		// `&x.field` parses as `&(x.field)` due to precedence, and BNOT
-		// / LNOT / MINUS produce numeric or bool values. We skip them.
+		// `*p` (DEREF) — referent of a pointer. `&x` (ADDR) — a pointer
+		// to x; member access and indexing auto-deref, so we resolve to
+		// x's own type (the referent) directly and let the member/index
+		// resolvers do the rest. BNOT / LNOT / MINUS produce numeric or
+		// bool values and never sensibly precede a member access.
 		switch (u.op) {
 		case ast::unarithm_op::DEREF =>
 			const recv = match (type_of_expr(s, doc, su, u.operand, depth + 1)) {
@@ -645,12 +652,102 @@ fn type_of_expr(
 				return void;
 			};
 			return deref_pointer_type(s, recv, depth + 1);
+		case ast::unarithm_op::ADDR =>
+			return type_of_expr(s, doc, su, u.operand, depth + 1);
 		case =>
 			return void;
 		};
+	case let ie: ast::if_expr =>
+		// `(if (c) a else b).field` — resolve via the true branch, falling
+		// back to the false branch (e.g. when the true branch diverges).
+		match (type_of_expr(s, doc, su, ie.tbranch, depth + 1)) {
+		case let lt: located_type =>
+			return lt;
+		case void => void;
+		};
+		match (ie.fbranch) {
+		case let fb: *ast::expr =>
+			return type_of_expr(s, doc, su, fb, depth + 1);
+		case null =>
+			return void;
+		};
+	case let m: ast::match_expr =>
+		// `match (v) { ... }.field` — member access is only valid when
+		// every case yields one common type, so the first resolvable case
+		// value stands in for the whole expression.
+		for (let i = 0z; i < len(m.cases); i += 1) {
+			match (block_yield_located_type(s, doc, su, m.cases[i].exprs, depth)) {
+			case let lt: located_type =>
+				return lt;
+			case void => void;
+			};
+		};
+		return void;
+	case let sw: ast::switch_expr =>
+		// `switch (k) { ... }.field` — as with match, the first resolvable
+		// case value represents the common case type.
+		for (let i = 0z; i < len(sw.cases); i += 1) {
+			match (block_yield_located_type(s, doc, su, sw.cases[i].exprs, depth)) {
+			case let lt: located_type =>
+				return lt;
+			case void => void;
+			};
+		};
+		return void;
+	case let c: ast::compound_expr =>
+		// `{ ...; yield s; }.field` — resolve via the block's yielded value.
+		return block_yield_located_type(s, doc, su, c.exprs, depth);
+	case let sl: ast::slice_expr =>
+		// `xs[a..b]` is `[]T`; the object's own list type carries the same
+		// element type, so a following `[i]` (element_type_in_type) or a
+		// member access resolves against it directly.
+		return type_of_expr(s, doc, su, sl.object, depth + 1);
 	case =>
 		return void;
 	};
+};
+
+// Resolves the first usable value type contributed by a block's top-level
+// `yield` (as a located_type node), used to represent a match / switch /
+// compound expression that appears as a member-access receiver. Member
+// access on such an expression is only valid when all branches share one
+// type, so the first resolvable yield value stands in for the whole. Only
+// top-level yields are inspected (a best-effort gap matching the binding-init
+// inference engine).
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param su: borrowed
+// @param exprs: borrowed
+// @returns: borrowed
+fn block_yield_located_type(
+	s: *server,
+	doc: *document,
+	su: *ast::subunit,
+	exprs: []*ast::expr,
+	depth: int,
+) (located_type | void) = {
+	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return void;
+	for (let i = 0z; i < len(exprs); i += 1) {
+		const y = match (exprs[i].expr) {
+		case let y: ast::yield_expr =>
+			yield y;
+		case =>
+			continue;
+		};
+		const v = match (y.value) {
+		case let v: *ast::expr =>
+			yield v;
+		case null =>
+			continue;
+		};
+		match (type_of_expr(s, doc, su, v, depth + 1)) {
+		case let lt: located_type =>
+			return lt;
+		case void => void;
+		};
+	};
+	return void;
 };
 
 // Returns the element type for an indexed access (`xs[i]`). Chases alias
@@ -746,6 +843,58 @@ fn tuple_field_type(
 				text = text,
 				uri = uri,
 			}, idx, depth + 1);
+	case =>
+		return void;
+	};
+};
+
+// Returns the result type of a function (or function-pointer) type as a
+// located_type, chasing pointer and alias wrappers. Used to resolve the
+// return type of an indirect call through a local function pointer (A12).
+//
+// @param s: borrowed
+// @returns: borrowed
+fn func_result_type(
+	s: *server,
+	holder: located_type,
+	depth: int,
+) (located_type | void) = {
+	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return void;
+	match (holder.t.repr) {
+	case let f: ast::func_type =>
+		return located_type {
+			t = f.result,
+			text = holder.text,
+			uri = holder.uri,
+		};
+	case let p: ast::pointer_type =>
+		return func_result_type(s,
+			located_type {
+				t = p.referent,
+				text = holder.text,
+				uri = holder.uri,
+			}, depth + 1);
+	case let a: ast::alias_type =>
+		const lookup_doc = find_doc_for_uri(s, holder.uri);
+		const d = match (resolve_alias_decl(s, lookup_doc, holder.uri, a)) {
+		case let d: *ast::decl =>
+			yield d;
+		case void =>
+			return void;
+		};
+		const u = match (analysis::type_decl_underlying(d)) {
+		case let u: *ast::_type =>
+			yield u;
+		case void =>
+			return void;
+		};
+		const (text, uri) = locate_decl_anywhere(s, d, holder);
+		return func_result_type(s,
+			located_type {
+				t = u,
+				text = text,
+				uri = uri,
+			}, depth + 1);
 	case =>
 		return void;
 	};

@@ -426,8 +426,7 @@ export fn next_trailing_flush_deadline_ms(s: *server) (i64 | void) = {
 			// gets a full 1ms wait instead of collapsing to a
 			// zero-timeout spin that flushes before the
 			// debounce check would accept.
-			yield (remaining_ns + time::MILLISECOND - 1) /
-				time::MILLISECOND;
+			yield (remaining_ns + time::MILLISECOND - 1) / time::MILLISECOND;
 		};
 		match (earliest) {
 		case void =>
