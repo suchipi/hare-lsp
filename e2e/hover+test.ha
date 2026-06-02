@@ -157,6 +157,136 @@ export fn main() void = {
 	);
 };
 
+// Hovering a tuple-index access (`opt.0`) should resolve to the indexed
+// element's type. Here `opt` is `(rune, str)` (an element of
+// getopt::command.opts, `[](rune, str)`), so `opt.0` is `rune`. Exercises
+// the full stdlib alias-resolution path plus the tuple-member hover handler.
+@test fn e2e_hover_on_tuple_member_element_type() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample =
+		`use getopt;
+use os;
+export fn main() void = {
+	const cmd = getopt::parse(os::args);
+	for (let opt .. cmd.opts) {
+		let _ = opt.0;
+	};
+};
+`;
+	const did_open = build_did_open("file:///tuple_member.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on the `0` of `opt.0`. Line 5 (0-indexed) is "\t\tlet _ = opt.0;";
+	// the `0` is at character 14 (two leading tabs count as one column each).
+	const hover_req =
+		`{"jsonrpc":"2.0","id":530,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///tuple_member.ha"},"position":{"line":5,"character":14}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 530.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			fmt::fatalf("e2e: tuple-member hover returned null. body={}", text);
+		};
+	case void =>
+		fmt::fatalf("e2e: tuple-member hover missing result: {}", text);
+	};
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "(tuple field 0)"),
+		"tuple-index hover should label the element"
+	);
+	assert(
+		strings::contains(md, "rune"),
+		"tuple-index hover should render the indexed element's type"
+	);
+};
+
+// Go-to-definition on a tuple-index access (`opt.0`) jumps to the element's
+// type node within the tuple type. Here the tuple `(rune, str)` lives in the
+// stdlib getopt module (reached via `cmd.opts` -> the for-each element type),
+// so the resolved Location must point into getopt's source at the `rune`
+// token. Exercises cross-file tuple definition end-to-end.
+@test fn e2e_definition_on_tuple_member_resolves_into_stdlib() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample =
+		`use getopt;
+use os;
+export fn main() void = {
+	const cmd = getopt::parse(os::args);
+	for (let opt .. cmd.opts) {
+		let _ = opt.0;
+	};
+};
+`;
+	const did_open = build_did_open("file:///tuple_member_def.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Definition on the `0` of `opt.0`. Line 5, character 14.
+	const def_req =
+		`{"jsonrpc":"2.0","id":540,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///tuple_member_def.ha"},"position":{"line":5,"character":14}}}`;
+	send(&s, strings::toutf8(def_req));
+
+	const body = wait_for_response(&s, 540.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield *p;
+	case void =>
+		fmt::fatalf("e2e: tuple definition missing result: {}", text);
+	};
+	const loc = match (result) {
+	case let o: json::object =>
+		yield o;
+	case let arr: []json::value =>
+		assert(len(arr) > 0, "definition should return at least one location");
+		yield arr[0] as json::object;
+	case =>
+		fmt::fatalf("e2e: tuple definition returned null. body={}", text);
+	};
+	const uri_str = *(json::get(&loc, "uri") as *json::value) as str;
+	assert(
+		strings::contains(uri_str, "/getopt/") && strings::hassuffix(uri_str, ".ha"),
+		"tuple definition should resolve into the stdlib getopt module"
+	);
+};
+
 // Top-level hover should render the signature only — no `= body`. The
 // previous behavior dumped the full unparsed decl including the function
 // body, which was useless noise for anything bigger than a one-liner.

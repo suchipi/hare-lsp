@@ -1013,6 +1013,79 @@ fn free_labels(labels: []str) void = {
 	};
 };
 
+@test fn completion_tuple_index_via_function_param() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `pair` is a function parameter of a tuple type; typing `pair.`
+	// should suggest its positional indices with their element types.
+	comp_open(&s, "file:///mt.ha",
+		`export fn f(pair: (int, uint)) void = {\n\tpair.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///mt.ha", 1, 6, 1100.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "0"),
+		"expected `0` in tuple index completions"
+	);
+	assert(
+		labels_contains(labels, "1"),
+		"expected `1` in tuple index completions"
+	);
+	// Member completion is exclusive: keywords/locals must NOT appear.
+	assert(!labels_contains(labels, "let"));
+	assert(!labels_contains(labels, "pair"));
+
+	// Each item is Kind=Field, sorts above other sources, and carries the
+	// element type as detail.
+	let saw0 = false;
+	let saw1 = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const kind = *(json::get(&it, "kind") as *json::value) as f64;
+		assert(kind == 5.0, "tuple index items must have kind=Field(5)");
+		const sort = *(json::get(&it, "sortText") as *json::value) as str;
+		assert(
+			strings::hasprefix(sort, "0-"),
+			"tuple index items must sort above other sources"
+		);
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		const detail = *(json::get(&it, "detail") as *json::value) as str;
+		if (label == "0") {
+			assert(detail == "int", "element 0 detail should be `int`");
+			saw0 = true;
+		};
+		if (label == "1") {
+			assert(detail == "uint", "element 1 detail should be `uint`");
+			saw1 = true;
+		};
+	};
+	assert(saw0 && saw1, "both tuple indices must be emitted");
+};
+
+@test fn completion_tuple_index_via_pointer() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `*(int, uint)` should still let you complete indices via auto-deref,
+	// mirroring struct-field completion through a pointer.
+	comp_open(&s, "file:///mtp.ha",
+		`export fn f(pair: *(int, uint)) void = {\n\tpair.\n};\n`);
+
+	const items = run_completion(&s, out, "file:///mtp.ha", 1, 6, 1101.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "0"),
+		"auto-deref tuple completion should emit `0`"
+	);
+	assert(
+		labels_contains(labels, "1"),
+		"auto-deref tuple completion should emit `1`"
+	);
+};
+
 @test fn completion_struct_field_via_alias_type() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);

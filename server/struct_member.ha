@@ -20,6 +20,7 @@
 
 use analysis;
 use encoding::json;
+use fmt;
 use hare::ast;
 use hare::unparse;
 use lsp;
@@ -108,12 +109,20 @@ fn resolve_struct_member_at(
 	// consumed RUNE (see [[hare::lex::prevloc]]). For an access_field
 	// `recv.field`, that's the start of the last rune of `field`. We
 	// pass the field name's start offset and let
-	// find_access_field_in_subunit do the rune-aware match.
-	const af = match (find_access_field_in_subunit(&cache.pr.subunit,
+	// find_member_access_in_subunit do the rune-aware match.
+	const e = match (find_member_access_in_subunit(&cache.pr.subunit,
 		ident_range.0, name)) {
-	case let af: ast::access_field =>
-		yield af;
+	case let e: *ast::expr =>
+		yield e;
 	case void =>
+		return void;
+	};
+	// The walker matches both `recv.field` and the tuple index `recv.N`;
+	// the latter is handled by the tuple-member hover path, not here.
+	const af = match (e.expr) {
+	case let fd: ast::access_field =>
+		yield fd;
+	case =>
 		return void;
 	};
 	const recv_type = match (type_of_expr(s, doc, &cache.pr.subunit, af.object,
@@ -126,22 +135,25 @@ fn resolve_struct_member_at(
 	return lookup_member_in_type(s, recv_type, name, 0);
 };
 
-// --- AST walker: finds an access_field whose name ends at `field_start`. ---
+// --- AST walker: finds the member-access expression whose accessed token
+// ends at `field_start`, either a struct/union field access (`recv.field`)
+// or a tuple-index access (`recv.N`). Returns the wrapping *ast::expr so the
+// caller can dispatch on access_field vs access_tuple. ---
 // @param su: borrowed
 // @param name: borrowed
 // @returns: borrowed from su
-fn find_access_field_in_subunit(
+fn find_member_access_in_subunit(
 	su: *ast::subunit,
 	field_start: size,
 	name: str,
-) (ast::access_field | void) = {
+) (*ast::expr | void) = {
 	for (let i = 0z; i < len(su.decls); i += 1) {
 		const d = &su.decls[i];
 		if (field_start < d.loc.start.off: size) continue;
 		if (field_start > d.loc.end.off: size) continue;
-		match (scan_decl_for_field(d, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_decl_for_member(d, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
 	};
@@ -151,39 +163,40 @@ fn find_access_field_in_subunit(
 // @param d: borrowed
 // @param name: borrowed
 // @returns: borrowed from d
-fn scan_decl_for_field(
+fn scan_decl_for_member(
 	d: *ast::decl,
 	field_start: size,
 	name: str,
-) (ast::access_field | void) = {
+) (*ast::expr | void) = {
 	match (d.decl) {
 	case let f: ast::decl_func =>
 		match (f.body) {
 		case let e: *ast::expr =>
-			return scan_expr_for_field(e, field_start, name);
+			return scan_expr_for_member(e, field_start, name);
 		case null =>
 			return void;
 		};
 	case let g: ast::decl_global =>
 		match (g.init) {
 		case let e: *ast::expr =>
-			return scan_expr_for_field(e, field_start, name);
+			return scan_expr_for_member(e, field_start, name);
 		case null =>
 			return void;
 		};
 	case let c: ast::decl_const =>
-		return scan_expr_for_field(c.init, field_start, name);
+		return scan_expr_for_member(c.init, field_start, name);
 	case =>
 		return void;
 	};
 };
 
-// Walks `e` and returns the access_field whose loc.end.off lands on
-// `field_start` (the start of the field-name token) and whose field
-// text matches `name`. We use that equality because hare::lex tracks
-// `loc.end` as the START offset of the last consumed rune (see
-// [[hare::lex::prevloc]]), so for an access_field `recv.field` the
-// reported `loc.end.off` is the start of `field`.
+// Walks `e` and returns the member-access expr whose loc.end.off lands on
+// `field_start` (the start of the accessed token): an access_field whose
+// field text matches `name`, or an access_tuple whose numeric index token
+// ends there. We use that equality because hare::lex tracks `loc.end` as
+// the START offset of the last consumed rune (see [[hare::lex::prevloc]]),
+// so for `recv.field` / `recv.N` the reported `loc.end.off` is the start of
+// the field name / index token.
 //
 // Exhaustively recurses through every expression variant that can hold a
 // sub-expression so member accesses nested inside builtin forms like
@@ -192,11 +205,11 @@ fn scan_decl_for_field(
 // @param e: borrowed
 // @param name: borrowed
 // @returns: borrowed from e
-fn scan_expr_for_field(
+fn scan_expr_for_member(
 	e: *ast::expr,
 	field_start: size,
 	name: str,
-) (ast::access_field | void) = {
+) (*ast::expr | void) = {
 	if (field_start < e.loc.start.off: size) return void;
 	if (field_start > e.loc.end.off: size) return void;
 	match (e.expr) {
@@ -205,16 +218,16 @@ fn scan_expr_for_field(
 		case ast::access_identifier =>
 			return void;
 		case let idx: ast::access_index =>
-			match (scan_expr_for_field(idx.object, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_expr_for_member(idx.object, field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
-			return scan_expr_for_field(idx.index, field_start, name);
+			return scan_expr_for_member(idx.index, field_start, name);
 		case let fd: ast::access_field =>
-			match (scan_expr_for_field(fd.object, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_expr_for_member(fd.object, field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
 			// `hare::lex::prevloc` reports the start offset of the
@@ -225,202 +238,210 @@ fn scan_expr_for_field(
 			// multi-rune field names match.
 			if (fd.field == name &&
 					e.loc.end.off: size == field_start + last_rune_offset(name)) {
-				return fd;
+				return e;
 			};
 			return void;
 		case let tu: ast::access_tuple =>
-			match (scan_expr_for_field(tu.object, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_expr_for_member(tu.object, field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
-			return scan_expr_for_field(tu.value, field_start, name);
+			// Tuple index `recv.N`: the index is a plain numeric literal
+			// and `loc.end.off` (the start of the last consumed rune)
+			// lands on the index token, so the same rune-aware match used
+			// for access_field above applies here too.
+			if (tuple_index_value(tu.value) is size &&
+					e.loc.end.off: size == field_start + last_rune_offset(name)) {
+				return e;
+			};
+			return scan_expr_for_member(tu.value, field_start, name);
 		};
 	case let c: ast::call_expr =>
-		match (scan_expr_for_field(c.lvalue, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_expr_for_member(c.lvalue, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
 		for (let i = 0z; i < len(c.args); i += 1) {
-			match (scan_expr_for_field(c.args[i], field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_expr_for_member(c.args[i], field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
 		};
 		return void;
 	case let b: ast::binding_expr =>
 		for (let i = 0z; i < len(b.bindings); i += 1) {
-			match (scan_expr_for_field(b.bindings[i].init, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_expr_for_member(b.bindings[i].init, field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
 		};
 		return void;
 	case let cmp: ast::compound_expr =>
 		for (let i = 0z; i < len(cmp.exprs); i += 1) {
-			match (scan_expr_for_field(cmp.exprs[i], field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_expr_for_member(cmp.exprs[i], field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
 		};
 		return void;
 	case let i: ast::if_expr =>
-		match (scan_expr_for_field(i.cond, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_expr_for_member(i.cond, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		match (scan_expr_for_field(i.tbranch, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_expr_for_member(i.tbranch, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		return scan_opt_expr_for_field(i.fbranch, field_start, name);
+		return scan_opt_expr_for_member(i.fbranch, field_start, name);
 	case let fr: ast::for_expr =>
-		match (scan_opt_expr_for_field(fr.bindings, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_opt_expr_for_member(fr.bindings, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		match (scan_opt_expr_for_field(fr.cond, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_opt_expr_for_member(fr.cond, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		match (scan_opt_expr_for_field(fr.afterthought, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_opt_expr_for_member(fr.afterthought, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		match (scan_expr_for_field(fr.body, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_expr_for_member(fr.body, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		return scan_opt_expr_for_field(fr.else_branch, field_start, name);
+		return scan_opt_expr_for_member(fr.else_branch, field_start, name);
 	case let m: ast::match_expr =>
-		match (scan_expr_for_field(m.value, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_expr_for_member(m.value, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
 		for (let i = 0z; i < len(m.cases); i += 1) {
 			const mc = &m.cases[i];
 			for (let j = 0z; j < len(mc.exprs); j += 1) {
-				match (scan_expr_for_field(mc.exprs[j], field_start, name)) {
-				case let af: ast::access_field =>
-					return af;
+				match (scan_expr_for_member(mc.exprs[j], field_start, name)) {
+				case let m: *ast::expr =>
+					return m;
 				case void => void;
 				};
 			};
 		};
 		return void;
 	case let sw: ast::switch_expr =>
-		match (scan_expr_for_field(sw.value, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_expr_for_member(sw.value, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
 		for (let i = 0z; i < len(sw.cases); i += 1) {
 			const sc = &sw.cases[i];
 			for (let j = 0z; j < len(sc.options); j += 1) {
-				match (scan_expr_for_field(sc.options[j], field_start, name)) {
-				case let af: ast::access_field =>
-					return af;
+				match (scan_expr_for_member(sc.options[j], field_start, name)) {
+				case let m: *ast::expr =>
+					return m;
 				case void => void;
 				};
 			};
 			for (let j = 0z; j < len(sc.exprs); j += 1) {
-				match (scan_expr_for_field(sc.exprs[j], field_start, name)) {
-				case let af: ast::access_field =>
-					return af;
+				match (scan_expr_for_member(sc.exprs[j], field_start, name)) {
+				case let m: *ast::expr =>
+					return m;
 				case void => void;
 				};
 			};
 		};
 		return void;
 	case let bn: ast::binarithm_expr =>
-		match (scan_expr_for_field(bn.lvalue, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_expr_for_member(bn.lvalue, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		return scan_expr_for_field(bn.rvalue, field_start, name);
+		return scan_expr_for_member(bn.rvalue, field_start, name);
 	case let u: ast::unarithm_expr =>
-		return scan_expr_for_field(u.operand, field_start, name);
+		return scan_expr_for_member(u.operand, field_start, name);
 	case let ag: ast::assign_expr =>
-		match (scan_opt_expr_for_field(ag.object, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_opt_expr_for_member(ag.object, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		return scan_expr_for_field(ag.value, field_start, name);
+		return scan_expr_for_member(ag.value, field_start, name);
 	case let ca: ast::cast_expr =>
-		return scan_expr_for_field(ca.value, field_start, name);
+		return scan_expr_for_member(ca.value, field_start, name);
 	case let d: ast::defer_expr =>
-		return scan_expr_for_field(d: *ast::expr, field_start, name);
+		return scan_expr_for_member(d: *ast::expr, field_start, name);
 	case let p: ast::propagate_expr =>
-		return scan_expr_for_field(p: *ast::expr, field_start, name);
+		return scan_expr_for_member(p: *ast::expr, field_start, name);
 	case let p: ast::error_assert_expr =>
-		return scan_expr_for_field(p: *ast::expr, field_start, name);
+		return scan_expr_for_member(p: *ast::expr, field_start, name);
 	case let f: ast::free_expr =>
-		return scan_expr_for_field(f: *ast::expr, field_start, name);
+		return scan_expr_for_member(f: *ast::expr, field_start, name);
 	case let l: ast::len_expr =>
-		return scan_expr_for_field(l: *ast::expr, field_start, name);
+		return scan_expr_for_member(l: *ast::expr, field_start, name);
 	case let o: ast::offset_expr =>
-		return scan_expr_for_field(o: *ast::expr, field_start, name);
+		return scan_expr_for_member(o: *ast::expr, field_start, name);
 	case let a: ast::alloc_expr =>
-		match (scan_expr_for_field(a.init, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_expr_for_member(a.init, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		return scan_opt_expr_for_field(a.capacity, field_start, name);
+		return scan_opt_expr_for_member(a.capacity, field_start, name);
 	case let a: ast::append_expr =>
-		return scan_append_insert_for_field(a, field_start, name);
+		return scan_append_insert_for_member(a, field_start, name);
 	case let a: ast::insert_expr =>
-		return scan_append_insert_for_field(a, field_start, name);
+		return scan_append_insert_for_member(a, field_start, name);
 	case let a: ast::assert_expr =>
-		match (scan_opt_expr_for_field(a.cond, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_opt_expr_for_member(a.cond, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		return scan_opt_expr_for_field(a.message, field_start, name);
+		return scan_opt_expr_for_member(a.message, field_start, name);
 	case let d: ast::delete_expr =>
-		return scan_expr_for_field(d.object, field_start, name);
+		return scan_expr_for_member(d.object, field_start, name);
 	case let bk: ast::break_expr =>
-		return scan_opt_expr_for_field(bk.value, field_start, name);
+		return scan_opt_expr_for_member(bk.value, field_start, name);
 	case let y: ast::yield_expr =>
-		return scan_opt_expr_for_field(y.value, field_start, name);
+		return scan_opt_expr_for_member(y.value, field_start, name);
 	case let r: ast::return_expr =>
-		return scan_opt_expr_for_field(r, field_start, name);
+		return scan_opt_expr_for_member(r, field_start, name);
 	case let sl: ast::slice_expr =>
-		match (scan_expr_for_field(sl.object, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_expr_for_member(sl.object, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		match (scan_opt_expr_for_field(sl.start, field_start, name)) {
-		case let af: ast::access_field =>
-			return af;
+		match (scan_opt_expr_for_member(sl.start, field_start, name)) {
+		case let m: *ast::expr =>
+			return m;
 		case void => void;
 		};
-		return scan_opt_expr_for_field(sl.end, field_start, name);
+		return scan_opt_expr_for_member(sl.end, field_start, name);
 	case let lit: ast::literal_expr =>
-		return scan_literal_for_field(lit, field_start, name);
+		return scan_literal_for_member(lit, field_start, name);
 	case let v: ast::variadic_expr =>
 		match (v) {
 		case ast::vastart_expr =>
 			return void;
 		case let va: ast::vaarg_expr =>
-			return scan_expr_for_field(va.ap, field_start, name);
+			return scan_expr_for_member(va.ap, field_start, name);
 		case let ve: ast::vaend_expr =>
-			return scan_expr_for_field(ve: *ast::expr, field_start, name);
+			return scan_expr_for_member(ve: *ast::expr, field_start, name);
 		};
 	case =>
 		return void;
@@ -432,14 +453,14 @@ fn scan_expr_for_field(
 // @param e: borrowed
 // @param name: borrowed
 // @returns: borrowed from e
-fn scan_opt_expr_for_field(
+fn scan_opt_expr_for_member(
 	e: nullable *ast::expr,
 	field_start: size,
 	name: str,
-) (ast::access_field | void) = {
+) (*ast::expr | void) = {
 	match (e) {
 	case let p: *ast::expr =>
-		return scan_expr_for_field(p, field_start, name);
+		return scan_expr_for_member(p, field_start, name);
 	case null =>
 		return void;
 	};
@@ -450,52 +471,52 @@ fn scan_opt_expr_for_field(
 //
 // @param name: borrowed
 // @returns: borrowed
-fn scan_append_insert_for_field(
+fn scan_append_insert_for_member(
 	a: ast::append_expr,
 	field_start: size,
 	name: str,
-) (ast::access_field | void) = {
-	match (scan_expr_for_field(a.object, field_start, name)) {
-	case let af: ast::access_field =>
-		return af;
+) (*ast::expr | void) = {
+	match (scan_expr_for_member(a.object, field_start, name)) {
+	case let m: *ast::expr =>
+		return m;
 	case void => void;
 	};
-	match (scan_expr_for_field(a.value, field_start, name)) {
-	case let af: ast::access_field =>
-		return af;
+	match (scan_expr_for_member(a.value, field_start, name)) {
+	case let m: *ast::expr =>
+		return m;
 	case void => void;
 	};
-	return scan_opt_expr_for_field(a.length, field_start, name);
+	return scan_opt_expr_for_member(a.length, field_start, name);
 };
 
 // Helper: walk into a literal expression's sub-expressions.
 //
 // @param name: borrowed
 // @returns: borrowed
-fn scan_literal_for_field(
+fn scan_literal_for_member(
 	lit: ast::literal_expr,
 	field_start: size,
 	name: str,
-) (ast::access_field | void) = {
+) (*ast::expr | void) = {
 	match (lit) {
 	case ast::plain_literal =>
 		return void;
 	case let a: ast::array_literal =>
 		for (let i = 0z; i < len(a.values); i += 1) {
-			match (scan_expr_for_field(a.values[i], field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_expr_for_member(a.values[i], field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
 		};
 		return void;
 	case let s: ast::struct_literal =>
-		return scan_struct_literal_for_field(s, field_start, name);
+		return scan_struct_literal_for_member(s, field_start, name);
 	case let t: ast::tuple_literal =>
 		for (let i = 0z; i < len(t); i += 1) {
-			match (scan_expr_for_field(t[i], field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_expr_for_member(t[i], field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
 		};
@@ -505,23 +526,23 @@ fn scan_literal_for_field(
 
 // @param name: borrowed
 // @returns: borrowed
-fn scan_struct_literal_for_field(
+fn scan_struct_literal_for_member(
 	sl: ast::struct_literal,
 	field_start: size,
 	name: str,
-) (ast::access_field | void) = {
+) (*ast::expr | void) = {
 	for (let i = 0z; i < len(sl.fields); i += 1) {
 		match (sl.fields[i]) {
 		case let v: ast::struct_value =>
-			match (scan_expr_for_field(v.init, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_expr_for_member(v.init, field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
 		case let sub: *ast::struct_literal =>
-			match (scan_struct_literal_for_field(*sub, field_start, name)) {
-			case let af: ast::access_field =>
-				return af;
+			match (scan_struct_literal_for_member(*sub, field_start, name)) {
+			case let m: *ast::expr =>
+				return m;
 			case void => void;
 			};
 		};
@@ -1859,4 +1880,270 @@ fn render_field_signature(name: str, t: *ast::_type) str = {
 		return strings::dup("(field)")!;
 	};
 	return strings::dup(memio::string(&buf)!)!;
+};
+
+// True when `s` is a non-empty run of ASCII digits. A tuple index (`recv.0`)
+// is lexed as such a run; struct/union field names never start with a digit,
+// so this cheaply distinguishes a tuple-index access from a field access.
+//
+// @param s: borrowed
+fn is_all_digits(s: str) bool = {
+	const b = strings::toutf8(s);
+	if (len(b) == 0) return false;
+	for (let i = 0z; i < len(b); i += 1) {
+		if (b[i] < '0': u8 || b[i] > '9': u8) return false;
+	};
+	return true;
+};
+
+// Renders a tuple element's signature line for hover:
+//   (tuple field N): type
+//
+// @param t: borrowed
+// @returns: owned
+fn render_tuple_field_signature(idx: size, t: *ast::_type) str = {
+	let buf = memio::dynamic();
+	defer lsp::safe_close(&buf);
+	const prefix = fmt::asprintf("(tuple field {}): ", idx)!;
+	defer free(prefix);
+	match (memio::concat(&buf, prefix)) {
+	case size => void;
+	case =>
+		return strings::dup("(tuple field)")!;
+	};
+	match (unparse::_type(&buf, &unparse::syn_nowrap, t)) {
+	case size => void;
+	case =>
+		return strings::dup("(tuple field)")!;
+	};
+	return strings::dup(memio::string(&buf)!)!;
+};
+
+// A resolved tuple-index access (`recv.N`).
+type tuple_member_match = struct {
+	// The numeric index N.
+	idx: size,
+	// The Nth element's type, plus the file context that owns it (for
+	// computing LSP positions in go-to-definition). Borrowed.
+	//
+	// @borrowed
+	elem: located_type,
+};
+
+// Top-level entry point: if `off` is on a tuple-index access (`recv.N`),
+// resolves the receiver and returns the index plus the element's type as a
+// [[tuple_member_match]]. Returns void otherwise. The cursor must sit on an
+// all-digit token preceded by a single `.`; struct/union field names never
+// start with a digit, so the all-digit test cleanly separates the two member
+// forms. The element type comes from [[type_of_expr]], which already chases
+// the receiver through bindings, calls, aliases, and pointers.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @returns: borrowed
+fn resolve_tuple_member_at(
+	s: *server,
+	doc: *document,
+	data: []u8,
+	off: size,
+) (tuple_member_match | void) = {
+	const ident_range = match (analysis::ident_at(data, off)) {
+	case let r: (size, size) =>
+		yield r;
+	case void =>
+		return void;
+	};
+	if (!is_member_access_at(data, ident_range.0)) return void;
+	const name = strings::fromutf8(data[ident_range.0..ident_range.1])!;
+	if (!is_all_digits(name)) return void;
+	const cache = parse_of(doc);
+	const e = match (find_member_access_in_subunit(&cache.pr.subunit,
+		ident_range.0, name)) {
+	case let e: *ast::expr =>
+		yield e;
+	case void =>
+		return void;
+	};
+	const tu = match (e.expr) {
+	case let tu: ast::access_tuple =>
+		yield tu;
+	case =>
+		return void;
+	};
+	const idx = match (tuple_index_value(tu.value)) {
+	case let i: size =>
+		yield i;
+	case void =>
+		return void;
+	};
+	// type_of_expr on the access_tuple node resolves `recv.N` straight to
+	// the Nth element's type.
+	const elem = match (type_of_expr(s, doc, &cache.pr.subunit, e, 0)) {
+	case let lt: located_type =>
+		yield lt;
+	case void =>
+		return void;
+	};
+	return tuple_member_match { idx = idx, elem = elem };
+};
+
+// Tries to send a hover response for a tuple-index access (`recv.N`).
+// Returns true if it handled the request (sent a response); false otherwise.
+// The element type is rendered the same way struct-member hover renders a
+// field type. Tuple elements carry no per-field name, doc comment, or
+// ownership annotation, so only the type is shown.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+export fn try_send_tuple_member_hover(
+	s: *server,
+	r: lsp::request,
+	doc: *document,
+	data: []u8,
+	off: size,
+) bool = {
+	const m = match (resolve_tuple_member_at(s, doc, data, off)) {
+	case let m: tuple_member_match =>
+		yield m;
+	case void =>
+		return false;
+	};
+	const ident_range = match (analysis::ident_at(data, off)) {
+	case let r: (size, size) =>
+		yield r;
+	case void =>
+		return false;
+	};
+	const sig = render_tuple_field_signature(m.idx, m.elem.t);
+	defer free(sig);
+	const md = build_hover_markdown_with_facts(s, doc, sig, "", "");
+	defer free(md);
+
+	const enc = position_encoding(s);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_range.0);
+	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		ident_range.1);
+
+	let result = json::newobject();
+	let contents = json::newobject();
+	json::set(&contents, "kind", "markdown": json::value)!;
+	json::set(&contents, "value", md: json::value)!;
+	json::put(&result, "contents", contents)!;
+	let range = json::newobject();
+	let s_obj = json::newobject();
+	json::put(&s_obj, "line", start_pos.line: f64)!;
+	json::put(&s_obj, "character", start_pos.character: f64)!;
+	let e_obj = json::newobject();
+	json::put(&e_obj, "line", end_pos.line: f64)!;
+	json::put(&e_obj, "character", end_pos.character: f64)!;
+	json::put(&range, "start", s_obj)!;
+	json::put(&range, "end", e_obj)!;
+	json::put(&result, "range", range)!;
+	const v: json::value = result;
+	defer json::finish(v);
+	match (lsp::encode_response_result(s.out, r.id, v)) {
+	case size => void;
+	case => void;
+	};
+	return true;
+};
+
+// Tries to send a definition / declaration / implementation response for a
+// tuple-index access (`recv.N`). Returns true if it handled the request.
+// A tuple element has no name declaration, so the closest analog of a
+// struct field's declaration is the element's type node within the tuple
+// type literal: for `recv.0` of `(rune, str)` we jump to the `rune` token,
+// which may live in another file (e.g. a stdlib tuple reached through an
+// alias chain).
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+export fn try_send_tuple_member_definition(
+	s: *server,
+	r: lsp::request,
+	doc: *document,
+	data: []u8,
+	off: size,
+) bool = {
+	const m = match (resolve_tuple_member_at(s, doc, data, off)) {
+	case let m: tuple_member_match =>
+		yield m;
+	case void =>
+		return false;
+	};
+	send_location_in_file(s, r.id, m.elem.uri, m.elem.text, m.elem.t.loc);
+	return true;
+};
+
+// Tries to send a type-definition response for a member access (`recv.field`
+// or `recv.N`). Returns true if the cursor is on a member access that this
+// handler owns, false if it is not a member access (so the caller can fall
+// through to bare-identifier handling).
+//
+// `type_of_expr` on the member-access node yields the member's type in both
+// the struct-field and tuple-index cases. If that type is a named alias we
+// jump to its declaration; otherwise (builtin, pointer, slice, tagged union,
+// anonymous struct, etc.) we send null - matching how bare-identifier
+// type-definition only follows named aliases. We own the response for any
+// member access so a same-named top-level type cannot hijack the result.
+//
+// @param s: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+export fn try_send_member_type_definition(
+	s: *server,
+	r: lsp::request,
+	doc: *document,
+	data: []u8,
+	off: size,
+) bool = {
+	const ident_range = match (analysis::ident_at(data, off)) {
+	case let rng: (size, size) =>
+		yield rng;
+	case void =>
+		return false;
+	};
+	if (!is_member_access_at(data, ident_range.0)) return false;
+	const name = strings::fromutf8(data[ident_range.0..ident_range.1])!;
+	const cache = parse_of(doc);
+	const e = match (find_member_access_in_subunit(&cache.pr.subunit,
+		ident_range.0, name)) {
+	case let e: *ast::expr =>
+		yield e;
+	case void =>
+		// A `.`-preceded token that is not actually a member-access node
+		// (e.g. the fractional digits of a float literal). Let the caller
+		// fall through to its normal handling.
+		return false;
+	};
+	// From here the cursor is on a real member access; we own the response.
+	const lt = match (type_of_expr(s, doc, &cache.pr.subunit, e, 0)) {
+	case let lt: located_type =>
+		yield lt;
+	case void =>
+		send_null_result(s, r.id);
+		return true;
+	};
+	const alias = match (lt.t.repr) {
+	case let a: ast::alias_type =>
+		yield a;
+	case =>
+		send_null_result(s, r.id);
+		return true;
+	};
+	const lookup_doc = find_doc_for_uri(s, lt.uri);
+	const d = match (resolve_alias_decl(s, lookup_doc, lt.uri, alias)) {
+	case let d: *ast::decl =>
+		yield d;
+	case void =>
+		send_null_result(s, r.id);
+		return true;
+	};
+	const (text, decl_uri) = locate_decl_anywhere(s, d, lt);
+	send_location_in_file(s, r.id, decl_uri, text, d.loc);
+	return true;
 };
