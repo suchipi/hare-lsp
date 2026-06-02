@@ -51,6 +51,11 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	// otherwise indistinguishable from a top-level name.
 	if (try_send_struct_member_hover(s, r, doc, data, off)) return;
 
+	// Tuple-index hover: cursor on `<receiver>.<N>`. The digit token is
+	// not a struct field, so this is tried separately after struct-member
+	// hover declines.
+	if (try_send_tuple_member_hover(s, r, doc, data, off)) return;
+
 	// Module-name hover: a `use foo::bar;` statement, a `::`
 	// separator, or a code-position qualifier like `bufio` in
 	// `bufio::newscanner`. If the cursor lands on a resolvable module
@@ -291,6 +296,11 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 		doc.buf.line_index, position_encoding(s),
 		analysis::position { line = pos.line, character = pos.character });
 	const data = analysis::bytes(&doc.buf);
+	// Member access (`recv.field` / `recv.N`): resolve the member's type
+	// and jump to that type's declaration. Tried before bare-identifier
+	// handling because a member token is otherwise indistinguishable from
+	// a top-level name and would resolve against the wrong symbol.
+	if (try_send_member_type_definition(s, r, doc, data, off)) return;
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
 		yield r;
@@ -455,6 +465,9 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 		analysis::position { line = pos.line, character = pos.character });
 	const data = analysis::bytes(&doc.buf);
 	if (try_send_struct_member_definition(s, r, doc, data, off)) return;
+	// Tuple-index access (`recv.N`): jump to the Nth element's type node
+	// within the tuple type. Tried after the struct path declines.
+	if (try_send_tuple_member_definition(s, r, doc, data, off)) return;
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
 		yield r;

@@ -25,6 +25,7 @@
 
 use analysis;
 use encoding::json;
+use fmt;
 use hare::ast;
 use hare::unparse;
 use lsp;
@@ -1289,6 +1290,19 @@ fn emit_struct_member_completions(
 		emit_struct_member_completions(s, doc,
 			located_type { t = u, text = text, uri = uri }, partial, arr, seen,
 			depth + 1);
+	case let tup: ast::tuple_type =>
+		// Tuple elements are addressed by position (`recv.0`), so offer
+		// one item per index. Indices are inherently unique within a
+		// single tuple, so the `seen` dedup used for struct fields isn't
+		// needed here.
+		for (let i = 0z; i < len(tup); i += 1) {
+			const idx_str = fmt::asprintf("{}", i)!;
+			defer free(idx_str);
+			if (len(partial) > 0 && !strings::hasprefix(idx_str, partial)) {
+				continue;
+			};
+			emit_tuple_index_item(i, tup[i], arr);
+		};
 	case => void;
 	};
 };
@@ -1379,6 +1393,35 @@ fn emit_struct_field_item(
 		json::set(&item, "documentation", docs: json::value)!;
 	};
 	const sort = strings::concat(SORT_MEMBER, f.name)!;
+	defer free(sort);
+	json::set(&item, "sortText", sort: json::value)!;
+	let a = *arr;
+	append(a, item: json::value)!;
+	*arr = a;
+};
+
+// Emits a completion item for tuple element `idx` of type `t`. Tuple
+// elements are addressed positionally (`recv.0`), so the label is the
+// decimal index and the detail is the element type. The sortText zero-pads
+// the index so members order numerically (0,1,...,10) rather than
+// lexicographically (0,1,10,2).
+//
+// @param t: borrowed
+// @param arr: borrowed
+fn emit_tuple_index_item(
+	idx: size,
+	t: *ast::_type,
+	arr: *[]json::value,
+) void = {
+	let item = json::newobject();
+	const label = fmt::asprintf("{}", idx)!;
+	defer free(label);
+	json::set(&item, "label", label: json::value)!;
+	json::put(&item, "kind", CIK_FIELD)!;
+	const type_str = render_field_type(t);
+	defer free(type_str);
+	json::set(&item, "detail", type_str: json::value)!;
+	const sort = fmt::asprintf("{}{:.4}", SORT_MEMBER, idx)!;
 	defer free(sort);
 	json::set(&item, "sortText", sort: json::value)!;
 	let a = *arr;
