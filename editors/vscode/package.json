@@ -260,5 +260,11 @@
     "mocha": "^11.7.6",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6"
+  },
+  "overrides": {
+    "tmp": "^0.2.7",
+    "qs": "^6.15.2",
+    "serialize-javascript": "^7.0.5",
+    "diff": "^8.0.3"
   }
 }
