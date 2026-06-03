@@ -426,8 +426,9 @@ use     io;
 	defer free(did_open);
 	send(&s, strings::toutf8(did_open));
 
-	// tabSize 8: the condition is 91 columns and must wrap after the
-	// outer `&&`, so the server returns exactly one edit.
+	// tabSize 8: the condition is 91 columns and must wrap. Per the
+	// Hare style guide the trailing `&&` moves to the start of the
+	// continuation line, so the server returns exactly one edit.
 	send(&s,
 		strings::toutf8(
 			`{"jsonrpc":"2.0","id":906,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///tabsize.ha"},"options":{"tabSize":8,"insertSpaces":false}}}`
@@ -442,12 +443,12 @@ use     io;
 	const new8 =
 		*(json::get(&(arr8[0] as json::object), "newText") as *json::value) as str;
 	assert(
-		strings::contains(new8, "len(part) > 0 &&\n"),
-		"tabSize 8 wraps the condition after the outer &&"
+		strings::contains(new8, "len(part) > 0\n"),
+		"tabSize 8 wraps the condition before the trailing &&"
 	);
 	assert(
-		strings::contains(new8, "\n\t\t\tstrings::sub(part, 0, 1)"),
-		"the wrapped continuation is indented twice past the `if`"
+		strings::contains(new8, "\n\t\t\t&& strings::sub(part, 0, 1)"),
+		"the wrapped continuation starts with && indented twice past the `if`"
 	);
 
 	// tabSize 1: the condition fits on one line, so the already-

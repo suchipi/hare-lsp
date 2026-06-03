@@ -100,3 +100,40 @@ fn fmt_operators_roundtrip(src: str) str = {
 		"associative `*` should still flatten"
 	);
 };
+
+@test fn fmt_logical_chain_fills_continuation_lines() void = {
+	// A long `||` chain that overflows 80 cols must pack as many
+	// operands per line as fit on EVERY line (greedy fill), not just
+	// the first. Regression for the nested-`group` layout, which broke
+	// the outermost operator first and contributed exactly one operand
+	// per continuation line ("staircase") after the first wrap. Per the
+	// Hare style guide the operator also moves to the START of each
+	// continuation line.
+	const src =
+		"export fn f(b: u8) bool = {\n"
+		"\tif (b == 'a' || b == 'b' || b == 'c' || b == 'd' || b == 'e'"
+		" || b == 'f' || b == 'g' || b == 'h' || b == 'i' || b == 'j')"
+		" return true;\n"
+		"\treturn false;\n"
+		"};\n";
+	const out = fmt_operators_roundtrip(src);
+	defer free(out);
+	// The chain must wrap, with the operator at the START of the
+	// continuation line, double-indented (if + 2) below the `if`.
+	assert(
+		strings::contains(out, "\n\t\t\t|| b == 'g'"),
+		"continuation lines must start with the operator, indented twice"
+	);
+	// Continuation lines must pack multiple operands (fill): `g` and
+	// `h` share one wrapped line rather than each getting their own.
+	assert(
+		strings::contains(out, "|| b == 'g' || b == 'h'"),
+		"continuation lines must pack multiple operands (fill), not one per line"
+	);
+	// The operator must not be left dangling at the end of a wrapped
+	// line (the old operator-at-end staircase).
+	assert(
+		!strings::contains(out, "b == 'f' ||\n"),
+		"operator must move to the next line, not trail the wrapped line"
+	);
+};

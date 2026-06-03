@@ -493,3 +493,45 @@ fn fmt_literals_roundtrip(src: str) str = {
 		"multi-option case must have exactly one space before `=>`"
 	);
 };
+
+@test fn fmt_for_predicate_breaks_at_clause_boundaries() void = {
+	// An accumulator `for (init; cond; afterthought)` header too wide
+	// for one line must break at the `;` clause boundaries and pack
+	// clauses greedily, NOT break inside a clause (e.g. at the
+	// binding's `=` or the afterthought's `+=`). Regression for the
+	// flat-concat layout whose only break points were those internal
+	// `=`/`+=` softlines.
+	const src =
+		"export fn g(items: []int) void = {\n"
+		"\tfor (let index = 0z; index < len(items) && items[index] != 0;"
+		" index += 1) {\n"
+		"\t\titems[index] = 0;\n"
+		"\t};\n"
+		"};\n";
+	const out = fmt_literals_roundtrip(src);
+	defer free(out);
+	// The init clause stays intact on one line - never split at `=`.
+	assert(
+		strings::contains(out, "let index = 0z;"),
+		"init clause must stay intact, not break at `=`"
+	);
+	assert(
+		!strings::contains(out, "let index =\n"),
+		"for header must not break inside the init clause at `=`"
+	);
+	// The header wraps at a `;` clause boundary: the cond clause ends a
+	// line and the afterthought moves to its own line, double-indented.
+	assert(
+		strings::contains(out, "!= 0;\n"),
+		"wide for header should wrap after a clause's `;`"
+	);
+	assert(
+		strings::contains(out, "\n\t\t\tindex += 1) {"),
+		"afterthought clause moves to its own line, indented twice"
+	);
+	// The afterthought must not be split at `+=` either.
+	assert(
+		!strings::contains(out, "index +=\n"),
+		"for header must not break inside the afterthought at `+=`"
+	);
+};
