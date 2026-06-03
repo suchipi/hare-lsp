@@ -88,11 +88,11 @@ HA_TEST_SOURCES = $(HA_SOURCES) $(shell find e2e -name '*.ha' 2>/dev/null)
 
 hare-lsp: hare/parse/.stamp $(HA_SOURCES)
 	mkdir -p .cache
-	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) build $(HAREFLAGS) -o hare-lsp ./cmd/hare_lsp
+	HAREPATH="$(HAREPATH)" HARECACHE="$(HOME)/.cache/hare" $(HARE) build $(HAREFLAGS) -o hare-lsp ./cmd/hare_lsp
 
 harefmt: hare/parse/.stamp $(HA_SOURCES)
 	mkdir -p .cache
-	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) build $(HAREFLAGS) -o harefmt ./cmd/harefmt
+	HAREPATH="$(HAREPATH)" HARECACHE="$(HOME)/.cache/hare" $(HARE) build $(HAREFLAGS) -o harefmt ./cmd/harefmt
 
 # `hare test -o <path>` builds a self-contained test binary that takes
 # glob patterns over `module::test_name` as arguments and only runs the
@@ -105,7 +105,7 @@ harefmt: hare/parse/.stamp $(HA_SOURCES)
 # lsp, gitignore, e2e, cmd::harefmt, and cmd::hare_lsp.
 .tmp/all-tests: hare/parse/.stamp $(HA_TEST_SOURCES)
 	mkdir -p .cache .tmp
-	HAREPATH="$(HAREPATH)" HARECACHE="$(PWD)/.cache" $(HARE) test $(HAREFLAGS) -o $@
+	HAREPATH="$(HAREPATH)" HARECACHE="$(HOME)/.cache/hare" $(HARE) test $(HAREFLAGS) -o $@
 
 # Sharded parallel test runner. The non-e2e suites finish in a handful
 # of seconds combined; the e2e suite is split into six alphabetical

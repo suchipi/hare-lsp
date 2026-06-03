@@ -32,7 +32,7 @@ Before committing, run `./harefmt --tab-width 2 --write .` to format Hare files 
 
 ```sh
 HAREPATH="$PWD:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib" \
-  HARECACHE="$PWD/.cache" \
+  HARECACHE="$HOME/.cache/hare" \
   hare test definition_falls_back_to_workspace_index_for_cross_file
 ```
 

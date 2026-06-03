@@ -18,7 +18,7 @@ To run a single e2e test:
 
 ```sh
 HAREPATH="$PWD:/usr/local/src/hare/third-party:/usr/local/src/hare/stdlib" \
-  HARECACHE="$PWD/.cache" \
+  HARECACHE="$HOME/.cache/hare" \
   hare test e2e_initialize_returns_response e2e
 ```
 
