@@ -1319,6 +1319,75 @@ fn binop_is_left_assoc_only(op: binarithm_op) bool = {
 	};
 };
 
+// Flattens the left-associative chain of binary operators that all
+// share precedence `prec` into flat operand / operator lists, in
+// source (left-to-right) order. The AST nests `a || b || c` as
+// `(a || b) || c`, so we walk the left spine and collect each operand
+// and operator. `&&` / `||` / `^^` are associative, so a same-
+// precedence chain flattens with no added parens.
+//
+// @param b: borrowed
+// @param operands: borrowed
+// @param ops: borrowed
+fn collect_binop_chain(
+	b: *ast::binarithm_expr,
+	prec: uint,
+	operands: *[]*ast::expr,
+	ops: *[]binarithm_op,
+) void = {
+	match (b.lvalue.expr) {
+	case let lb: ast::binarithm_expr =>
+		if (binprec(lb.op) == prec) {
+			collect_binop_chain(&lb, prec, operands, ops);
+		} else {
+			let o = *operands;
+			append(o, b.lvalue)!;
+			*operands = o;
+		};
+	case =>
+		let o = *operands;
+		append(o, b.lvalue)!;
+		*operands = o;
+	};
+	let os = *ops;
+	append(os, b.op)!;
+	*ops = os;
+	let o = *operands;
+	append(o, b.rvalue)!;
+	*operands = o;
+};
+
+// Builds the greedy-fill doc for a flattened logical-operator chain.
+// `operands` has exactly one more entry than `ops`. The first operand
+// renders alone; every later operand carries its preceding operator
+// (`ops[k - 1]`) as a prefix, so when the fill breaks the operator
+// lands at the START of the continuation line (Hare style).
+//
+// @param operands: borrowed
+// @param ops: borrowed
+// @param bc: borrowed
+fn build_binop_fill(
+	operands: []*ast::expr,
+	ops: []binarithm_op,
+	bc: *build_ctx,
+	prec: uint,
+) doc = {
+	let fill_items: []doc = [];
+	for (let k = 0z; k < len(operands); k += 1) {
+		let piece: []doc = [];
+		if (k > 0) {
+			append(piece, text(binarithm_op_str(ops[k - 1])))!;
+			append(piece, text(" "))!;
+		};
+		append(piece, build_binexpr_operand(operands[k], bc, prec))!;
+		append(fill_items, concat(piece))!;
+		if (k + 1 < len(operands)) {
+			append(fill_items, line(" "))!;
+		};
+	};
+	return fill(fill_items);
+};
+
 // @param b: borrowed
 // @param bc: borrowed
 fn build_binarithm_expr(
@@ -1327,35 +1396,57 @@ fn build_binarithm_expr(
 	parent_prec: uint,
 ) doc = {
 	const prec = binprec(b.op);
-	let items: []doc = [];
 	const need_outer_parens = prec < parent_prec;
-	if (need_outer_parens) append(items, text("("))!;
 
 	// Only the lowest-precedence operators (`&&`, `||`, `^^`) get a
-	// soft break point AFTER the operator; arithmetic, shift, and
-	// comparison operators stay on one line, since wrapping a
-	// `len(id) >\n\t0` mid-comparison is uglier than letting the
-	// line run a few cols past 80. Logical chains commonly span
-	// lines (e.g. `if (a && b &&\n\t\tc && d)`) so they keep their
-	// soft break.
-	const sep: doc = if (prec <= binprec_lor()) line(" ") else text(" ");
+	// soft break point; arithmetic, shift, and comparison operators
+	// stay on one line, since wrapping a `len(id) >\n\t0` mid-
+	// comparison is uglier than letting the line run a few cols past
+	// 80. Logical chains commonly span lines (e.g.
+	// `if (a && b\n\t\t&& c && d)`) so they keep their soft break.
+	//
+	// A same-precedence logical chain is flattened into one `fill`
+	// rather than the nested `group`s the AST shape would produce.
+	// With nested groups the OUTERMOST group breaks first and each
+	// enclosing level contributes exactly one more operand per line,
+	// so a long chain staircases one-operand-per-line after the first
+	// break. A flat fill instead keeps packing operands onto each line
+	// until the column limit, then breaks - matching the style guide
+	// ("keep filling each line until reaching the column limit before
+	// breaking onto a new line"). The Hare style guide also places the
+	// operator at the START of the continuation line, so each operand
+	// after the first carries its preceding operator as a prefix; a
+	// break lands before the operator.
+	if (prec <= binprec_lor()) {
+		let operands: []*ast::expr = [];
+		defer free(operands);
+		let ops: []binarithm_op = [];
+		defer free(ops);
+		collect_binop_chain(b, prec, &operands, &ops);
+		const chain = build_binop_fill(operands, ops, bc, prec);
+		if (!need_outer_parens) return chain;
+		let wrapped: []doc = [];
+		append(wrapped, text("("))!;
+		append(wrapped, chain)!;
+		append(wrapped, text(")"))!;
+		return concat(wrapped);
+	};
+
+	// Arithmetic / shift / comparison operators stay on one line.
 	// Right child of a non-associative op (e.g. `a - (b - 1)`) must
 	// keep its own parens even at equal precedence; bumping the
 	// effective parent precedence by one forces the inner
 	// `build_binarithm_expr` to wrap.
+	let items: []doc = [];
+	if (need_outer_parens) append(items, text("("))!;
 	const rvalue_parent_prec = if (binop_is_left_assoc_only(
 				b.op)) prec + 1u else prec;
 	append(items, build_binexpr_operand(b.lvalue, bc, prec))!;
 	append(items, text(" "))!;
 	append(items, text(binarithm_op_str(b.op)))!;
-	append(items, sep)!;
+	append(items, text(" "))!;
 	append(items, build_binexpr_operand(b.rvalue, bc, rvalue_parent_prec))!;
-
-	if (need_outer_parens) {
-		append(items, text(")"))!;
-		return concat(items);
-	};
-	if (prec <= binprec_lor()) return group(items);
+	if (need_outer_parens) append(items, text(")"))!;
 	return concat(items);
 };
 
@@ -1570,23 +1661,25 @@ fn build_for_expr(f: *ast::for_expr, bc: *build_ctx) doc = {
 		yield "=>";
 	};
 
-	match (f.bindings) {
-	case let b: *ast::expr =>
-		const be = b.expr as ast::binding_expr;
-		append(items, build_binding_expr(&be, bc, op))!;
-		if (f.kind == ast::for_kind::ACCUMULATOR) {
-			append(items, text("; "))!;
-		};
-	case null => void;
-	};
-
 	if (f.kind == ast::for_kind::ACCUMULATOR) {
-		append(items, build_expr_doc(f.cond as *ast::expr, bc))!;
-		match (f.afterthought) {
+		// `for (init; cond; afterthought)` - the `;`-separated clauses
+		// become a `fill` so a header too long for one line breaks at
+		// the `;` boundaries and packs as many clauses per line as fit,
+		// instead of breaking inside a clause (e.g. at a binding's `=`).
+		// `nest(2, ...)` double-indents any wrapped continuation: the
+		// loop body opens a block at indent + 1, so the style guide
+		// requires the continuation at indent + 2 to stay visually
+		// distinct from it. A header that fits emits flat, leaving the
+		// nest a no-op.
+		append(items, nest(2, build_for_predicate(f, op, bc)))!;
+	} else {
+		// Each / iterator loops have a single binding clause and no
+		// `;` separators, so there's nothing to fill.
+		match (f.bindings) {
+		case let b: *ast::expr =>
+			const be = b.expr as ast::binding_expr;
+			append(items, build_binding_expr(&be, bc, op))!;
 		case null => void;
-		case let e: *ast::expr =>
-			append(items, text("; "))!;
-			append(items, build_expr_doc(e, bc))!;
 		};
 	};
 	append(items, text(") "))!;
@@ -1598,6 +1691,59 @@ fn build_for_expr(f: *ast::for_expr, bc: *build_ctx) doc = {
 	case => void;
 	};
 	return concat(items);
+};
+
+// Builds the `fill` of `;`-separated clauses for an accumulator
+// `for (init; cond; afterthought)` header. Each clause keeps its
+// trailing `;` glued on (style guide: a `;` in a for predicate is
+// followed by a space or a newline) and the separators are softlines,
+// so the renderer packs clauses greedily and only breaks at the clause
+// boundaries. `init` and `afterthought` are optional; `cond` is always
+// present in an accumulator loop.
+//
+// @param f: borrowed
+// @param op: borrowed
+// @param bc: borrowed
+fn build_for_predicate(f: *ast::for_expr, op: str, bc: *build_ctx) doc = {
+	const has_after = match (f.afterthought) {
+	case null =>
+		yield false;
+	case *ast::expr =>
+		yield true;
+	};
+
+	let fill_items: []doc = [];
+
+	// init clause (optional), with its `;` glued on and a separator.
+	match (f.bindings) {
+	case let b: *ast::expr =>
+		const be = b.expr as ast::binding_expr;
+		let piece: []doc = [];
+		append(piece, build_binding_expr(&be, bc, op))!;
+		append(piece, text(";"))!;
+		append(fill_items, concat(piece))!;
+		append(fill_items, line(" "))!;
+	case null => void;
+	};
+
+	// cond clause - gets a trailing `;` only when an afterthought
+	// follows it.
+	let cpiece: []doc = [];
+	append(cpiece, build_expr_doc(f.cond as *ast::expr, bc))!;
+	if (has_after) {
+		append(cpiece, text(";"))!;
+	};
+	append(fill_items, concat(cpiece))!;
+
+	// afterthought clause (optional).
+	match (f.afterthought) {
+	case let e: *ast::expr =>
+		append(fill_items, line(" "))!;
+		append(fill_items, build_expr_doc(e, bc))!;
+	case null => void;
+	};
+
+	return fill(fill_items);
 };
 
 // @param i: borrowed

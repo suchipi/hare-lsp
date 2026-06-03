@@ -247,12 +247,18 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		"};\n");
 
 	// Tab as 8 columns (the default): the indented condition runs past
-	// 80 columns and wraps after the outer `&&`.
+	// 80 columns and wraps. Per the Hare style guide the operator
+	// moves to the START of the continuation line, so the first line
+	// ends after `len(part) > 0` and the next begins with `&&`.
 	const wide = format_source(input, "<test>", 8) as str;
 	defer free(wide);
 	assert(
-		strings::contains(wide, "len(part) > 0 &&\n"),
-		"at tab width 8 the && chain wraps after the outer &&"
+		strings::contains(wide, "len(part) > 0\n"),
+		"at tab width 8 the && chain wraps before the trailing &&"
+	);
+	assert(
+		strings::contains(wide, "&& strings::sub(part, 0, 1)"),
+		"the && operator moves to the start of the continuation line"
 	);
 
 	// Tab as 1 column: the same line is only 77 columns and stays
