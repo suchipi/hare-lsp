@@ -211,3 +211,58 @@ use strings;
 	const b = resolve_binding_at_byte(&g, "nonexistent", use_off);
 	assert(b is void, "unknown name should resolve to void");
 };
+
+@test fn scope_graph_collects_all_visible_bindings() void = {
+	// At a cursor in `main`'s body, collect_scope_bindings returns the
+	// parameter, both local lets, and the toplevel decls — each once.
+	// Multi-character names guard against offset/length confusion.
+	const src_str =
+		"fn helper() void = void;\nfn main(count: int) void = { let alpha: int = 1; let beta: int = 2; let _ = beta; };\n";
+	const src = strings::toutf8(src_str);
+	let r = parse_recover(src, "test.ha");
+	defer finish_parse_result(&r);
+	let g = build_scope_graph(&r.subunit);
+	defer finish_scope_graph(&g);
+	const cur = byte_index(src_str, "= beta;"): u32 + 2;
+	const bs = collect_scope_bindings(&g, cur);
+	defer finish_scope_bindings(bs);
+	assert(scope_bindings_contains(bs, "count"), "parameter must be visible");
+	assert(scope_bindings_contains(bs, "alpha"), "earlier local must be visible");
+	assert(scope_bindings_contains(bs, "beta"), "later local must be visible");
+	assert(
+		scope_bindings_contains(bs, "main"),
+		"enclosing toplevel must be visible"
+	);
+	assert(
+		scope_bindings_contains(bs, "helper"),
+		"sibling toplevel must be visible"
+	);
+};
+
+@test fn scope_graph_collect_dedupes_shadowed_name() void = {
+	// `value` is bound in both the outer body and an inner block. From
+	// inside the inner block collect_scope_bindings returns `value` once
+	// (the inner binding shadows the outer).
+	const src_str =
+		"fn f() void = { let value: int = 1; { let value: int = 2; let _ = value; }; };\n";
+	const src = strings::toutf8(src_str);
+	let r = parse_recover(src, "test.ha");
+	defer finish_parse_result(&r);
+	let g = build_scope_graph(&r.subunit);
+	defer finish_scope_graph(&g);
+	const cur = byte_index(src_str, "= value;"): u32 + 2;
+	const bs = collect_scope_bindings(&g, cur);
+	defer finish_scope_bindings(bs);
+	let count = 0;
+	for (let i = 0z; i < len(bs); i += 1) {
+		if (bs[i].name == "value") count += 1;
+	};
+	assert(count == 1, "shadowed name must appear exactly once");
+};
+
+fn scope_bindings_contains(bs: []scope_binding, name: str) bool = {
+	for (let i = 0z; i < len(bs); i += 1) {
+		if (bs[i].name == name) return true;
+	};
+	return false;
+};

@@ -1661,3 +1661,147 @@ fn free_labels(labels: []str) void = {
 		"resolve must echo the original detail when the document is missing"
 	);
 };
+
+// --- Type vs value position -------------------------------------------
+@test fn completion_value_position_suggests_local_let_binding() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `let thing = false;` on one line; typing `th` on the next should
+	// surface the local binding `thing` as a Variable completion. This is
+	// the canonical value-position case the feature targets.
+	comp_open(&s, "file:///vpos.ha",
+		"fn main() void = {\\n\\tlet thing = false;\\n\\tth\\n};\\n");
+
+	// Line 2 = `\tth`; char 3 sits right after `th`.
+	const items = run_completion(&s, out, "file:///vpos.ha", 2, 3, 2000.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "thing"),
+		"value-position completion must suggest the in-scope local binding"
+	);
+	// The local must present as a Variable (kind 6) so the editor renders
+	// it distinctly from keywords / functions.
+	let saw_variable = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		if (label != "thing") continue;
+		const kind = *(json::get(&it, "kind") as *json::value) as f64;
+		assert(kind == 6.0, "local let binding must have kind=Variable(6)");
+		saw_variable = true;
+	};
+	assert(saw_variable, "the `thing` binding item must be present");
+};
+
+@test fn completion_type_position_suggests_builtin_type() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// Typing the type annotation of a binding: `let thing: s`. With no
+	// initializer yet (the realistic while-typing state) the binding
+	// doesn't parse, but classification is byte-based, so the type
+	// keywords must still be offered — and the non-type keywords filtered.
+	comp_open(&s, "file:///tpos.ha",
+		"fn main() void = {\\n\\tlet thing: s\\n};\\n");
+
+	// Line 1 = `\tlet thing: s`; char 13 sits right after `s`.
+	const items = run_completion(&s, out, "file:///tpos.ha", 1, 13, 2001.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "str"),
+		"type-position completion must suggest the builtin type `str`"
+	);
+	// Non-type keywords that happen to start with `s` must NOT leak into a
+	// type position.
+	assert(
+		!labels_contains(labels, "static"),
+		"type position must exclude the non-type keyword `static`"
+	);
+	assert(
+		!labels_contains(labels, "switch"),
+		"type position must exclude the non-type keyword `switch`"
+	);
+	assert(
+		!labels_contains(labels, "let"),
+		"type position must exclude the non-type keyword `let`"
+	);
+};
+
+@test fn completion_type_position_suggests_type_alias() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// A top-level `type mytype = int;` must be offered when completing a
+	// type annotation, while the function `main` (a value symbol) must not.
+	comp_open(&s, "file:///talias.ha",
+		"type mytype = int;\\nfn main() void = {\\n\\tlet x: my = 0\\n};\\n");
+
+	// Line 2 = `\tlet x: my = 0`; char 10 sits right after `my`.
+	const items = run_completion(&s, out, "file:///talias.ha", 2, 10, 2002.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "mytype"),
+		"type-position completion must suggest the file-local type alias"
+	);
+	assert(
+		!labels_contains(labels, "main"),
+		"type position must exclude value symbols like the function `main`"
+	);
+};
+
+@test fn completion_type_position_excludes_value_binding() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// A local value binding `thing` is in scope, and a type alias `theme`
+	// also matches the `th` prefix. In a type position only the type
+	// alias may surface — the value binding must be suppressed.
+	comp_open(&s, "file:///texcl.ha",
+		"type theme = int;\\nfn main() void = {\\n\\tlet thing = false;\\n\\tlet other: th = thing\\n};\\n"
+	);
+
+	// Line 3 = `\tlet other: th = thing`; char 14 sits right after `th`.
+	const items = run_completion(&s, out, "file:///texcl.ha", 3, 14, 2003.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "theme"),
+		"type position must still surface the matching type alias"
+	);
+	assert(
+		!labels_contains(labels, "thing"),
+		"type position must exclude the in-scope value binding `thing`"
+	);
+};
+
+@test fn completion_type_position_qualified_filters_to_types() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// A module exports both a function and a type. After `mymod::` in a
+	// type position only the type member is grammatical, so the function
+	// must be filtered out.
+	const provider = strings::toutf8(
+		"export fn myfunc() void = void;\nexport type mytype = int;\n");
+	analysis::index_file(&s.workspace_index, "/repo/mymod/p.ha", provider);
+
+	comp_open(&s, "file:///qtype.ha",
+		"use mymod;\\nfn main() void = {\\n\\tlet v: mymod::\\n};\\n");
+
+	// Line 2 = `\tlet v: mymod::`; char 15 sits right after the `::`.
+	const items = run_completion(&s, out, "file:///qtype.ha", 2, 15, 2004.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "mytype"),
+		"qualified type position must surface the module's type member"
+	);
+	assert(
+		!labels_contains(labels, "myfunc"),
+		"qualified type position must exclude the module's function member"
+	);
+};

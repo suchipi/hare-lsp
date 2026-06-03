@@ -154,6 +154,64 @@ export fn resolve_binding_at_byte(
 	return void;
 };
 
+// Collects every binding visible at byte offset `off`, walking from the
+// innermost enclosing scope outward through its parents. When the same
+// name is bound in several enclosing scopes the innermost binding wins
+// (outer shadows are dropped) so a name appears at most once. Useful for
+// completion, which wants the full set of in-scope names rather than the
+// single resolution [[resolve_binding_at_byte]] returns.
+//
+// The caller owns the returned slice and each binding's duplicated
+// `name`; release with [[finish_scope_bindings]].
+//
+// @param g: borrowed
+// @returns: owned
+export fn collect_scope_bindings(g: *scope_graph, off: u32) []scope_binding = {
+	let out: []scope_binding = [];
+	let cur: nullable *scope_node = find_innermost_scope(g.root, off);
+	for (true) {
+		const n = match (cur) {
+		case let p: *scope_node =>
+			yield p;
+		case null =>
+			break;
+		};
+		for (let i = 0z; i < len(n.bindings); i += 1) {
+			const b = &n.bindings[i];
+			if (off < b.scope_start || off >= b.scope_end) continue;
+			if (scope_binding_name_present(out, b.name)) continue;
+			append(out, scope_binding {
+				name = strings::dup(b.name)!,
+				kind = b.kind,
+				name_span = b.name_span,
+				scope_start = b.scope_start,
+				scope_end = b.scope_end,
+			})!;
+		};
+		cur = n.parent;
+	};
+	return out;
+};
+
+// @param bs: borrowed
+// @param name: borrowed
+fn scope_binding_name_present(bs: []scope_binding, name: str) bool = {
+	for (let i = 0z; i < len(bs); i += 1) {
+		if (bs[i].name == name) return true;
+	};
+	return false;
+};
+
+// Frees the result of [[collect_scope_bindings]].
+//
+// @param bs: owned
+export fn finish_scope_bindings(bs: []scope_binding) void = {
+	for (let i = 0z; i < len(bs); i += 1) {
+		free(bs[i].name);
+	};
+	free(bs);
+};
+
 // @param node: borrowed
 fn find_innermost_scope(node: *scope_node, off: u32) *scope_node = {
 	for (let i = 0z; i < len(node.children); i += 1) {
