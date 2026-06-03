@@ -7,11 +7,12 @@
 //
 //   1. The output reparses without error.
 //   2. No `//` comments are lost.
-//   3. No formatted line exceeds 80 columns (with tabs counted as one
-//      column, matching the pretty-printer's tab convention; the Hare
-//      style guide's documented exceptions — long error strings,
-//      pre-existing 80+ source lines — are tolerated by NOT failing
-//      when the source itself already exceeded 80 columns).
+//   3. No formatted line exceeds 80 columns, with tabs counted as
+//      ROUNDTRIP_TAB_WIDTH (8) display columns - the same width the
+//      pretty-printer wrapped at. The Hare style guide's documented
+//      exceptions (long error strings, pre-existing over-long source
+//      lines) are tolerated by NOT failing when the source itself
+//      already exceeded 80 columns at that width.
 //
 // The walk skips `.cache/`, `.tmp/`, and `editors/` (vendor / vscode
 // extension code), since those aren't ours to reformat.
@@ -23,6 +24,11 @@ use io;
 use memio;
 use os;
 use strings;
+
+// Display columns per tab used both when formatting (passed to pretty)
+// and when measuring formatted line widths. Matches the default the
+// LSP and harefmt use, so the roundtrip check validates real behavior.
+def ROUNDTRIP_TAB_WIDTH: size = 8;
 
 // Recursively collects every regular file under `root` whose name
 // ends in ".ha". Skips dot-directories and `editors/` (vscode
@@ -128,7 +134,7 @@ fn format_bytes(data: []u8) (str | void) = {
 
 	let buf = memio::dynamic();
 	defer io::close(&buf)!;
-	match (pretty(&buf, &d, 80, 0)) {
+	match (pretty(&buf, &d, 80, 0, ROUNDTRIP_TAB_WIDTH)) {
 	case size => void;
 	case io::error =>
 		return;
@@ -136,16 +142,35 @@ fn format_bytes(data: []u8) (str | void) = {
 	return strings::dup(memio::string(&buf)!)!;
 };
 
-// Returns the maximum line length in `s`. Counts bytes, with tabs as
-// one byte each — matches what pretty's column tracker uses.
+// Returns the maximum display width of any line in `s`, counting each
+// byte as one column and each tab as advancing to the next
+// ROUNDTRIP_TAB_WIDTH stop - the same accounting pretty's column
+// tracker uses, so this measures lines the way the formatter wrapped
+// them.
 fn max_line_length(s: str) size = {
 	const lines = strings::split(s, "\n")!;
 	defer free(lines);
 	let max: size = 0;
 	for (let i = 0z; i < len(lines); i += 1) {
-		if (len(lines[i]) > max) max = len(lines[i]);
+		const w = line_display_width(lines[i]);
+		if (w > max) max = w;
 	};
 	return max;
+};
+
+// Display width of a single line: each tab advances to the next
+// ROUNDTRIP_TAB_WIDTH column stop, every other byte counts as one.
+fn line_display_width(line: str) size = {
+	const bytes = strings::toutf8(line);
+	let col: size = 0;
+	for (let i = 0z; i < len(bytes); i += 1) {
+		if (bytes[i] == '\t': u8) {
+			col = col - (col % ROUNDTRIP_TAB_WIDTH) + ROUNDTRIP_TAB_WIDTH;
+		} else {
+			col += 1;
+		};
+	};
+	return col;
 };
 
 // Returns true iff every formatted line is <= 80 cols, OR the source

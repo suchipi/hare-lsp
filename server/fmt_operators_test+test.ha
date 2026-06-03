@@ -28,7 +28,7 @@ fn fmt_operators_roundtrip(src: str) str = {
 
 	let buf = memio::dynamic();
 	defer io::close(&buf)!;
-	pretty(&buf, &d, 80, 0)!;
+	pretty(&buf, &d, 80, 0, 8)!;
 	return strings::dup(memio::string(&buf)!)!;
 };
 

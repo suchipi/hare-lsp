@@ -113,7 +113,7 @@ The canonical JSON Schema for these settings is checked in at [editors/vscode/sc
 
 `make` also builds `./harefmt`, a thin CLI wrapping the same formatter the LSP uses for `textDocument/formatting`. Use it from the shell or CI to format `*.ha` files outside an editor.
 
-The formatter is fully opinionated and follows Hare's [style guide](https://harelang.org/documentation/usage/style.html). There are no style options, and the LSP's `textDocument/formatting` calls the same engine, so editor-side and CLI-side output are byte-identical for the same input.
+The formatter is fully opinionated and follows Hare's [style guide](https://harelang.org/documentation/usage/style.html). The only knob is the tab width used for line-wrap decisions (the style guide says a tab SHOULD be 8 columns, which is the default); see [`--tab-width`](#tab-width) below. The LSP's `textDocument/formatting` calls the same engine and wraps to the editor's reported `tabSize`, so for a given tab width the editor-side and CLI-side output are byte-identical for the same input.
 
 ### Usage
 
@@ -134,6 +134,16 @@ harefmt --check --no-follow-file-symlinks src/
 ```
 
 Exit codes follow the gofmt / prettier convention: `0` = clean, `1` = at least one file would change (in `--check`) or at least one parse error, `2` = CLI usage error.
+
+### Tab width
+
+The formatter wraps lines to fit within 80 columns. How many columns a leading tab counts as for that decision defaults to 8, matching the Hare style guide. Override it with `--tab-width`:
+
+```sh
+harefmt --write --tab-width 4 src/   # wrap as if a tab were 4 columns wide
+```
+
+This affects only where lines wrap; indentation is always emitted as literal tabs regardless of the value. Through the LSP the server uses the editor's `tabSize` from the formatting request instead (the LSP spec makes it a required field), so wrapping matches what you see on screen; `--tab-width` is the CLI equivalent of that setting.
 
 ### Ignore files
 

@@ -275,7 +275,11 @@ fn sum_flat_width(items: []doc) size = {
 // Renders `d` to `out`. `max_col` is the soft column limit; `indent`
 // is the starting indent level (one indent unit = one tab character
 // emitted; the formatter is fully opinionated, so output is always
-// tab-indented at column 0).
+// tab-indented at column 0). `tab_width` is how many display columns
+// one tab occupies for wrap decisions - the Hare style guide says this
+// SHOULD be 8, but it is configurable (editors pass their own
+// `tabSize`, harefmt takes `--tab-width`). It affects only the column
+// accounting, never the emitted bytes, which are always literal tabs.
 //
 // @param d: borrowed
 export fn pretty(
@@ -283,12 +287,13 @@ export fn pretty(
 	d: *doc,
 	max_col: size,
 	indent: i32,
+	tab_width: size,
 ) (size | io::error) = {
 	let cur_col = 0z;
 	let written = 0z;
 	let pending_tabs: i32 = 0;
-	render(out, d, render_mode::BROKEN, max_col, indent, 0z, &cur_col, &written,
-		&pending_tabs)?;
+	render(out, d, render_mode::BROKEN, max_col, indent, tab_width, 0z, &cur_col,
+		&written, &pending_tabs)?;
 	return written;
 };
 
@@ -308,6 +313,7 @@ fn render(
 	mode: render_mode,
 	max_col: size,
 	indent: i32,
+	tab_width: size,
 	tail_width: size,
 	cur_col: *size,
 	written: *size,
@@ -315,16 +321,16 @@ fn render(
 ) (void | io::error) = {
 	match (*d) {
 	case let t: doc_text =>
-		emit_str(out, t.content, cur_col, written, pending_tabs)?;
+		emit_str(out, t.content, tab_width, cur_col, written, pending_tabs)?;
 	case let l: doc_line =>
 		switch (mode) {
 		case render_mode::FLAT =>
-			emit_str(out, l.flat, cur_col, written, pending_tabs)?;
+			emit_str(out, l.flat, tab_width, cur_col, written, pending_tabs)?;
 		case render_mode::BROKEN =>
-			emit_break(out, indent, cur_col, written, pending_tabs)?;
+			emit_break(out, indent, tab_width, cur_col, written, pending_tabs)?;
 		};
 	case doc_hardline =>
-		emit_break(out, indent, cur_col, written, pending_tabs)?;
+		emit_break(out, indent, tab_width, cur_col, written, pending_tabs)?;
 	case let g: doc_group =>
 		const remaining = if (*cur_col >= max_col) 0z else max_col - *cur_col;
 		const w = sum_flat_width(g.items);
@@ -334,52 +340,52 @@ fn render(
 			else w + tail_width;
 		const child_mode = if (total <= remaining &&
 				fits_all(g.items)) render_mode::FLAT else render_mode::BROKEN;
-		render_items(out, g.items, child_mode, max_col, indent, tail_width, cur_col,
-			written, pending_tabs)?;
+		render_items(out, g.items, child_mode, max_col, indent, tab_width,
+			tail_width, cur_col, written, pending_tabs)?;
 	// Decide flat-or-broken based on remaining columns,
 	// counting both the group's own flat width AND the
 	// `tail_width` of text that will follow on the same line
 	// in flat mode.
 
 	case let n: doc_nest =>
-		render(out, n.inner, mode, max_col, indent + n.delta, tail_width, cur_col,
-			written, pending_tabs)?;
+		render(out, n.inner, mode, max_col, indent + n.delta, tab_width,
+			tail_width, cur_col, written, pending_tabs)?;
 	case let c: doc_concat =>
-		render_items(out, c.items, mode, max_col, indent, tail_width, cur_col,
-			written, pending_tabs)?;
+		render_items(out, c.items, mode, max_col, indent, tab_width,
+			tail_width, cur_col, written, pending_tabs)?;
 	case let cm: doc_comment =>
 		// Trailing comments stay glued to the preceding code with
 		// a single space separator (e.g. `assert(...);  // note`).
 		// Non-trailing (full-line) comments must always start on a
 		// fresh line - if we're mid-line, break first.
 		if (cm.trailing) {
-			emit_str(out, " ", cur_col, written, pending_tabs)?;
+			emit_str(out, " ", tab_width, cur_col, written, pending_tabs)?;
 		} else if (*cur_col > 0 && *pending_tabs == 0) {
-			emit_break(out, indent, cur_col, written, pending_tabs)?;
+			emit_break(out, indent, tab_width, cur_col, written, pending_tabs)?;
 		};
 		// `cm.text` is the raw text after `//` from the source and
 		// includes any leading whitespace the user wrote (typically
 		// one space). Emit `//` with no extra space so we don't
 		// double up.
-		emit_str(out, "//", cur_col, written, pending_tabs)?;
-		emit_str(out, cm.text, cur_col, written, pending_tabs)?;
+		emit_str(out, "//", tab_width, cur_col, written, pending_tabs)?;
+		emit_str(out, cm.text, tab_width, cur_col, written, pending_tabs)?;
 		// Full-line comments emit their own trailing break so the
 		// next item starts at a clean indent. Trailing comments
 		// rely on the caller's next `hardline()` (or sibling
 		// statement break) to move off the line - emitting a break
 		// here would double up and produce a blank line.
 		if (!cm.trailing) {
-			emit_break(out, indent, cur_col, written, pending_tabs)?;
+			emit_break(out, indent, tab_width, cur_col, written, pending_tabs)?;
 		};
 	case let ib: doc_if_broken =>
 		switch (mode) {
 		case render_mode::FLAT => void;
 		case render_mode::BROKEN =>
-			emit_str(out, ib.text, cur_col, written, pending_tabs)?;
+			emit_str(out, ib.text, tab_width, cur_col, written, pending_tabs)?;
 		};
 	case let f: doc_fill =>
-		render_fill(out, f.items, max_col, indent, tail_width, cur_col, written,
-			pending_tabs)?;
+		render_fill(out, f.items, max_col, indent, tab_width, tail_width,
+			cur_col, written, pending_tabs)?;
 	};
 };
 
@@ -399,6 +405,7 @@ fn render_fill(
 	items: []doc,
 	max_col: size,
 	indent: i32,
+	tab_width: size,
 	outer_tail: size,
 	cur_col: *size,
 	written: *size,
@@ -417,10 +424,10 @@ fn render_fill(
 	const first_tail = if (len(items) == 1) outer_tail else 0z;
 	const first_need = saturating_add(first_w, first_tail);
 	if (first_need != WIDTH_INFINITY && first_need > remaining0 && *cur_col > 0) {
-		emit_break(out, indent, cur_col, written, pending_tabs)?;
+		emit_break(out, indent, tab_width, cur_col, written, pending_tabs)?;
 	};
-	render(out, &items[0], render_mode::FLAT, max_col, indent, 0z, cur_col,
-		written, pending_tabs)?;
+	render(out, &items[0], render_mode::FLAT, max_col, indent, tab_width,
+		0z, cur_col, written, pending_tabs)?;
 	let i = 1z;
 	for (i + 1 < len(items); i += 2) {
 		// items[i] is the separator (a doc_line); items[i+1] is
@@ -436,17 +443,17 @@ fn render_fill(
 			need != WIDTH_INFINITY && need <= remaining && fits_flat(&items[i]) &&
 			fits_flat(&items[i + 1]);
 		if (can_fit) {
-			render(out, &items[i], render_mode::FLAT, max_col, indent, 0z, cur_col,
-				written, pending_tabs)?;
-			render(out, &items[i + 1], render_mode::FLAT, max_col, indent, 0z, cur_col,
-				written, pending_tabs)?;
+			render(out, &items[i], render_mode::FLAT, max_col, indent, tab_width,
+				0z, cur_col, written, pending_tabs)?;
+			render(out, &items[i + 1], render_mode::FLAT, max_col, indent, tab_width,
+				0z, cur_col, written, pending_tabs)?;
 		} else {
 			// Break at the separator, then emit the next content
 			// (which itself may be a group that decides its own
 			// flat-or-broken layout).
-			emit_break(out, indent, cur_col, written, pending_tabs)?;
-			render(out, &items[i + 1], render_mode::BROKEN, max_col, indent, 0z, cur_col,
-				written, pending_tabs)?;
+			emit_break(out, indent, tab_width, cur_col, written, pending_tabs)?;
+			render(out, &items[i + 1], render_mode::BROKEN, max_col, indent, tab_width,
+				0z, cur_col, written, pending_tabs)?;
 		};
 	};
 };
@@ -472,6 +479,7 @@ fn render_items(
 	mode: render_mode,
 	max_col: size,
 	indent: i32,
+	tab_width: size,
 	outer_tail: size,
 	cur_col: *size,
 	written: *size,
@@ -479,8 +487,8 @@ fn render_items(
 ) (void | io::error) = {
 	for (let i = 0z; i < len(items); i += 1) {
 		const my_tail = tail_after(items, i + 1, mode, outer_tail);
-		render(out, &items[i], mode, max_col, indent, my_tail, cur_col, written,
-			pending_tabs)?;
+		render(out, &items[i], mode, max_col, indent, tab_width, my_tail, cur_col,
+			written, pending_tabs)?;
 	};
 };
 
@@ -596,6 +604,7 @@ fn fits_all(items: []doc) bool = {
 fn emit_str(
 	out: io::handle,
 	s: str,
+	tab_width: size,
 	cur_col: *size,
 	written: *size,
 	pending_tabs: *i32,
@@ -613,14 +622,28 @@ fn emit_str(
 	const n = io::writeall(out, bytes)?;
 	*written += n;
 	// Track column position. Newlines in raw text (allowed in
-	// doc_text for embedded raw strings, etc.) reset the column.
+	// doc_text for embedded raw strings, etc.) reset the column; an
+	// embedded literal tab advances to the next `tab_width` stop, so
+	// a tab inside a raw string is counted the same way leading
+	// indentation is.
 	for (let i = 0z; i < len(bytes); i += 1) {
 		if (bytes[i] == '\n': u8) {
 			*cur_col = 0z;
+		} else if (bytes[i] == '\t': u8) {
+			*cur_col = next_tab_stop(*cur_col, tab_width);
 		} else {
 			*cur_col += 1;
 		};
 	};
+};
+
+// Advances `col` to the next tab stop that is a multiple of
+// `tab_width`. A degenerate `tab_width` of 0 leaves the column
+// unchanged. Used for literal tab bytes embedded in rendered text;
+// leading indentation is accounted for in [[emit_break]].
+fn next_tab_stop(col: size, tab_width: size) size = {
+	if (tab_width == 0) return col;
+	return col - (col % tab_width) + tab_width;
 };
 
 // @param cur_col: borrowed
@@ -629,6 +652,7 @@ fn emit_str(
 fn emit_break(
 	out: io::handle,
 	indent: i32,
+	tab_width: size,
 	cur_col: *size,
 	written: *size,
 	pending_tabs: *i32,
@@ -639,7 +663,10 @@ fn emit_break(
 	// another emit_break fires before any emit_str, this indent is
 	// discarded — keeping blank lines truly blank.
 	*pending_tabs = if (indent < 0) 0i32 else indent;
-	*cur_col = if (indent < 0) 0z else indent: size;
+	// One indent level emits one tab character but occupies
+	// `tab_width` display columns; the column tracker counts display
+	// columns so wrap decisions match what the reader sees.
+	*cur_col = if (indent < 0) 0z else (indent: size) * tab_width;
 };
 
 // Convenience: pretty-print to a freshly-allocated string. Caller
@@ -647,9 +674,14 @@ fn emit_break(
 //
 // @param d: borrowed
 // @returns: owned
-export fn pretty_str(d: *doc, max_col: size, indent: i32) (str | io::error) = {
+export fn pretty_str(
+	d: *doc,
+	max_col: size,
+	indent: i32,
+	tab_width: size,
+) (str | io::error) = {
 	let buf = memio::dynamic();
 	defer io::close(&buf)!;
-	pretty(&buf, d, max_col, indent)?;
+	pretty(&buf, d, max_col, indent, tab_width)?;
 	return strings::dup(memio::string(&buf)!)!;
 };

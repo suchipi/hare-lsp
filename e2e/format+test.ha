@@ -395,3 +395,75 @@ use     io;
 		"already-canonical short signature must be a no-op format"
 	);
 };
+
+// The server must honor the client's `tabSize` from FormattingOptions.
+// The same indented `&&` chain wraps when a tab is 8 columns wide (the
+// `if` line then runs past 80) but stays flat when a tab is 1 column.
+// This proves the LSP reads `options.tabSize` rather than hard-coding a
+// width.
+@test fn e2e_format_honors_client_tab_size() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	// Canonical when a tab counts as 1 column: the `if` condition is
+	// 77 columns and fits on one line.
+	const sample =
+		"export fn f(omit_leading_dot: bool, part: str) void = {\n"
+		"\tif (omit_leading_dot && len(part) > 0 && "
+		"strings::sub(part, 0, 1) == \".\") {\n"
+		"\t\treturn;\n"
+		"\t};\n"
+		"};\n";
+	const did_open = build_did_open("file:///tabsize.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// tabSize 8: the condition is 91 columns and must wrap after the
+	// outer `&&`, so the server returns exactly one edit.
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":906,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///tabsize.ha"},"options":{"tabSize":8,"insertSpaces":false}}}`
+		));
+	const body8 = wait_for_response(&s, 906.0);
+	defer free(body8);
+	let v8 = json::loadstr(strings::fromutf8(body8)!)!;
+	defer json::finish(v8);
+	const arr8 =
+		*(json::get(&(v8 as json::object), "result") as *json::value) as []json::value;
+	assert(len(arr8) == 1, "tabSize 8 must produce a wrapping edit");
+	const new8 =
+		*(json::get(&(arr8[0] as json::object), "newText") as *json::value) as str;
+	assert(
+		strings::contains(new8, "len(part) > 0 &&\n"),
+		"tabSize 8 wraps the condition after the outer &&"
+	);
+	assert(
+		strings::contains(new8, "\n\t\t\tstrings::sub(part, 0, 1)"),
+		"the wrapped continuation is indented twice past the `if`"
+	);
+
+	// tabSize 1: the condition fits on one line, so the already-
+	// canonical document is a no-op format (no edits).
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":907,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///tabsize.ha"},"options":{"tabSize":1,"insertSpaces":false}}}`
+		));
+	const body1 = wait_for_response(&s, 907.0);
+	defer free(body1);
+	let v1 = json::loadstr(strings::fromutf8(body1)!)!;
+	defer json::finish(v1);
+	const arr1 =
+		*(json::get(&(v1 as json::object), "result") as *json::value) as []json::value;
+	assert(
+		len(arr1) == 0,
+		"tabSize 1 leaves the one-line condition untouched (no-op)"
+	);
+};
