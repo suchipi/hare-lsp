@@ -146,21 +146,18 @@ fn print_usage() void = {
 	fmt::println()!;
 	fmt::println("Options:")!;
 	fmt::println(
-		"  --doctor      Check that hare, hare-json, and "
-		"HAREPATH look healthy.")!;
+		"  --doctor      Check that hare, hare-json, and HAREPATH look healthy.")!;
 	fmt::println("  --version     Print the server version and exit.")!;
 	fmt::println("  --help        Show this message and exit.")!;
 	fmt::println()!;
 	fmt::println("Environment:")!;
 	fmt::println(
-		"  HARE_LSP_LOG_DIR     Absolute directory to tee "
-		"wire-protocol logs into.")!;
+		"  HARE_LSP_LOG_DIR     Absolute directory to tee wire-protocol logs into."
+	)!;
+	fmt::println("  HARE_LSP_LOG_LEVEL   debug|info|warn|error (default: info)")!;
 	fmt::println(
-		"  HARE_LSP_LOG_LEVEL   debug|info|warn|error "
-		"(default: info)")!;
-	fmt::println(
-		"  HARE_LSP_MAX_BODY_BYTES  Override LSP transport's max "
-		"request body size (default 32 MiB).")!;
+		"  HARE_LSP_MAX_BODY_BYTES  Override LSP transport's max request body size (default 32 MiB)."
+	)!;
 };
 
 // Reads HARE_LSP_MAX_BODY_BYTES if set. Returns void when unset or
@@ -180,8 +177,8 @@ fn read_max_body_env() (size | void) = {
 		return n;
 	case =>
 		fmt::fprintfln(os::stderr,
-			"hare-lsp: ignoring invalid HARE_LSP_MAX_BODY_BYTES={}; "
-			"using default", raw)!;
+			"hare-lsp: ignoring invalid HARE_LSP_MAX_BODY_BYTES={}; using default",
+			raw)!;
 		return void;
 	};
 };

@@ -66,9 +66,7 @@ export fn run_doctor() int = {
 		fmt::printfln("[OK] hare found at {}", p)!;
 		report_hare_version();
 	case void =>
-		fmt::println(
-			"[FAIL] hare not found on $PATH "
-			"(install Hare v0.26.0)")!;
+		fmt::println("[FAIL] hare not found on $PATH (install Hare v0.26.0)")!;
 		failed = true;
 	};
 
@@ -86,9 +84,8 @@ export fn run_doctor() int = {
 		fmt::printfln("[OK] hare-lsp found at {}", p)!;
 	case void =>
 		fmt::println(
-			"[WARN] hare-lsp not on $PATH "
-			"(editors usually need this; "
-			"run `sudo make install` from the repo)")!;
+			"[WARN] hare-lsp not on $PATH (editors usually need this; run `sudo make install` from the repo)"
+		)!;
 	};
 
 	// 3. Build the list of search roots. Prefer $HAREPATH; otherwise
@@ -112,8 +109,7 @@ export fn run_doctor() int = {
 		append(entries, from_env...)!;
 	} else {
 		fmt::println(
-			"[WARN] HAREPATH not set; "
-			"falling back to compiled-in defaults")!;
+			"[WARN] HAREPATH not set; falling back to compiled-in defaults")!;
 		using_defaults = true;
 		for (let i = 0z; i < len(STDLIB_DEFAULTS); i += 1) {
 			append(entries, STDLIB_DEFAULTS[i])!;
@@ -146,9 +142,8 @@ export fn run_doctor() int = {
 		fmt::printfln("[OK] stdlib found in {}", p)!;
 	case void =>
 		fmt::println(
-			"[FAIL] no stdlib found on HAREPATH "
-			"(no entry contains core stdlib modules); "
-			"point HAREPATH at your Hare stdlib root")!;
+			"[FAIL] no stdlib found on HAREPATH (no entry contains core stdlib modules); point HAREPATH at your Hare stdlib root"
+		)!;
 		failed = true;
 	};
 
@@ -161,12 +156,12 @@ export fn run_doctor() int = {
 			HARE_JSON_MARKER)!;
 	case void =>
 		fmt::printfln(
-			"[FAIL] hare-json not reachable from HAREPATH "
-			"(no entry contains {})", HARE_JSON_MARKER)!;
+			"[FAIL] hare-json not reachable from HAREPATH (no entry contains {})",
+			HARE_JSON_MARKER)!;
 		fmt::println("       install with:")!;
 		fmt::println(
-			"         d=$(mktemp -d) && git clone "
-			"https://git.sr.ht/~sircmpwn/hare-json \"$d/hare-json\"")!;
+			"         d=$(mktemp -d) && git clone https://git.sr.ht/~sircmpwn/hare-json \"$d/hare-json\""
+		)!;
 		fmt::println("         sudo make -C \"$d/hare-json\" install")!;
 		failed = true;
 	};
@@ -178,31 +173,25 @@ export fn run_doctor() int = {
 	case let s: str =>
 		if (len(s) == 0) {
 			fmt::println(
-				"[WARN] HARE_LSP_LOG_DIR is set but empty; "
-				"wire-protocol logging disabled")!;
+				"[WARN] HARE_LSP_LOG_DIR is set but empty; wire-protocol logging disabled"
+			)!;
 		} else if (!path_is_absolute(s)) {
 			fmt::printfln(
-				"[FAIL] HARE_LSP_LOG_DIR={} is not absolute; "
-				"editors run hare-lsp with cwd=/ and relative "
-				"paths will fail", s)!;
+				"[FAIL] HARE_LSP_LOG_DIR={} is not absolute; editors run hare-lsp with cwd=/ and relative paths will fail",
+				s)!;
 			failed = true;
 		} else if (!is_directory(s)) {
-			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not a "
-				"directory", s)!;
+			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not a directory", s)!;
 			failed = true;
 		} else if (!is_writable_dir(s)) {
-			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not "
-				"writable", s)!;
+			fmt::printfln("[FAIL] HARE_LSP_LOG_DIR={} is not writable", s)!;
 			failed = true;
 		} else {
-			fmt::printfln(
-				"[OK] HARE_LSP_LOG_DIR={} is absolute "
-				"and writable", s)!;
+			fmt::printfln("[OK] HARE_LSP_LOG_DIR={} is absolute and writable", s)!;
 		};
 	case void =>
 		fmt::println(
-			"[OK] HARE_LSP_LOG_DIR not set "
-			"(wire-protocol logging disabled)")!;
+			"[OK] HARE_LSP_LOG_DIR not set (wire-protocol logging disabled)")!;
 	};
 
 	// 7. HARE_LSP_LOG_LEVEL sanity. Mirrors server::log_level_from_env:
@@ -211,24 +200,19 @@ export fn run_doctor() int = {
 	match (os::getenv("HARE_LSP_LOG_LEVEL")) {
 	case let s: str =>
 		if (len(s) == 0) {
-			fmt::println(
-				"[OK] HARE_LSP_LOG_LEVEL not set "
-				"(defaults to info)")!;
+			fmt::println("[OK] HARE_LSP_LOG_LEVEL not set (defaults to info)")!;
 		} else {
 			match (server::parse_log_level(s)) {
 			case server::log_level =>
 				fmt::printfln("[OK] HARE_LSP_LOG_LEVEL={}", s)!;
 			case void =>
 				fmt::printfln(
-					"[WARN] HARE_LSP_LOG_LEVEL={} is not "
-					"recognized; the server will fall back "
-					"to info", s)!;
+					"[WARN] HARE_LSP_LOG_LEVEL={} is not recognized; the server will fall back to info",
+					s)!;
 			};
 		};
 	case void =>
-		fmt::println(
-			"[OK] HARE_LSP_LOG_LEVEL not set "
-			"(defaults to info)")!;
+		fmt::println("[OK] HARE_LSP_LOG_LEVEL not set (defaults to info)")!;
 	};
 
 	// 8. HARE_LSP_MAX_BODY_BYTES sanity. Mirrors read_max_body_env in
@@ -239,35 +223,28 @@ export fn run_doctor() int = {
 	case let s: str =>
 		if (len(s) == 0) {
 			fmt::println(
-				"[OK] HARE_LSP_MAX_BODY_BYTES not set "
-				"(defaults to 32 MiB)")!;
+				"[OK] HARE_LSP_MAX_BODY_BYTES not set (defaults to 32 MiB)")!;
 		} else {
 			match (strconv::stoz(s)) {
 			case let n: size =>
 				if (n == 0) {
 					fmt::printfln(
-						"[WARN] HARE_LSP_MAX_BODY_BYTES=0 "
-						"will reject every message; "
-						"unset it or pick a positive "
-						"value")!;
+						"[WARN] HARE_LSP_MAX_BODY_BYTES=0 will reject every message; unset it or pick a positive value"
+					)!;
 				} else if (n % (1024 * 1024) == 0) {
-					fmt::printfln(
-						"[OK] HARE_LSP_MAX_BODY_BYTES={} "
-						"({} MiB)", n, n / (1024 * 1024))!;
+					fmt::printfln("[OK] HARE_LSP_MAX_BODY_BYTES={} ({} MiB)", n,
+						n / (1024 * 1024))!;
 				} else {
 					fmt::printfln("[OK] HARE_LSP_MAX_BODY_BYTES={}", n)!;
 				};
 			case =>
 				fmt::printfln(
-					"[WARN] HARE_LSP_MAX_BODY_BYTES={} is "
-					"not a valid integer; the server will "
-					"fall back to 32 MiB", s)!;
+					"[WARN] HARE_LSP_MAX_BODY_BYTES={} is not a valid integer; the server will fall back to 32 MiB",
+					s)!;
 			};
 		};
 	case void =>
-		fmt::println(
-			"[OK] HARE_LSP_MAX_BODY_BYTES not set "
-			"(defaults to 32 MiB)")!;
+		fmt::println("[OK] HARE_LSP_MAX_BODY_BYTES not set (defaults to 32 MiB)")!;
 	};
 
 	fmt::println()!;

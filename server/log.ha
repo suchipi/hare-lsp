@@ -47,8 +47,7 @@ export fn log_level_from_env() log_level = {
 		return l;
 	case void =>
 		fmt::fprintfln(os::stderr,
-			"hare-lsp: ignoring invalid HARE_LSP_LOG_LEVEL={}; "
-			"using default", v)!;
+			"hare-lsp: ignoring invalid HARE_LSP_LOG_LEVEL={}; using default", v)!;
 		return DEFAULT_LOG_LEVEL;
 	};
 };
