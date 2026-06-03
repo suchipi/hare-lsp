@@ -134,3 +134,32 @@ use strings;
 	defer free(out);
 	assert(out == "(x");
 };
+
+@test fn fmt_doc_flat_width_counts_embedded_tab() void = {
+	// A doc_text carrying a literal tab (as a backtick raw string does)
+	// must be measured with the tab at its display width when the group
+	// decides flat-vs-broken; otherwise the group lays out flat and the
+	// rendered line overshoots. With max_col 10 this group fits when a
+	// tab is 1 column (2 + 1 + 3 = 6) but not when it is 8 columns
+	// (2 + 1 + 10 = 13), so it must stay flat at tab width 1 and break
+	// at tab width 8.
+	let flat_items: []doc = alloc([], 3)!;
+	append(flat_items, text("ab"))!;
+	append(flat_items, line(" "))!;
+	append(flat_items, text("x\ty"))!;
+	let flat_d = group(flat_items);
+	defer doc_finish(&flat_d);
+	const narrow = pretty_str(&flat_d, 10, 0, 1)!;
+	defer free(narrow);
+	assert(narrow == "ab x\ty", "tab as 1 column: group fits on one line");
+
+	let br_items: []doc = alloc([], 3)!;
+	append(br_items, text("ab"))!;
+	append(br_items, line(" "))!;
+	append(br_items, text("x\ty"))!;
+	let br_d = group(br_items);
+	defer doc_finish(&br_d);
+	const wide = pretty_str(&br_d, 10, 0, 8)!;
+	defer free(wide);
+	assert(wide == "ab\nx\ty", "tab as 8 columns: group breaks to avoid overshoot");
+};

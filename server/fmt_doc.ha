@@ -233,13 +233,36 @@ fn fits_flat(d: *doc) bool = {
 // break (hardline / comment).
 const WIDTH_INFINITY: size = ~0z;
 
+// Flat display width of literal text. A tab counts as a full
+// `tab_width` columns - its maximum advance - because the exact stop is
+// position-dependent and unknown at estimation time. That upper bound
+// keeps width estimates conservative: a group is never laid out flat
+// and then overshoots because an embedded tab (e.g. inside a backtick
+// raw string) rendered wider than estimated. Mirrors the tab handling
+// in [[emit_str]], which counts the same tab toward the rendered column
+// (exactly there, since it knows the position).
+//
+// @param s: borrowed
+fn text_flat_width(s: str, tab_width: size) size = {
+	const bytes = strings::toutf8(s);
+	let w = 0z;
+	for (let i = 0z; i < len(bytes); i += 1) {
+		if (bytes[i] == '\t': u8) {
+			w += tab_width;
+		} else {
+			w += 1;
+		};
+	};
+	return w;
+};
+
 // size's max value
 //
 // @param d: borrowed
-fn flat_width(d: *doc) size = {
+fn flat_width(d: *doc, tab_width: size) size = {
 	match (*d) {
 	case let t: doc_text =>
-		return len(t.content);
+		return text_flat_width(t.content, tab_width);
 	case let l: doc_line =>
 		return len(l.flat);
 	case doc_hardline =>
@@ -249,21 +272,21 @@ fn flat_width(d: *doc) size = {
 	case doc_if_broken =>
 		return 0z;
 	case let g: doc_group =>
-		return sum_flat_width(g.items);
+		return sum_flat_width(g.items, tab_width);
 	case let n: doc_nest =>
-		return flat_width(n.inner);
+		return flat_width(n.inner, tab_width);
 	case let c: doc_concat =>
-		return sum_flat_width(c.items);
+		return sum_flat_width(c.items, tab_width);
 	case let f: doc_fill =>
-		return sum_flat_width(f.items);
+		return sum_flat_width(f.items, tab_width);
 	};
 };
 
 // @param items: borrowed
-fn sum_flat_width(items: []doc) size = {
+fn sum_flat_width(items: []doc, tab_width: size) size = {
 	let total = 0z;
 	for (let i = 0z; i < len(items); i += 1) {
-		const w = flat_width(&items[i]);
+		const w = flat_width(&items[i], tab_width);
 		if (w == WIDTH_INFINITY) return WIDTH_INFINITY;
 		// Saturating add — refuse to overflow.
 		if (total > WIDTH_INFINITY - w) return WIDTH_INFINITY;
@@ -333,7 +356,7 @@ fn render(
 		emit_break(out, indent, tab_width, cur_col, written, pending_tabs)?;
 	case let g: doc_group =>
 		const remaining = if (*cur_col >= max_col) 0z else max_col - *cur_col;
-		const w = sum_flat_width(g.items);
+		const w = sum_flat_width(g.items, tab_width);
 		const total = if (w == WIDTH_INFINITY) WIDTH_INFINITY
 			else if (tail_width == WIDTH_INFINITY) WIDTH_INFINITY
 			else if (w > WIDTH_INFINITY - tail_width) WIDTH_INFINITY
@@ -419,7 +442,7 @@ fn render_fill(
 	// the overflowing line. This matches prettier's behavior of
 	// pulling the first arg down to a fresh line when the call site
 	// is already wide.
-	const first_w = flat_width(&items[0]);
+	const first_w = flat_width(&items[0], tab_width);
 	const remaining0 = if (*cur_col >= max_col) 0z else max_col - *cur_col;
 	const first_tail = if (len(items) == 1) outer_tail else 0z;
 	const first_need = saturating_add(first_w, first_tail);
@@ -434,8 +457,8 @@ fn render_fill(
 		// the next content. Try to fit `flat(sep) + flat(content)`
 		// (plus the outer tail when this is the last content item)
 		// on the current line.
-		const sep_flat_w = flat_width(&items[i]);
-		const content_flat_w = flat_width(&items[i + 1]);
+		const sep_flat_w = flat_width(&items[i], tab_width);
+		const content_flat_w = flat_width(&items[i + 1], tab_width);
 		const tail = if (i + 2 >= len(items)) outer_tail else 0z;
 		const need = saturating_add(saturating_add(sep_flat_w, content_flat_w), tail);
 		const remaining = if (*cur_col >= max_col) 0z else max_col - *cur_col;
@@ -486,7 +509,7 @@ fn render_items(
 	pending_tabs: *i32,
 ) (void | io::error) = {
 	for (let i = 0z; i < len(items); i += 1) {
-		const my_tail = tail_after(items, i + 1, mode, outer_tail);
+		const my_tail = tail_after(items, i + 1, mode, tab_width, outer_tail);
 		render(out, &items[i], mode, max_col, indent, tab_width, my_tail, cur_col,
 			written, pending_tabs)?;
 	};
@@ -510,11 +533,12 @@ fn tail_after(
 	items: []doc,
 	from: size,
 	mode: render_mode,
+	tab_width: size,
 	outer_tail: size,
 ) size = {
 	let total = 0z;
 	for (let i = from; i < len(items); i += 1) {
-		const (w, broke) = line_lead_width(&items[i], mode);
+		const (w, broke) = line_lead_width(&items[i], mode, tab_width);
 		total += w;
 		if (broke) return total;
 	};
@@ -531,10 +555,10 @@ fn tail_after(
 // hardlines (flat = WIDTH_INFINITY), the group renders broken and we
 // recurse to find the prefix-on-current-line.
 // @param d: borrowed
-fn line_lead_width(d: *doc, mode: render_mode) (size, bool) = {
+fn line_lead_width(d: *doc, mode: render_mode, tab_width: size) (size, bool) = {
 	match (*d) {
 	case let t: doc_text =>
-		return (len(t.content), false);
+		return (text_flat_width(t.content, tab_width), false);
 	case let l: doc_line =>
 		switch (mode) {
 		case render_mode::FLAT =>
@@ -554,17 +578,17 @@ fn line_lead_width(d: *doc, mode: render_mode) (size, bool) = {
 			return (len(ib.text), false);
 		};
 	case let g: doc_group =>
-		const w = sum_flat_width(g.items);
+		const w = sum_flat_width(g.items, tab_width);
 		const inner_mode = if (w == WIDTH_INFINITY) render_mode::BROKEN
 			else render_mode::FLAT;
-		return line_lead_items(g.items, inner_mode);
+		return line_lead_items(g.items, inner_mode, tab_width);
 	case let n: doc_nest =>
-		return line_lead_width(n.inner, mode);
+		return line_lead_width(n.inner, mode, tab_width);
 	case let c: doc_concat =>
-		return line_lead_items(c.items, mode);
+		return line_lead_items(c.items, mode, tab_width);
 	case let f: doc_fill =>
 		if (len(f.items) == 0) return (0z, false);
-		const (w, broke) = line_lead_width(&f.items[0], mode);
+		const (w, broke) = line_lead_width(&f.items[0], mode, tab_width);
 		if (broke) return (w, true);
 		if (len(f.items) > 1) return (w, true);
 		return (w, false);
@@ -579,10 +603,14 @@ fn line_lead_width(d: *doc, mode: render_mode) (size, bool) = {
 };
 
 // @param items: borrowed
-fn line_lead_items(items: []doc, mode: render_mode) (size, bool) = {
+fn line_lead_items(
+	items: []doc,
+	mode: render_mode,
+	tab_width: size,
+) (size, bool) = {
 	let total = 0z;
 	for (let i = 0z; i < len(items); i += 1) {
-		const (w, broke) = line_lead_width(&items[i], mode);
+		const (w, broke) = line_lead_width(&items[i], mode, tab_width);
 		total += w;
 		if (broke) return (total, true);
 	};
@@ -625,7 +653,9 @@ fn emit_str(
 	// doc_text for embedded raw strings, etc.) reset the column; an
 	// embedded literal tab advances to the next `tab_width` stop, so
 	// a tab inside a raw string is counted the same way leading
-	// indentation is.
+	// indentation is. The flat-width estimator counts the same tab
+	// conservatively (see [[text_flat_width]]) so a group is never
+	// laid out flat and then overshoots here.
 	for (let i = 0z; i < len(bytes); i += 1) {
 		if (bytes[i] == '\n': u8) {
 			*cur_col = 0z;
