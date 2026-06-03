@@ -134,8 +134,8 @@ export fn finish_comments(cs: []comment_info) void = {
 // @returns: borrowed from c
 export fn pop_before(c: *comment_cursor, boundary: size) []comment_info = {
 	const start = c.pos;
-	for (c.pos < len(c.comments) &&
-	c.comments[c.pos].start_off < boundary; c.pos += 1) void;
+	for (c.pos < len(c.comments) && c.comments[c.pos].start_off < boundary;
+			c.pos += 1) void;
 	return c.comments[start..c.pos];
 };
 

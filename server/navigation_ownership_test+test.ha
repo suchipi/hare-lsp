@@ -33,7 +33,8 @@ fn hover_value(
 	defer free(line_str);
 	const ch_str = nav_format_int(ch: int);
 	defer free(ch_str);
-	const full = strings::concat(params, line_str, `,"character":`, ch_str, `}}`)!;
+	const full =
+		strings::concat(params, line_str, `,"character":`, ch_str, `}}`)!;
 	defer free(full);
 	let pv = json::loadstr(full)!;
 	defer json::finish(pv);

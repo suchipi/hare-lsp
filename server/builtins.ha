@@ -17,7 +17,10 @@ use strings;
 export fn lookup_builtin(name: str) ((str, str) | void) = {
 	for (let i = 0z; i < len(builtins); i += 1) {
 		if (builtins[i].name == name) {
-			return (strings::dup(builtins[i].sig)!, strings::dup(builtins[i].docs)!);
+			return (
+				strings::dup(builtins[i].sig)!,
+				strings::dup(builtins[i].docs)!,
+			);
 		};
 	};
 	return void;

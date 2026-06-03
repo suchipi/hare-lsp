@@ -66,7 +66,8 @@ fn th_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -120,7 +121,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const v = th_skip_to_response(out, 1.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// Expect at least one item (B).
 	assert(len(result) >= 1);
 	let found_b = false;
@@ -167,7 +169,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const v = th_skip_to_response(out, 2.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let found_wrapper = false;
 	for (let i = 0z; i < len(result); i += 1) {
 		const item = result[i] as json::object;
@@ -212,7 +215,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const v = th_skip_to_response(out, 3.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let found_a = false, found_b = false;
 	for (let i = 0z; i < len(result); i += 1) {
 		const item = result[i] as json::object;
@@ -249,7 +253,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const v = th_skip_to_response(out, 10.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// The only ident referenced by Node's underlying is Node itself,
 	// which we filter out. Result should be empty.
 	for (let i = 0z; i < len(result); i += 1) {
@@ -294,7 +299,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const v = th_skip_to_response(out, 11.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// Node refs itself; expect no items returned (filtered as self).
 	assert(len(result) == 0);
 };
@@ -327,7 +333,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const v = th_skip_to_response(out, 12.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let count_b = 0;
 	for (let i = 0z; i < len(result); i += 1) {
 		const item = result[i] as json::object;
@@ -398,7 +405,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const v = th_skip_to_response(out, 20.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// Exactly one supertype: X from mod_a's file. mod_b's X must not appear.
 	assert(
 		len(result) == 1,
@@ -471,7 +479,8 @@ fn th_index(s: *server, path: str, text: str) void = {
 	const v = th_skip_to_response(out, 21.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// Only mod_a's `T` should appear.
 	for (let i = 0z; i < len(result); i += 1) {
 		const item = result[i] as json::object;
@@ -483,7 +492,10 @@ fn th_index(s: *server, path: str, text: str) void = {
 		);
 		assert(item_name == "T", "subtype must be `T`, not `U` from mod_b");
 	};
-	assert(len(result) == 1, "subtypes should return exactly the in-module match");
+	assert(
+		len(result) == 1,
+		"subtypes should return exactly the in-module match"
+	);
 };
 
 // --- file fixture helpers ---

@@ -357,7 +357,8 @@ fn walk_expr(g: *scope_graph, scope: *scope_node, e: *ast::expr) void = {
 			walk_expr(g, scope, bd.init);
 		};
 	case let c: ast::compound_expr =>
-		const child = push_scope(g, scope, e.loc.start.off: u32, e.loc.end.off: u32);
+		const child = push_scope(g, scope, e.loc.start.off: u32,
+			e.loc.end.off: u32);
 		for (let i = 0z; i < len(c.exprs); i += 1) {
 			walk_expr(g, child, c.exprs[i]);
 		};
@@ -530,7 +531,8 @@ fn walk_match_case(
 			start = lex_loc_at(cstart),
 			end = lex_loc_at(cstart),
 		};
-		add_binding(cscope, mc.name, binding_kind::MATCH_BINDING, nloc, cstart, cend);
+		add_binding(cscope, mc.name, binding_kind::MATCH_BINDING, nloc, cstart,
+			cend);
 	};
 	for (let j = 0z; j < len(mc.exprs); j += 1) {
 		walk_expr(g, cscope, mc.exprs[j]);

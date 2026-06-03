@@ -66,7 +66,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -1295,8 +1296,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	assert(
-		strings::contains(value, "if condition opener") ||
-		strings::contains(value, "`if` condition opener")
+		strings::contains(value, "if condition opener")
+		|| strings::contains(value, "`if` condition opener")
 	);
 	assert(!strings::contains(value, "Call argument list"));
 };
@@ -1620,7 +1621,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 200.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(uri == "file:///x.ha");
 	const range = *(json::get(&result, "range") as *json::value) as json::object;
@@ -1712,7 +1714,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 400.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	// Should point at the on-disk file, not caller.ha.
 	assert(strings::hassuffix(uri, "hare-lsp-nav-crossfile.ha"));
@@ -1763,7 +1766,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 402.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(
 		strings::hassuffix(uri, "hare-lsp-nav-samefile-impl.ha"),
@@ -1804,7 +1808,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 401.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -1848,7 +1853,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 410.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -1894,7 +1900,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 411.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -1942,7 +1949,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 460.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -1988,7 +1996,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 461.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2041,7 +2050,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
-	const src = `export fn run(xs: []int) void = { for (let item &.. xs) void; };`;
+	const src =
+		`export fn run(xs: []int) void = { for (let item &.. xs) void; };`;
 	nav_open(&s, "file:///fe_ptr.ha", src);
 	const value = nav_hover_contents(&s, out, "file:///fe_ptr.ha", 0,
 		find_col(src, "item"), 702.0);
@@ -2203,7 +2213,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 450.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	// Should resolve to mod-a, not mod-b.
 	assert(strings::contains(uri, "lspmoda"));
@@ -2255,7 +2266,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 451.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(strings::contains(uri, "lspmodd"));
 };
@@ -2290,7 +2302,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 470.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2326,7 +2339,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 480.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2361,7 +2375,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 481.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2396,7 +2411,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 490.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2433,7 +2449,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 491.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2485,7 +2502,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 493.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2539,7 +2557,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 495.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2584,7 +2603,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 496.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2631,7 +2651,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 497.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2679,7 +2700,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 494.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2718,7 +2740,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 492.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2754,7 +2777,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 493.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2791,7 +2815,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 494.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2823,7 +2848,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = skip_to_response(out, 495.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -2873,7 +2899,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
 
-	const src = `export fn run(pair: (int, str)) void = { let second = pair.1; };`;
+	const src =
+		`export fn run(pair: (int, str)) void = { let second = pair.1; };`;
 	nav_open(&s, "file:///a3.ha", src);
 	const value = nav_hover_contents(&s, out, "file:///a3.ha", 0,
 		find_col(src, "second"), 732.0);
@@ -3440,7 +3467,8 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 
 fn hover_value_str(v: json::value) str = {
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	return *(json::get(&contents, "value") as *json::value) as str;
@@ -3470,7 +3498,8 @@ fn hover_value_str(v: json::value) str = {
 	const v = skip_to_response(out, 500.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -3504,7 +3533,8 @@ fn hover_value_str(v: json::value) str = {
 	const v = skip_to_response(out, 501.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -3537,7 +3567,8 @@ fn hover_value_str(v: json::value) str = {
 	const v = skip_to_response(out, 503.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -3571,7 +3602,8 @@ fn hover_value_str(v: json::value) str = {
 	const v = skip_to_response(out, 502.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -3669,7 +3701,8 @@ fn find_col(src: str, needle: str) u32 = {
 // @returns: owned
 fn pos_params(uri: str, line: u32, ch: u32) str = {
 	return strings::concat(`{"textDocument":{"uri":"`, uri,
-		`"},"position":{"line":`, fmt_u32(line), `,"character":`, fmt_u32(ch), `}}`)!;
+		`"},"position":{"line":`, fmt_u32(line), `,"character":`, fmt_u32(ch),
+		`}}`)!;
 };
 
 // Sends a `textDocument/hover` at (line, ch) and returns the response's
@@ -3699,7 +3732,8 @@ fn nav_hover_contents(
 	const v = skip_to_response(out, id);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;

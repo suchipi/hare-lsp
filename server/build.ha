@@ -287,8 +287,8 @@ fn parse_diagnostic_line(line: str, cwd: str) (build_diagnostic | void) = {
 	case =>
 		return void;
 	};
-	if (kind_str != "error" && kind_str != "syntax error" &&
-			kind_str != "warning") {
+	if (kind_str != "error" && kind_str != "syntax error"
+			&& kind_str != "warning") {
 		return void;
 	};
 

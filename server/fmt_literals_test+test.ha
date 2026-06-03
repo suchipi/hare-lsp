@@ -416,7 +416,8 @@ fn fmt_literals_roundtrip(src: str) str = {
 };
 
 @test fn fmt_struct_type_source_multiline_stays_multiline() void = {
-	const src = "type point = struct {\n"
+	const src =
+		"type point = struct {\n"
 		"\tx: int,\n"
 		"\ty: int,\n"
 		"};\n";

@@ -143,7 +143,10 @@ def MINIMAL_INITIALIZE: str =
 	case =>
 		fmt::fatalf("shutdown response result must be null, got: {}", text);
 	};
-	assert(!has_field(&obj, "error"), "shutdown response must not carry an error");
+	assert(
+		!has_field(&obj, "error"),
+		"shutdown response must not carry an error"
+	);
 
 	// exit notification — server should terminate with exit code 0
 	// because shutdown was sent first.

@@ -36,7 +36,8 @@ use strings;
 	// walker doesn't try to parse `hare-shim.sh` (it scans the root
 	// for `*.ha`) and so that cleanup_workspace does not wipe them
 	// between assertion and inspection if debugging a failure.
-	const records_path = strings::concat(cwd, "/.tmp/e2e-extra-args-records.txt")!;
+	const records_path =
+		strings::concat(cwd, "/.tmp/e2e-extra-args-records.txt")!;
 	defer free(records_path);
 	const shim_path = strings::concat(cwd, "/.tmp/e2e-extra-args-shim.sh")!;
 	defer free(shim_path);

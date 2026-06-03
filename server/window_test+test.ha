@@ -192,7 +192,8 @@ fn next_framed(data: []u8) (json::value, size) = {
 	const o2 = v2 as json::object;
 	assert(*(json::get(&o2, "method") as *json::value) as str == "$/progress");
 	const params2 = *(json::get(&o2, "params") as *json::value) as json::object;
-	const value2 = *(json::get(&params2, "value") as *json::value) as json::object;
+	const value2 =
+		*(json::get(&params2, "value") as *json::value) as json::object;
 	assert(*(json::get(&value2, "kind") as *json::value) as str == "begin");
 
 	// Message 3: $/progress {kind: "report", percentage: 50}
@@ -201,7 +202,8 @@ fn next_framed(data: []u8) (json::value, size) = {
 	off += off3;
 	const o3 = v3 as json::object;
 	const params3 = *(json::get(&o3, "params") as *json::value) as json::object;
-	const value3 = *(json::get(&params3, "value") as *json::value) as json::object;
+	const value3 =
+		*(json::get(&params3, "value") as *json::value) as json::object;
 	assert(*(json::get(&value3, "kind") as *json::value) as str == "report");
 	assert(*(json::get(&value3, "percentage") as *json::value) as f64 == 50.0);
 
@@ -210,7 +212,8 @@ fn next_framed(data: []u8) (json::value, size) = {
 	defer json::finish(v4);
 	const o4 = v4 as json::object;
 	const params4 = *(json::get(&o4, "params") as *json::value) as json::object;
-	const value4 = *(json::get(&params4, "value") as *json::value) as json::object;
+	const value4 =
+		*(json::get(&params4, "value") as *json::value) as json::object;
 	assert(*(json::get(&value4, "kind") as *json::value) as str == "end");
 };
 

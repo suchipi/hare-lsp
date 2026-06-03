@@ -280,7 +280,8 @@ use strings;
 	// under the workspace) and skip it; the build itself runs
 	// against the saved module with stdlib resolved via the
 	// inherited HAREPATH.
-	const body = "use strings;\nexport fn upper(s: str) str = strings::dup(s)!;\n";
+	const body =
+		"use strings;\nexport fn upper(s: str) str = strings::dup(s)!;\n";
 	write_test_file(main_path, body);
 
 	let s = spawn_session();
@@ -674,7 +675,8 @@ use strings;
 		strings::concat(
 			`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"`,
 			uri,
-			`","version":2},"contentChanges":[{"text":"export fn bad( = void;\n"}]}}`)!;
+			`","version":2},"contentChanges":[{"text":"export fn bad( = void;\n"}]}}`
+		)!;
 	defer free(change);
 	send(&s, strings::toutf8(change));
 

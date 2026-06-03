@@ -293,8 +293,8 @@ fn add_unused_import_actions(
 		if (size_in_list(covered, idx)) continue;
 		const imp = &pr.subunit.imports[idx];
 		const (rm_start, rm_end) = import_removal_range(data, imp);
-		if (!range_overlaps_unused(data, doc.buf.line_index, enc, req_range, rm_start,
-					rm_end)) continue;
+		if (!range_overlaps_unused(data, doc.buf.line_index, enc, req_range,
+					rm_start, rm_end)) continue;
 
 		const title = unused_import_title(imp);
 		defer free(title);
@@ -616,7 +616,8 @@ fn unused_import_title(imp: *ast::import) str = {
 		defer free(joined);
 		const inner = strings::join(", ", m...)!;
 		defer free(inner);
-		return strings::concat("Remove unused import '", joined, "::{", inner, "}'")!;
+		return strings::concat("Remove unused import '", joined, "::{", inner,
+			"}'")!;
 	case ast::import_wildcard =>
 		return strings::dup("Remove unused import")!;
 	};
@@ -638,10 +639,9 @@ fn import_removal_range(data: []u8, imp: *ast::import) (size, size) = {
 		const b = data[s - 1];
 		if (b != ' ': u8 && b != '\t': u8) break;
 	};
-	if (s >= 3 && data[s - 3] == 'u': u8 && data[s - 2] == 's': u8 &&
-			data[s - 1] == 'e': u8 &&
-			(s == 3 ||
-			!analysis::is_ident_byte(data[s - 4]))) {
+	if (s >= 3 && data[s - 3] == 'u': u8 && data[s - 2] == 's': u8
+			&& data[s - 1] == 'e': u8
+			&& (s == 3 || !analysis::is_ident_byte(data[s - 4]))) {
 		s -= 3;
 	};
 	let e = imp.loc.end.off: size + 1;
@@ -695,9 +695,15 @@ fn range_overlaps_unused(
 		return true;
 	};
 	const a = analysis::position_to_byte(data, line_index, enc,
-		analysis::position { line = r.start.line, character = r.start.character });
+		analysis::position {
+			line = r.start.line,
+			character = r.start.character,
+		});
 	const b = analysis::position_to_byte(data, line_index, enc,
-		analysis::position { line = r.end.line, character = r.end.character });
+		analysis::position {
+			line = r.end.line,
+			character = r.end.character,
+		});
 	if (a == b) return a >= imp_start && a <= imp_end;
 	return a < imp_end && imp_start < b;
 };

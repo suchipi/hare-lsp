@@ -70,7 +70,8 @@ use strings;
 	defer match (os::rmdirall(root)) {
 	case => void;
 	};
-	write_tmp(".tmp/hare-lsp-collect-ha-files-test/a.ha", "fn x() void = void;\n");
+	write_tmp(".tmp/hare-lsp-collect-ha-files-test/a.ha",
+		"fn x() void = void;\n");
 	write_tmp(".tmp/hare-lsp-collect-ha-files-test/sub/b.ha",
 		"fn y() void = void;\n");
 	write_tmp(".tmp/hare-lsp-collect-ha-files-test/notes.txt", "ignore me");
@@ -162,7 +163,8 @@ fn write_tmp(path: str, body: str) void = {
 	let idx = new_workspace_index();
 	defer finish_workspace_index(&idx);
 	index_file(&idx, "/a.ha",
-		strings::toutf8("fn parse_thing() void = void;\nfn other() void = void;\n"));
+		strings::toutf8("fn parse_thing() void = void;\nfn other() void = void;\n")
+	);
 	const m = fuzzy_search(&idx, "PARSE");
 	defer free(m);
 	assert(len(m) == 1);

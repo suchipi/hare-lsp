@@ -161,7 +161,8 @@ export fn handle_workspace_symbol(s: *server, r: lsp::request) void = {
 					cancelled = true;
 					break;
 				};
-				append(arr, encode_workspace_symbol(&s.stdlib_index.entries[stdlib[i]]))!;
+				append(arr, encode_workspace_symbol(
+					&s.stdlib_index.entries[stdlib[i]]))!;
 			};
 	};
 	if (cancelled) return;

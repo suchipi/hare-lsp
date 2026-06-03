@@ -96,7 +96,8 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	make_dir(root);
 	defer cleanup(root);
 	write_test_file(strings::concat(root, "/a.ha")!, "fn a() void = void;\n");
-	write_test_file(strings::concat(root, "/b.skip.ha")!, "fn b() void = void;\n");
+	write_test_file(strings::concat(root, "/b.skip.ha")!,
+		"fn b() void = void;\n");
 	write_test_file(strings::concat(root, "/.harefmtignore")!, "*.skip.ha\n");
 
 	const abs = os::resolve(root);
@@ -242,7 +243,8 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	make_dir(root);
 	defer cleanup(root);
 	make_dir(strings::concat(root, "/real")!);
-	write_test_file(strings::concat(root, "/real/a.ha")!, "fn a() void = void;\n");
+	write_test_file(strings::concat(root, "/real/a.ha")!,
+		"fn a() void = void;\n");
 	// Symlink at root level pointing to the real dir.
 	const link_path = strings::concat(root, "/link")!;
 	defer free(link_path);
@@ -267,7 +269,8 @@ fn walk_collect(root: str, opts: ignore_opts) []str = {
 	make_dir(root);
 	defer cleanup(root);
 	make_dir(strings::concat(root, "/real")!);
-	write_test_file(strings::concat(root, "/real/a.ha")!, "fn a() void = void;\n");
+	write_test_file(strings::concat(root, "/real/a.ha")!,
+		"fn a() void = void;\n");
 	make_symlink("real", strings::concat(root, "/link")!);
 
 	let opts = default_opts();

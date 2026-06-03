@@ -66,7 +66,10 @@ use strings;
 	// silent shadowing. Catch them explicitly.
 	for (let i = 0z; i < len(builtins); i += 1) {
 		for (let j = i + 1; j < len(builtins); j += 1) {
-			assert(builtins[i].name != builtins[j].name, "duplicate builtin entry name");
+			assert(
+				builtins[i].name != builtins[j].name,
+				"duplicate builtin entry name"
+			);
 		};
 	};
 };

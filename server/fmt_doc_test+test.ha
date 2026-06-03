@@ -161,5 +161,8 @@ use strings;
 	defer doc_finish(&br_d);
 	const wide = pretty_str(&br_d, 10, 0, 8)!;
 	defer free(wide);
-	assert(wide == "ab\nx\ty", "tab as 8 columns: group breaks to avoid overshoot");
+	assert(
+		wide == "ab\nx\ty",
+		"tab as 8 columns: group breaks to avoid overshoot"
+	);
 };

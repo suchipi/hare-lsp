@@ -97,8 +97,8 @@ fn line_content_end(text: []u8, line_index: []size, line: size) size = {
 	} else {
 		yield len(text);
 	};
-	if (end > 0 && end <= len(text) && end - 1 < len(text) &&
-			text[end - 1] == '\r': u8) {
+	if (end > 0 && end <= len(text) && end - 1 < len(text)
+			&& text[end - 1] == '\r': u8) {
 		end -= 1;
 	};
 	return end;

@@ -283,13 +283,9 @@ fn first_word(s: str) str = {
 	let end = 0z;
 	for (end < len(bytes); end += 1) {
 		const b = bytes[end];
-		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8 ||
-				b == '.': u8 ||
-				b == ',': u8 ||
-				b == ';': u8 ||
-				b == '\'': u8 ||
-				b == '"': u8 ||
-				b == '`': u8) break;
+		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8
+				|| b == '.': u8 || b == ',': u8 || b == ';': u8 || b == '\'': u8
+				|| b == '"': u8 || b == '`': u8) break;
 	};
 	return strings::dup(strings::sub(s, 0, end))!;
 };

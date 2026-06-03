@@ -105,8 +105,8 @@ export fn hit_resolves_to(
 	match (analysis::workspace_lookup_for_subunit(&s.workspace_index, su,
 		file_module, qualifier, ident_str)) {
 	case let e: *analysis::workspace_entry =>
-		return e.path == expected.path && e.short_name == expected.short_name &&
-		e.kind == expected.kind;
+		return e.path == expected.path && e.short_name == expected.short_name
+		&& e.kind == expected.kind;
 	case void =>
 		return false;
 	};

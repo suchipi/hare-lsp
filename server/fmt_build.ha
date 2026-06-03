@@ -130,7 +130,8 @@ export fn build_subunit_doc(
 		// instead, so the line check inside the flush picks up
 		// the actual closing `;` line.
 		const decl_src_end = source_content_end(data, decl_off, next_decl_off);
-		flush_trailing_comments_to_eol(&items, c, next_decl_off, decl_src_end, data);
+		flush_trailing_comments_to_eol(&items, c, next_decl_off, decl_src_end,
+			data);
 		append(items, hardline())!;
 		if (i + 1 < len(su.decls)) {
 			// Blank line between top-level decls — always emit
@@ -2217,10 +2218,8 @@ fn type_has_const_prefix(bc: *build_ctx, loc: ast::location) bool = {
 	// like `xconst`.
 	if (i == 5) return true;
 	const before = bc.data[i - 6];
-	return before == ' ': u8 || before == '\t': u8 || before == '\n': u8 ||
-	before == '(': u8 ||
-	before == ',': u8 ||
-	before == '=': u8;
+	return before == ' ': u8 || before == '\t': u8 || before == '\n': u8
+	|| before == '(': u8 || before == ',': u8 || before == '=': u8;
 };
 
 // Returns the verbatim source text of a string literal at `loc`,
@@ -2260,9 +2259,10 @@ fn verbatim_string_at(bc: *build_ctx, loc: ast::location) (str | void) = {
 	let final_close = close;
 	let i = close + 1;
 	for (i < end) {
-		for (i < end &&
-		(data[i] == ' ': u8 || data[i] == '\t': u8 ||
-		data[i] == '\n': u8); i += 1) void;
+		for (
+				i < end
+				&& (data[i] == ' ': u8 || data[i] == '\t': u8 || data[i] == '\n': u8);
+				i += 1) void;
 		if (i >= end) break;
 		const delim = data[i];
 		if (delim != '`': u8 && delim != '"': u8) break;

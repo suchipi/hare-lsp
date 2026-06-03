@@ -200,7 +200,10 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const off = analysis::position_to_byte(data, doc.buf.line_index,
 		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 
 	// Inspect the bytes around `off` to decide which kind of completion
 	// the cursor is in.
@@ -324,8 +327,8 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 	// preceded by whitespace). The byte before the dot must be one that
 	// can plausibly terminate an expression - see
 	// [[receiver_ends_before_dot]].
-	if (s >= 1 && data[s - 1] == '.': u8 && s >= 2 &&
-			receiver_ends_before_dot(data, s - 1)) {
+	if (s >= 1 && data[s - 1] == '.': u8 && s >= 2
+			&& receiver_ends_before_dot(data, s - 1)) {
 		return prefix_info {
 			kind = prefix_kind::MEMBER,
 			module = strings::dup("")!,
@@ -486,8 +489,8 @@ fn add_local_bindings(
 	for (let i = 0z; i < len(bindings); i += 1) {
 		const b = &bindings[i];
 		if (b.kind == analysis::binding_kind::TOPLEVEL_DECL) continue;
-		if (len(info.partial) > 0 &&
-				!strings::hasprefix(b.name, info.partial)) continue;
+		if (len(info.partial) > 0
+				&& !strings::hasprefix(b.name, info.partial)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", b.name: json::value)!;
 		json::put(&item, "kind", binding_kind_to_completion(b.kind))!;
@@ -584,8 +587,8 @@ fn add_file_locals(
 	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
 		const sym = &cache.idx.symbols[i];
 		if (types_only && sym.kind != analysis::symbol_kind::TYPE) continue;
-		if (len(partial) > 0 &&
-				!strings::hasprefix(sym.short_name, partial)) continue;
+		if (len(partial) > 0
+				&& !strings::hasprefix(sym.short_name, partial)) continue;
 		if (already_emitted(exclude, sym.short_name)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", sym.short_name: json::value)!;
@@ -635,7 +638,8 @@ fn add_workspace_symbols(
 	for (let i = 0z; i < cap && added < 200z; i += 1) {
 		const e = &s.workspace_index.entries[i];
 		if (types_only && e.kind != analysis::symbol_kind::TYPE) continue;
-		if (len(partial) > 0 && !strings::hasprefix(e.short_name, partial)) continue;
+		if (len(partial) > 0
+				&& !strings::hasprefix(e.short_name, partial)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", e.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_completion(e.kind))!;
@@ -954,7 +958,8 @@ fn add_module_members(
 	// demand so e.g. `strings::` lists stdlib symbols; a no-op once the
 	// module has already been indexed or when it isn't on any search path.
 	ensure_stdlib_module_indexed(s, module);
-	emit_module_members_from(&s.workspace_index, arr, module, partial, types_only);
+	emit_module_members_from(&s.workspace_index, arr, module, partial,
+		types_only);
 	emit_module_members_from(&s.stdlib_index, arr, module, partial, types_only);
 };
 
@@ -978,7 +983,8 @@ fn emit_module_members_from(
 		if (e.module != module) continue;
 		if (!e.exported) continue;
 		if (types_only && e.kind != analysis::symbol_kind::TYPE) continue;
-		if (len(partial) > 0 && !strings::hasprefix(e.short_name, partial)) continue;
+		if (len(partial) > 0
+				&& !strings::hasprefix(e.short_name, partial)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", e.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_completion(e.kind))!;
@@ -1484,10 +1490,11 @@ fn emit_struct_member_completions(
 	if (depth >= MEMBER_RESOLVE_MAX_DEPTH) return;
 	match (holder.t.repr) {
 	case let st: ast::struct_type =>
-		emit_members_from_list(s, doc, holder, st.members, partial, arr, seen, depth);
+		emit_members_from_list(s, doc, holder, st.members, partial, arr, seen,
+			depth);
 	case let ut: ast::union_type =>
-		emit_members_from_list(s, doc, holder, ut: []ast::struct_member, partial, arr,
-			seen, depth);
+		emit_members_from_list(s, doc, holder, ut: []ast::struct_member, partial,
+			arr, seen, depth);
 	case let p: ast::pointer_type =>
 		emit_struct_member_completions(s, doc,
 			located_type {
@@ -1942,7 +1949,8 @@ fn resolve_file_local(s: *server, uri: str, name: str) ((str, str) | void) = {
 		case void =>
 			return void;
 		};
-		const sig = render_decl_signature(s, doc, &cache.pr.subunit.decls[decl_idx]);
+		const sig = render_decl_signature(s, doc,
+			&cache.pr.subunit.decls[decl_idx]);
 		const docs = strings::dup(sym.docs)!;
 		return (sig, docs);
 	case void =>

@@ -236,8 +236,8 @@ fn scan_expr_for_member(
 			// the first byte of the LAST rune of `field`. Compare
 			// against `field_start + last_rune_offset(name)` so
 			// multi-rune field names match.
-			if (fd.field == name &&
-					e.loc.end.off: size == field_start + last_rune_offset(name)) {
+			if (fd.field == name
+					&& e.loc.end.off: size == field_start + last_rune_offset(name)) {
 				return e;
 			};
 			return void;
@@ -251,8 +251,8 @@ fn scan_expr_for_member(
 			// and `loc.end.off` (the start of the last consumed rune)
 			// lands on the index token, so the same rune-aware match used
 			// for access_field above applies here too.
-			if (tuple_index_value(tu.value) is size &&
-					e.loc.end.off: size == field_start + last_rune_offset(name)) {
+			if (tuple_index_value(tu.value) is size
+					&& e.loc.end.off: size == field_start + last_rune_offset(name)) {
 				return e;
 			};
 			return scan_expr_for_member(tu.value, field_start, name);
@@ -1199,7 +1199,8 @@ fn walk_for_binding_type(
 				};
 			};
 			for (let j = 0z; j < len(mc.exprs); j += 1) {
-				match (walk_for_binding_type(s, doc, su, mc.exprs[j], name, off, depth)) {
+				match (walk_for_binding_type(s, doc, su, mc.exprs[j], name, off,
+					depth)) {
 				case let lt: located_type =>
 					return lt;
 				case void => void;

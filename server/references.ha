@@ -54,7 +54,10 @@ export fn handle_references(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const off = analysis::position_to_byte(data, doc.buf.line_index,
 		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
 		yield r;
@@ -348,7 +351,8 @@ fn scan_text_for_ident_static_in_range(
 	start: size,
 	end: size,
 ) []json::value = {
-	const offsets = scan_text_for_ident_offsets_in_range(data, target, start, end);
+	const offsets = scan_text_for_ident_offsets_in_range(data, target, start,
+		end);
 	defer free(offsets);
 	let arr: []json::value = [];
 	for (let i = 0z; i < len(offsets); i += 1) {
@@ -462,7 +466,10 @@ export fn handle_prepare_rename(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const off = analysis::position_to_byte(data, doc.buf.line_index,
 		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
 		yield r;
@@ -527,7 +534,10 @@ export fn handle_rename(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const off = analysis::position_to_byte(data, doc.buf.line_index,
 		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
 		yield r;

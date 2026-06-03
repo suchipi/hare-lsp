@@ -253,12 +253,18 @@ fn lookup_operator(name: str, role: op_role) ((str, str) | void) = {
 	for (let i = 0z; i < len(operators); i += 1) {
 		if (operators[i].name != name) continue;
 		if (operators[i].role != role) continue;
-		return (strings::dup(operators[i].sig)!, strings::dup(operators[i].docs)!);
+		return (
+			strings::dup(operators[i].sig)!,
+			strings::dup(operators[i].docs)!,
+		);
 	};
 	for (let i = 0z; i < len(operators); i += 1) {
 		if (operators[i].name != name) continue;
 		if (operators[i].role == op_role::ANY) {
-			return (strings::dup(operators[i].sig)!, strings::dup(operators[i].docs)!);
+			return (
+				strings::dup(operators[i].sig)!,
+				strings::dup(operators[i].docs)!,
+			);
 		};
 	};
 	return void;
@@ -483,7 +489,8 @@ fn classify_lbrace_role(data: []u8, brace_pos: size) op_role = {
 	for (i > 0) {
 		i -= 1;
 		const b = data[i];
-		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8) continue;
+		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8
+				|| b == '\r': u8) continue;
 		if (b == '=': u8) {
 			if (i > 0 && data[i - 1] == '=': u8) {
 				return op_role::COMPOUND_BLOCK;
@@ -513,8 +520,8 @@ fn classify_lbrace_role(data: []u8, brace_pos: size) op_role = {
 				let j = start;
 				for (j > 0; j -= 1) {
 					const bb = data[j - 1];
-					if (bb != ' ': u8 && bb != '\t': u8 && bb != '\n': u8 &&
-							bb != '\r': u8) break;
+					if (bb != ' ': u8 && bb != '\t': u8 && bb != '\n': u8
+							&& bb != '\r': u8) break;
 				};
 				if (j >= 4) {
 					const prev_word = strings::fromutf8(data[j - 4..j])!;
@@ -557,8 +564,8 @@ fn classify_lbrace_after_rparen(data: []u8, rparen_pos: size) op_role = {
 		const b = data[j - 1];
 		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 && b != '\r': u8) break;
 	};
-	if (j == 0 ||
-			!analysis::is_ident_byte(data[j - 1])) return op_role::COMPOUND_BLOCK;
+	if (j == 0
+			|| !analysis::is_ident_byte(data[j - 1])) return op_role::COMPOUND_BLOCK;
 	let end = j;
 	let start = j;
 	for (start > 0; start -= 1) {
@@ -627,8 +634,8 @@ fn is_empty_bracket_pair(data: []u8, bracket_pos: size) bool = {
 	for (i < len(data); i += 1) {
 		const b = data[i];
 		if (b == ']': u8) return true;
-		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8 &&
-				b != '\r': u8) return false;
+		if (b != ' ': u8 && b != '\t': u8 && b != '\n': u8
+				&& b != '\r': u8) return false;
 	};
 	return false;
 };
@@ -696,8 +703,8 @@ fn classify_lparen_role(data: []u8, paren_pos: size) op_role = {
 			let j = start;
 			for (j > 0; j -= 1) {
 				const bb = data[j - 1];
-				if (bb != ' ': u8 && bb != '\t': u8 && bb != '\n': u8 &&
-						bb != '\r': u8) break;
+				if (bb != ' ': u8 && bb != '\t': u8 && bb != '\n': u8
+						&& bb != '\r': u8) break;
 			};
 			if (j >= 2) {
 				const prev_word = strings::fromutf8(data[j - 2..j])!;
@@ -806,7 +813,8 @@ fn is_label_colon(data: []u8, op_start: size) bool = {
 	for (i > 0) {
 		i -= 1;
 		const b = data[i];
-		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8) continue;
+		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8
+				|| b == '\r': u8) continue;
 		if (b == '{': u8) return true;
 		if (!analysis::is_ident_byte(b)) return false;
 		let end = i + 1;
@@ -990,7 +998,8 @@ fn prev_token_is_type_marker(data: []u8, pos: size) bool = {
 	for (i > 0) {
 		i -= 1;
 		const b = data[i];
-		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8) continue;
+		if (b == ' ': u8 || b == '\t': u8 || b == '\n': u8
+				|| b == '\r': u8) continue;
 		switch (b) {
 		case ':': u8 =>
 			return true;

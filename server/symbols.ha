@@ -159,7 +159,12 @@ fn build_decl_document_symbol(
 		);
 	case let g: ast::decl_global =>
 		const k = if (g.is_const) SK_CONSTANT else SK_VARIABLE;
-		yield (ident_join_borrowed(g.ident), k, false, null: nullable *ast::_type);
+		yield (
+			ident_join_borrowed(g.ident),
+			k,
+			false,
+			null: nullable *ast::_type,
+		);
 	case let c: ast::decl_const =>
 		yield (
 			ident_join_borrowed(c.ident),
@@ -484,7 +489,10 @@ export fn handle_document_highlight(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const off = analysis::position_to_byte(data, doc.buf.line_index,
 		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	const ident_range = match (analysis::ident_at(data, off)) {
 	case let r: (size, size) =>
 		yield r;
@@ -659,7 +667,10 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		// L2: containing decl (if any).
 		match (analysis::symbol_at(&cache.idx, off)) {
 		case let p: *analysis::symbol =>
-			append(levels, (p.span.start.off: size, p.span.end.off: size))!;
+			append(levels, (
+				p.span.start.off: size,
+				p.span.end.off: size,
+			))!;
 		case void => void;
 		};
 
@@ -671,8 +682,8 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		let unique: [](size, size) = [];
 		defer free(unique);
 		for (let j = 0z; j < len(levels); j += 1) {
-			if (len(unique) > 0 && unique[len(unique) - 1].0 == levels[j].0 &&
-					unique[len(unique) - 1].1 == levels[j].1) {
+			if (len(unique) > 0 && unique[len(unique) - 1].0 == levels[j].0
+					&& unique[len(unique) - 1].1 == levels[j].1) {
 				continue;
 			};
 			// Each outer level must strictly contain the previous one.
@@ -691,8 +702,10 @@ export fn handle_selection_range(s: *server, r: lsp::request) void = {
 		let outer_obj: (json::value | void) = void;
 		for (let j = len(unique); j > 0; j -= 1) {
 			const rng = unique[j - 1];
-			const sp = analysis::byte_to_position(data, doc.buf.line_index, enc, rng.0);
-			const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, rng.1);
+			const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
+				rng.0);
+			const ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
+				rng.1);
 			let o = json::newobject();
 			json::put(&o, "range", encode_range_pos(sp, ep))!;
 			match (outer_obj) {

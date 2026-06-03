@@ -264,7 +264,8 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 
 	// Build a single full-document text edit.
 	const enc = position_encoding(s);
-	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc, 0);
+	const start_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		0);
 	const end_pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
 		len(data));
 	let edit = json::newobject();
@@ -367,7 +368,8 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 	};
 
 	// Format the run of selected decls with comment interleaving.
-	const decl_range_start = pr.subunit.decls[first_idx: size].loc.start.off: size;
+	const decl_range_start =
+		pr.subunit.decls[first_idx: size].loc.start.off: size;
 	const decl_range_end = pr.subunit.decls[last_idx: size].loc.end.off: size;
 	const cs = collect_comments(data);
 	defer finish_comments(cs);
@@ -476,7 +478,10 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const enc = position_encoding(s);
 	const cursor_off = analysis::position_to_byte(data, doc.buf.line_index, enc,
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	if (cursor_off == 0 || cursor_off > len(data)) {
 		send_array_result(s, r.id, []);
 		return;
@@ -491,7 +496,8 @@ export fn handle_on_type_formatting(s: *server, r: lsp::request) void = {
 
 	// Find the start of the line containing the `}`.
 	let line_start = close_at;
-	for (line_start > 0 && data[line_start - 1] != '\n': u8; line_start -= 1) void;
+	for (line_start > 0 && data[line_start - 1] != '\n': u8;
+			line_start -= 1) void;
 
 	// Count current leading whitespace on the line.
 	let cur_ws_end = line_start;

@@ -66,7 +66,8 @@ export fn run_doctor() int = {
 		fmt::printfln("[OK] hare found at {}", p)!;
 		report_hare_version();
 	case void =>
-		fmt::println("[FAIL] hare not found on $PATH "
+		fmt::println(
+			"[FAIL] hare not found on $PATH "
 			"(install Hare v0.26.0)")!;
 		failed = true;
 	};
@@ -194,7 +195,8 @@ export fn run_doctor() int = {
 				"writable", s)!;
 			failed = true;
 		} else {
-			fmt::printfln("[OK] HARE_LSP_LOG_DIR={} is absolute "
+			fmt::printfln(
+				"[OK] HARE_LSP_LOG_DIR={} is absolute "
 				"and writable", s)!;
 		};
 	case void =>
@@ -209,7 +211,8 @@ export fn run_doctor() int = {
 	match (os::getenv("HARE_LSP_LOG_LEVEL")) {
 	case let s: str =>
 		if (len(s) == 0) {
-			fmt::println("[OK] HARE_LSP_LOG_LEVEL not set "
+			fmt::println(
+				"[OK] HARE_LSP_LOG_LEVEL not set "
 				"(defaults to info)")!;
 		} else {
 			match (server::parse_log_level(s)) {
@@ -223,7 +226,8 @@ export fn run_doctor() int = {
 			};
 		};
 	case void =>
-		fmt::println("[OK] HARE_LSP_LOG_LEVEL not set "
+		fmt::println(
+			"[OK] HARE_LSP_LOG_LEVEL not set "
 			"(defaults to info)")!;
 	};
 
@@ -247,7 +251,8 @@ export fn run_doctor() int = {
 						"unset it or pick a positive "
 						"value")!;
 				} else if (n % (1024 * 1024) == 0) {
-					fmt::printfln("[OK] HARE_LSP_MAX_BODY_BYTES={} "
+					fmt::printfln(
+						"[OK] HARE_LSP_MAX_BODY_BYTES={} "
 						"({} MiB)", n, n / (1024 * 1024))!;
 				} else {
 					fmt::printfln("[OK] HARE_LSP_MAX_BODY_BYTES={}", n)!;

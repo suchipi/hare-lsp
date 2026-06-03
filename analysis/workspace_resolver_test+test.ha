@@ -16,11 +16,12 @@ use strings;
 
 	// Use mod_a; bare reference to `shared` resolves to mod_a/file.ha.
 	const pr_a = parse_recover(
-		strings::toutf8("use mod_a;\nfn caller() int = shared();\n"), "caller_a.ha");
+		strings::toutf8("use mod_a;\nfn caller() int = shared();\n"),
+		"caller_a.ha");
 	let pr_a_local = pr_a;
 	defer finish_parse_result(&pr_a_local);
-	const entry_a = workspace_lookup_for_subunit(&idx, &pr_a_local.subunit, "", "",
-		"shared");
+	const entry_a = workspace_lookup_for_subunit(&idx, &pr_a_local.subunit, "",
+		"", "shared");
 	assert(entry_a is *workspace_entry, "resolver should find a match");
 	const e_a = entry_a as *workspace_entry;
 	assert(
@@ -29,11 +30,12 @@ use strings;
 	);
 
 	const pr_b = parse_recover(
-		strings::toutf8("use mod_b;\nfn caller() int = shared();\n"), "caller_b.ha");
+		strings::toutf8("use mod_b;\nfn caller() int = shared();\n"),
+		"caller_b.ha");
 	let pr_b_local = pr_b;
 	defer finish_parse_result(&pr_b_local);
-	const entry_b = workspace_lookup_for_subunit(&idx, &pr_b_local.subunit, "", "",
-		"shared");
+	const entry_b = workspace_lookup_for_subunit(&idx, &pr_b_local.subunit, "",
+		"", "shared");
 	assert(entry_b is *workspace_entry, "resolver should find a match");
 	const e_b = entry_b as *workspace_entry;
 	assert(

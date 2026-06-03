@@ -465,8 +465,8 @@ fn free_diag_slice(arr: []json::value) void = {
 //
 // @param message: borrowed
 fn severity_for(message: str) f64 = {
-	if (strings::contains(message, "unused") ||
-			strings::contains(message, "unreachable")) {
+	if (strings::contains(message, "unused")
+			|| strings::contains(message, "unreachable")) {
 		return 2.0;
 	};
 	return 1.0;
@@ -545,8 +545,8 @@ export fn apply_unnecessary_tag_if_match(
 	d: *json::object,
 	message: str,
 ) void = {
-	if (strings::contains(message, "unused") ||
-			strings::contains(message, "unreachable")) {
+	if (strings::contains(message, "unused")
+			|| strings::contains(message, "unreachable")) {
 		let tags: []json::value = [];
 		append(tags, DIAG_TAG_UNNECESSARY: json::value)!;
 		json::put(d, "tags", tags: json::value)!;

@@ -210,8 +210,8 @@ fn next_id(s: *session) f64 = {
 fn make_request(method: str, id: f64, params_json: str) str = {
 	const id_str = f64_to_int_str(id);
 	defer free(id_str);
-	return strings::concat(`{"jsonrpc":"2.0","id":`, id_str, `,"method":"`, method,
-		`","params":`, params_json, `}`)!;
+	return strings::concat(`{"jsonrpc":"2.0","id":`, id_str, `,"method":"`,
+		method, `","params":`, params_json, `}`)!;
 };
 
 fn make_notification(method: str, params_json: str) str = {
@@ -466,9 +466,8 @@ fn parse_header(s: *session) ((size, size) | void) = {
 		start = s.header_scan_pos - (len(needle) - 1);
 	};
 	for (let i = start; i + len(needle) <= len(s.read_buf); i += 1) {
-		if (s.read_buf[i] == needle[0] && s.read_buf[i + 1] == needle[1] &&
-				s.read_buf[i + 2] == needle[2] &&
-				s.read_buf[i + 3] == needle[3]) {
+		if (s.read_buf[i] == needle[0] && s.read_buf[i + 1] == needle[1]
+				&& s.read_buf[i + 2] == needle[2] && s.read_buf[i + 3] == needle[3]) {
 			end = i;
 			found = true;
 			break;
@@ -594,8 +593,8 @@ fn wait_for_publish_diagnostics(s: *session, uri: str) []u8 = {
 	for (let i = 0z; i < 50z; i += 1) {
 		const body = recv(s);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, `"method":"textDocument/publishDiagnostics"`) &&
-				strings::contains(text, uri)) {
+		if (strings::contains(text, `"method":"textDocument/publishDiagnostics"`)
+				&& strings::contains(text, uri)) {
 			return body;
 		};
 		free(body);
@@ -618,8 +617,8 @@ fn drain_until_indexed(s: *session) void = {
 		const body = recv(s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed") &&
-				strings::contains(text, "file(s)")) return;
+		if (strings::contains(text, "indexed")
+				&& strings::contains(text, "file(s)")) return;
 	};
 	fmt::fatalf("e2e: workspace indexing did not complete within 20 messages");
 };
@@ -629,8 +628,8 @@ fn drain_until_indexed_ref(s: *session) void = {
 		const body = recv(s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed") &&
-				strings::contains(text, "file(s)")) return;
+		if (strings::contains(text, "indexed")
+				&& strings::contains(text, "file(s)")) return;
 	};
 };
 

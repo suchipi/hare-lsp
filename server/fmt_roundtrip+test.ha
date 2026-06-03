@@ -165,7 +165,7 @@ fn line_display_width(line: str) size = {
 	let col: size = 0;
 	for (let i = 0z; i < len(bytes); i += 1) {
 		if (bytes[i] == '\t': u8) {
-			col = col - (col % ROUNDTRIP_TAB_WIDTH) + ROUNDTRIP_TAB_WIDTH;
+			col = col - col % ROUNDTRIP_TAB_WIDTH + ROUNDTRIP_TAB_WIDTH;
 		} else {
 			col += 1;
 		};

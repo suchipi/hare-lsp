@@ -124,7 +124,10 @@ use time;
 
 @test fn compose_harepath_folders_first_then_stdlib() void = {
 	const h = compose_harepath(["/ws"],
-		["/usr/local/src/hare/stdlib", "/usr/local/src/hare/third-party"]);
+		[
+			"/usr/local/src/hare/stdlib",
+			"/usr/local/src/hare/third-party",
+		]);
 	defer free(h);
 	assert(h == "/ws:/usr/local/src/hare/stdlib:/usr/local/src/hare/third-party");
 };

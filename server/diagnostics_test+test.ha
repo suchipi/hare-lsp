@@ -110,7 +110,8 @@ fn next_msg(data: []u8) (json::value, size) = {
 	const (v, _) = next_msg(data);
 	defer json::finish(v);
 	const params =
-		*(json::get(&(v as json::object), "params") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"params") as *json::value) as json::object;
 	const diags =
 		*(json::get(&params, "diagnostics") as *json::value) as []json::value;
 	assert(len(diags) >= 1);
@@ -336,14 +337,16 @@ fn next_msg(data: []u8) (json::value, size) = {
 	const (v1, off1) = next_msg(data);
 	defer json::finish(v1);
 	const p1 =
-		*(json::get(&(v1 as json::object), "params") as *json::value) as json::object;
+		*(json::get(&(v1 as json::object),
+			"params") as *json::value) as json::object;
 	const d1 = *(json::get(&p1, "diagnostics") as *json::value) as []json::value;
 	assert(len(d1) == 0);
 
 	const (v2, _) = next_msg(data[off1..]);
 	defer json::finish(v2);
 	const p2 =
-		*(json::get(&(v2 as json::object), "params") as *json::value) as json::object;
+		*(json::get(&(v2 as json::object),
+			"params") as *json::value) as json::object;
 	const d2 = *(json::get(&p2, "diagnostics") as *json::value) as []json::value;
 	assert(len(d2) >= 1);
 };
@@ -371,7 +374,8 @@ fn next_msg(data: []u8) (json::value, size) = {
 	const (v, _) = next_msg(data);
 	defer json::finish(v);
 	const params =
-		*(json::get(&(v as json::object), "params") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"params") as *json::value) as json::object;
 	const diags =
 		*(json::get(&params, "diagnostics") as *json::value) as []json::value;
 	assert(len(diags) == 1);
@@ -428,7 +432,8 @@ fn next_msg(data: []u8) (json::value, size) = {
 	const (v2, _) = next_msg(data[off1..]);
 	defer json::finish(v2);
 	const p2 =
-		*(json::get(&(v2 as json::object), "params") as *json::value) as json::object;
+		*(json::get(&(v2 as json::object),
+			"params") as *json::value) as json::object;
 	const d2 = *(json::get(&p2, "diagnostics") as *json::value) as []json::value;
 	assert(len(d2) == 0);
 };
@@ -558,8 +563,8 @@ fn finish_diag_slice(arr: []json::value) void = {
 	const marker = out[9] as json::object;
 	const msg = *(json::get(&marker, "message") as *json::value) as str;
 	const want =
-		fmt::asprintf("({} more diagnostics not shown; {} of {} reported)", 991u, 9u,
-			1000u)!;
+		fmt::asprintf("({} more diagnostics not shown; {} of {} reported)", 991u,
+			9u, 1000u)!;
 	defer free(want);
 	assert(msg == want, msg);
 };
@@ -595,7 +600,8 @@ fn finish_diag_slice(arr: []json::value) void = {
 	const (v, _) = next_msg(data);
 	defer json::finish(v);
 	const params =
-		*(json::get(&(v as json::object), "params") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"params") as *json::value) as json::object;
 	const diags =
 		*(json::get(&params, "diagnostics") as *json::value) as []json::value;
 	assert(len(diags) == 3);

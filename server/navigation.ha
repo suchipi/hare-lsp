@@ -330,7 +330,10 @@ export fn handle_type_definition(s: *server, r: lsp::request) void = {
 	};
 	const off = analysis::position_to_byte(analysis::bytes(&doc.buf),
 		doc.buf.line_index, position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	const data = analysis::bytes(&doc.buf);
 	// Member access (`recv.field` / `recv.N`): resolve the member's type
 	// and jump to that type's declaration. Tried before bare-identifier
@@ -498,7 +501,10 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 	};
 	const off = analysis::position_to_byte(analysis::bytes(&doc.buf),
 		doc.buf.line_index, position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	const data = analysis::bytes(&doc.buf);
 	if (try_send_struct_member_definition(s, r, doc, data, off)) return;
 	// Tuple-index access (`recv.N`): jump to the Nth element's type node
@@ -1007,7 +1013,8 @@ fn workspace_lookup_aware(
 	// reference is the most common case), then rank by the open file's
 	// imports.
 	if (len(file_module) > 0) {
-		match (analysis::find_in_module(&s.workspace_index, file_module, ident_str)) {
+		match (analysis::find_in_module(&s.workspace_index, file_module,
+			ident_str)) {
 		case let e: *analysis::workspace_entry =>
 			return e;
 		case void => void;
@@ -2097,8 +2104,8 @@ fn infer_block_value_type(
 		};
 	};
 	// Implicit `yield void` if control can reach the end of the block.
-	if (len(exprs) == 0 ||
-			block_falls_through(srv, doc, exprs[len(exprs) - 1], depth)) {
+	if (len(exprs) == 0
+			|| block_falls_through(srv, doc, exprs[len(exprs) - 1], depth)) {
 		const v = strings::dup("void")!;
 		if (!contains_str(parts, v)) {
 			append(parts, v)!;

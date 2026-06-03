@@ -185,7 +185,8 @@ export fn ask() int = answer();
 			"fromRanges must include the call site inside `ask`"
 		);
 		const fr0 = from_ranges[0] as json::object;
-		const fr_start = *(json::get(&fr0, "start") as *json::value) as json::object;
+		const fr_start =
+			*(json::get(&fr0, "start") as *json::value) as json::object;
 		const fr_line = *(json::get(&fr_start, "line") as *json::value) as f64;
 		const fr_ch = *(json::get(&fr_start, "character") as *json::value) as f64;
 		assert(fr_line == 2.0, "outgoing call site is on line 2 of `ask`");

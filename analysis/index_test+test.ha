@@ -56,7 +56,8 @@ def MAX: int = 100;
 };
 
 @test fn symbol_at_offset_returns_containing_decl() void = {
-	const src = `export fn first() void = void;
+	const src =
+		`export fn first() void = void;
 
 export fn second() void = void;
 `;

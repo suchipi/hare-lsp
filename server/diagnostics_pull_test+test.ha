@@ -122,7 +122,8 @@ fn next_pull_msg(data: []u8) (json::value, size) = {
 	const (v, _) = next_pull_msg(data);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	assert(len(items) == 0);
 };
@@ -176,7 +177,8 @@ fn next_pull_msg(data: []u8) (json::value, size) = {
 	const (v, _) = next_pull_msg(data[off..]);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	assert(len(items) == 2);
 	for (let i = 0z; i < len(items); i += 1) {

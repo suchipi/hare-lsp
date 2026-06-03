@@ -63,7 +63,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -115,7 +116,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = fmt_skip_to_response(out, 2.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// No edit = source is already canonical, which trivially preserves
 	// every comment. The regression target is an edit that drops a
 	// comment, not the absence of an edit.
@@ -151,7 +153,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = fmt_skip_to_response(out, 1.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	if (len(result) > 0) {
 		// The edit must start on line 2 (where decl b lives) and must
 		// not start on line 0 (decl a) or line 4 (decl c). Hare's
@@ -187,7 +190,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = fmt_skip_to_response(out, 2.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) == 0);
 };
 
@@ -291,7 +295,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = fmt_skip_to_response(out, 50.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) == 1);
 	const e0 = result[0] as json::object;
 	const new_text = *(json::get(&e0, "newText") as *json::value) as str;
@@ -317,7 +322,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = fmt_skip_to_response(out, 51.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) == 0);
 };
 
@@ -341,7 +347,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = fmt_skip_to_response(out, 52.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) == 0);
 };
 
@@ -368,7 +375,8 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = fmt_skip_to_response(out, 53.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) == 1);
 	const e0 = result[0] as json::object;
 	const new_text = *(json::get(&e0, "newText") as *json::value) as str;

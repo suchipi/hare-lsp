@@ -163,12 +163,11 @@ fn segment_index_at(
 		// character. The lex preserves "use" keyword + whitespace
 		// before the path.
 		for (cursor < len(data)) {
-			if (cursor + len(name) <= len(data) &&
-					bytes_equal(data[cursor..cursor + len(name)], name) &&
-					(cursor + len(name) == len(data) ||
-					!analysis::is_ident_byte(data[cursor + len(name)])) &&
-					(cursor == 0 ||
-					!analysis::is_ident_byte(data[cursor - 1]))) {
+			if (cursor + len(name) <= len(data)
+					&& bytes_equal(data[cursor..cursor + len(name)], name)
+					&& (cursor + len(name) == len(data)
+					|| !analysis::is_ident_byte(data[cursor + len(name)]))
+					&& (cursor == 0 || !analysis::is_ident_byte(data[cursor - 1]))) {
 				break;
 			};
 			cursor += 1;

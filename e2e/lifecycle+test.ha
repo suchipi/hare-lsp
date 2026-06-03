@@ -32,7 +32,10 @@ use strings;
 	const err = *(json::get(&obj, "error") as *json::value) as json::object;
 	const code = *(json::get(&err, "code") as *json::value) as f64;
 	// SERVER_NOT_INITIALIZED = -32002.
-	assert(code == -32002.0, "pre-init request must yield SERVER_NOT_INITIALIZED");
+	assert(
+		code == -32002.0,
+		"pre-init request must yield SERVER_NOT_INITIALIZED"
+	);
 };
 
 // Sends one of the misc-notification methods and confirms the server
@@ -211,9 +214,9 @@ fn smoke_notification(notif: str, probe_uri: str, ping_id: f64) void = {
 		const body = recv(&s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, `"method":"textDocument/publishDiagnostics"`) &&
-				strings::contains(text, `file:///shutdown_drain.ha`) &&
-				strings::contains(text, `"version":2`)) {
+		if (strings::contains(text, `"method":"textDocument/publishDiagnostics"`)
+				&& strings::contains(text, `file:///shutdown_drain.ha`)
+				&& strings::contains(text, `"version":2`)) {
 			saw_v2_publish = true;
 		};
 		if (strings::contains(text, `"id":2700`)) {

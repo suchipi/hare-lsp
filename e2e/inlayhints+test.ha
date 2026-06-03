@@ -109,7 +109,8 @@ use strings;
 	const v = json::loadstr(strings::fromutf8(body)!)!;
 	defer json::finish(v);
 	const arr =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let saw_int_label = false;
 	let saw_alias_only = false;
 	for (let i = 0z; i < len(arr); i += 1) {

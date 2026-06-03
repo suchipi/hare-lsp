@@ -64,7 +64,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -107,7 +108,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = ch_skip_to_response(out, 1.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) == 1);
 	const item = result[0] as json::object;
 	assert(*(json::get(&item, "name") as *json::value) as str == "target");
@@ -134,7 +136,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = ch_skip_to_response(out, 2.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// Exactly one calling URI (file:///x.ha) with at least one fromRange.
 	assert(len(result) == 1);
 	const entry = result[0] as json::object;
@@ -173,7 +176,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = ch_skip_to_response(out, 3.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let count_target = 0;
 	for (let i = 0z; i < len(result); i += 1) {
 		const entry = result[i] as json::object;
@@ -208,7 +212,8 @@ fn ch_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = ch_skip_to_response(out, 4.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	for (let i = 0z; i < len(result); i += 1) {
 		const entry = result[i] as json::object;
 		const to = *(json::get(&entry, "to") as *json::value) as json::object;

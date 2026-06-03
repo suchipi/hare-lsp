@@ -148,7 +148,8 @@ export fn main() void = {
 	const tmpl =
 		`{"jsonrpc":"2.0","id":1910,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"`;
 	const req =
-		strings::concat(tmpl, main_uri, `"},"position":{"line":2,"character":28}}}`)!;
+		strings::concat(tmpl, main_uri,
+			`"},"position":{"line":2,"character":28}}}`)!;
 	defer free(req);
 	send(&s, strings::toutf8(req));
 

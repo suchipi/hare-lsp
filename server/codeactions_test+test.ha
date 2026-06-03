@@ -63,7 +63,8 @@ fn ca_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -106,12 +107,14 @@ fn organize_imports_new_text(s: *server, uri: str) str = {
 	const v = ca_skip_to_response(s.out: *memio::stream, 60.0);
 	defer json::finish(v);
 	const actions =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(actions) >= 1);
 	// First action should be organize-imports.
 	const action = actions[0] as json::object;
 	const edit = *(json::get(&action, "edit") as *json::value) as json::object;
-	const changes = *(json::get(&edit, "changes") as *json::value) as json::object;
+	const changes =
+		*(json::get(&edit, "changes") as *json::value) as json::object;
 	const edits = *(json::get(&changes, uri) as *json::value) as []json::value;
 	const first_edit = edits[0] as json::object;
 	return strings::dup(
@@ -177,7 +180,8 @@ fn ca_get_actions(s: *server, uri: str, request_id: f64) json::value = {
 // Counts code actions in a response whose title starts with `prefix`.
 fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	const actions =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let n: size = 0;
 	for (let i = 0z; i < len(actions); i += 1) {
 		const action = actions[i] as json::object;
@@ -307,7 +311,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	const v = ca_get_actions(&s, "file:///u9.ha", 108.0);
 	defer json::finish(v);
 	const actions =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// Find the per-import quickfix (kind == "quickfix").
 	let found_quickfix = false;
 	for (let i = 0z; i < len(actions); i += 1) {
@@ -344,7 +349,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	const v = ca_get_actions(&s, "file:///u10.ha", 109.0);
 	defer json::finish(v);
 	const actions =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let found_batch = false;
 	for (let i = 0z; i < len(actions); i += 1) {
 		const action = actions[i] as json::object;
@@ -386,7 +392,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	const v = ca_skip_to_response(out, 200.0);
 	defer json::finish(v);
 	const actions =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let quickfix_count: size = 0;
 	let saw_with_diag = false;
 	for (let i = 0z; i < len(actions); i += 1) {
@@ -447,7 +454,8 @@ fn ca_count_titles_with_prefix(v: json::value, prefix: str) size = {
 	const v = ca_skip_to_response(out, 110.0);
 	defer json::finish(v);
 	const actions =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let saw_quickfix = false;
 	let saw_batch = false;
 	for (let i = 0z; i < len(actions); i += 1) {

@@ -40,7 +40,8 @@ use strings;
 	const v = skip_to_response(out, 600.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -82,7 +83,8 @@ use strings;
 	const v = skip_to_response(out, 601.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -116,7 +118,8 @@ use strings;
 	const v = skip_to_response(out, 602.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(uri == "file:///sm_def.ha");
 	const range = *(json::get(&result, "range") as *json::value) as json::object;
@@ -154,7 +157,8 @@ use strings;
 	const v = skip_to_response(out, 603.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -221,7 +225,8 @@ use strings;
 	const v = skip_to_response(out, 605.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -256,7 +261,8 @@ use strings;
 	const v = skip_to_response(out, 625.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -293,7 +299,8 @@ use strings;
 	const v = skip_to_response(out, 626.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -335,7 +342,8 @@ use strings;
 	const v = skip_to_response(out, 620.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -371,7 +379,8 @@ use strings;
 	const v = skip_to_response(out, 621.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -404,7 +413,8 @@ use strings;
 	const v = skip_to_response(out, 622.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -437,7 +447,8 @@ use strings;
 	const v = skip_to_response(out, 623.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -469,7 +480,8 @@ use strings;
 	const v = skip_to_response(out, 624.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const contents =
 		*(json::get(&result, "contents") as *json::value) as json::object;
 	const value = *(json::get(&contents, "value") as *json::value) as str;
@@ -515,7 +527,8 @@ use strings;
 	const v = skip_to_response(out, 606.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(strings::hassuffix(uri, "hare-lsp-sm-crossfile.ha"));
 	const range = *(json::get(&result, "range") as *json::value) as json::object;
@@ -551,7 +564,8 @@ use strings;
 		`export type point = struct { coord: int }; export fn run(base: point, opt: (point | void)) void = { let _ = (match (opt) { case void => yield base; case point => yield base; }).coord; };`;
 	nav_open(&s, "file:///b2match.ha", src);
 	const col = find_col(src, ".coord") + len(".coord"): u32 - 1;
-	const value = nav_hover_contents(&s, out, "file:///b2match.ha", 0, col, 791.0);
+	const value = nav_hover_contents(&s, out, "file:///b2match.ha", 0, col,
+		791.0);
 	defer free(value);
 	assert(strings::contains(value, "(field)"));
 	assert(strings::contains(value, "coord"));
@@ -601,7 +615,8 @@ use strings;
 		`export type point = struct { coord: int }; export fn run(xs: []point) void = { let _ = xs[0..2][0].coord; };`;
 	nav_open(&s, "file:///b5slice.ha", src);
 	const col = find_col(src, ".coord") + len(".coord"): u32 - 1;
-	const value = nav_hover_contents(&s, out, "file:///b5slice.ha", 0, col, 794.0);
+	const value = nav_hover_contents(&s, out, "file:///b5slice.ha", 0, col,
+		794.0);
 	defer free(value);
 	assert(strings::contains(value, "(field)"));
 	assert(strings::contains(value, "coord"));
@@ -702,7 +717,8 @@ use strings;
 	const v = skip_to_response(out, 660.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(uri == "file:///tuple_def.ha");
 	const range = *(json::get(&result, "range") as *json::value) as json::object;
@@ -738,7 +754,8 @@ use strings;
 	const v = skip_to_response(out, 661.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(uri == "file:///tuple_tdef.ha");
 	const range = *(json::get(&result, "range") as *json::value) as json::object;
@@ -804,7 +821,8 @@ use strings;
 	const v = skip_to_response(out, 663.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const uri = *(json::get(&result, "uri") as *json::value) as str;
 	assert(uri == "file:///sm_tdef.ha");
 	const range = *(json::get(&result, "range") as *json::value) as json::object;

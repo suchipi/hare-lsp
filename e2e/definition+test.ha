@@ -209,11 +209,11 @@ export fn main() void = void;
 		const end_line = *(json::get(&end, "line") as *json::value) as f64;
 		const end_char = *(json::get(&end, "character") as *json::value) as f64;
 		const exp = expected[i];
-		if (start_line != exp.0 || end_line != exp.0 || start_char != exp.1 ||
-				end_char != exp.2) {
-			fmt::fatalf("link[{}] = ({},{}..{},{}), expected ({},{}..{},{}). body={}", i,
-				start_line, start_char, end_line, end_char, exp.0, exp.1, exp.0, exp.2,
-				text);
+		if (start_line != exp.0 || end_line != exp.0 || start_char != exp.1
+				|| end_char != exp.2) {
+			fmt::fatalf("link[{}] = ({},{}..{},{}), expected ({},{}..{},{}). body={}",
+				i, start_line, start_char, end_line, end_char, exp.0, exp.1, exp.0,
+				exp.2, text);
 		};
 	};
 };
@@ -238,12 +238,12 @@ fn check_link_range(
 	const start_char = *(json::get(&start, "character") as *json::value) as f64;
 	const end_line = *(json::get(&end, "line") as *json::value) as f64;
 	const end_char = *(json::get(&end, "character") as *json::value) as f64;
-	if (start_line != line || end_line != line || start_char != start_col ||
-			end_char != end_col) {
+	if (start_line != line || end_line != line || start_char != start_col
+			|| end_char != end_col) {
 		fmt::fatalf(
 			"DocumentLink range = ({},{}..{},{}), expected ({},{}..{},{}). body={}",
-			start_line, start_char, end_line, end_char, line, start_col, line, end_col,
-			text);
+			start_line, start_char, end_line, end_char, line, start_col, line,
+			end_col, text);
 	};
 };
 
@@ -464,7 +464,8 @@ export fn main() void = {
 	const tmpl =
 		`{"jsonrpc":"2.0","id":703,"method":"textDocument/definition","params":{"textDocument":{"uri":"`;
 	const req =
-		strings::concat(tmpl, test_uri, `"},"position":{"line":1,"character":11}}}`)!;
+		strings::concat(tmpl, test_uri,
+			`"},"position":{"line":1,"character":11}}}`)!;
 	defer free(req);
 	send(&s, strings::toutf8(req));
 

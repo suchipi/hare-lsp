@@ -73,8 +73,8 @@ export fn build_order(
 	let visited: []str = [];
 	defer strings::freeall(visited);
 	let out: []module_dep = [];
-	walk_module(module_dir, "", workspace_folders, resolve, resolver_ctx, &visited,
-		&out);
+	walk_module(module_dir, "", workspace_folders, resolve, resolver_ctx,
+		&visited, &out);
 	return out;
 };
 

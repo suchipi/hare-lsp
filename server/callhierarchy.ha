@@ -37,7 +37,10 @@ export fn handle_prepare_call_hierarchy(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const off = analysis::position_to_byte(data, doc.buf.line_index,
 		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	const cache = parse_of(doc);
 	const sym = match (analysis::symbol_at(&cache.idx, off)) {
 	case let p: *analysis::symbol =>
@@ -353,7 +356,8 @@ fn build_call_hierarchy_item(
 	const span_end = sym.span.end.off: size;
 	const sp = analysis::byte_to_position(data, doc.buf.line_index, enc,
 		span_start);
-	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc, span_end);
+	const ep = analysis::byte_to_position(data, doc.buf.line_index, enc,
+		span_end);
 	json::put(&item, "range", encode_range_pos(sp, ep))!;
 	// LSP: selectionRange is "the range to be selected and revealed
 	// when this symbol is being picked, e.g. the name of a function".
@@ -517,9 +521,8 @@ fn scan_calls_static(
 		// Heuristic: only count this as a call site if followed by '('
 		// (possibly after whitespace).
 		let k = i + len(t);
-		for (k < len(data) &&
-		(data[k] == ' ': u8 ||
-		data[k] == '\t': u8); k += 1) void;
+		for (k < len(data) && (data[k] == ' ': u8 || data[k] == '\t': u8);
+				k += 1) void;
 		if (k >= len(data) || data[k] != '(': u8) continue;
 		// Skip the declaration itself: `fn name(` is a definition, not
 		// a call. Without this, incomingCalls reports the symbol's own
@@ -546,9 +549,10 @@ fn scan_calls_static(
 fn preceded_by_fn_keyword(data: []u8, i: size) bool = {
 	if (i < 3) return false;
 	let k = i;
-	for (k > 0 &&
-	(data[k - 1] == ' ': u8 || data[k - 1] == '\t': u8 ||
-	data[k - 1] == '\n': u8); k -= 1) void;
+	for (
+			k > 0
+			&& (data[k - 1] == ' ': u8 || data[k - 1] == '\t': u8
+			|| data[k - 1] == '\n': u8); k -= 1) void;
 	if (k < 2) return false;
 	if (data[k - 1] != 'n': u8 || data[k - 2] != 'f': u8) return false;
 	if (k == 2) return true;

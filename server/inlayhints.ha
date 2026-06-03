@@ -18,8 +18,8 @@ use strings;
 
 // @param s: borrowed
 export fn handle_inlay_hint(s: *server, r: lsp::request) void = {
-	if (!s.config.inlay_hints_parameter_names &&
-			!s.config.inlay_hints_inferred_types) {
+	if (!s.config.inlay_hints_parameter_names
+			&& !s.config.inlay_hints_inferred_types) {
 		send_array_result(s, r.id, []);
 		return;
 	};
@@ -209,7 +209,8 @@ fn emit_param_hints(
 		for (let k = 0z; k < count; k += 1) {
 			if (len(params[k]) == 0) continue;
 			const off = arg_starts[k];
-			const pos = analysis::byte_to_position(data, doc.buf.line_index, enc, off);
+			const pos = analysis::byte_to_position(data, doc.buf.line_index, enc,
+				off);
 			let hint = json::newobject();
 			let p_obj = json::newobject();
 			json::put(&p_obj, "line", pos.line: f64)!;
@@ -322,9 +323,8 @@ fn skip_ws_and_comments(data: []u8, i: size, limit: size) size = {
 			j += 1;
 			continue;
 		};
-		if (data[j] == '/': u8 && j + 1 < limit &&
-				(data[j + 1] == '/': u8 ||
-				data[j + 1] == '*': u8)) {
+		if (data[j] == '/': u8 && j + 1 < limit
+				&& (data[j + 1] == '/': u8 || data[j + 1] == '*': u8)) {
 			j = analysis::token_skip_noncode(data, j, limit);
 			continue;
 		};

@@ -64,7 +64,8 @@ export fn main() void = void;
 			case let s: str =>
 				yield s;
 			case =>
-				fmt::fatalf("e2e: organizeImports action title is not a string: {}", text);
+				fmt::fatalf("e2e: organizeImports action title is not a string: {}",
+					text);
 			};
 		case =>
 			fmt::fatalf("e2e: organizeImports action missing title: {}", text);
@@ -80,12 +81,14 @@ export fn main() void = void;
 			case let o: json::object =>
 				yield o;
 			case =>
-				fmt::fatalf("e2e: organizeImports action edit must be an object: {}", text);
+				fmt::fatalf("e2e: organizeImports action edit must be an object: {}",
+					text);
 			};
 		case =>
 			fmt::fatalf("e2e: organizeImports action missing edit: {}", text);
 		};
-		const new_text = extract_organize_edit_newtext(&edit, "file:///ca.ha", text);
+		const new_text = extract_organize_edit_newtext(&edit, "file:///ca.ha",
+			text);
 		// The server sorts `use bufio;` before `use strings;`.
 		assert(
 			new_text == "use bufio;\nuse strings;\n",
@@ -304,7 +307,8 @@ fn extract_organize_edit_newtext(
 		case let o: json::object =>
 			yield o;
 		case =>
-			fmt::fatalf("e2e: organize-imports edit.changes must be an object: {}", raw);
+			fmt::fatalf("e2e: organize-imports edit.changes must be an object: {}",
+				raw);
 		};
 	case =>
 		fmt::fatalf("e2e: organize-imports edit missing changes: {}", raw);

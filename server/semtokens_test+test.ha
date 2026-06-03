@@ -63,7 +63,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -110,7 +111,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = st_skip_to_response(out, 10.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const data_arr =
 		*(json::get(&result, "data") as *json::value) as []json::value;
 	// First token (let): (deltaLine, deltaStart, length, type, mods).
@@ -144,7 +146,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = st_skip_to_response(out, 20.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const data_arr =
 		*(json::get(&result, "data") as *json::value) as []json::value;
 	// Tokens: let, x, =, 123, ; → 5 tuples × 5 entries = 25.
@@ -175,7 +178,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = st_skip_to_response(out, 21.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const data_arr =
 		*(json::get(&result, "data") as *json::value) as []json::value;
 	// 4th token is `'a'`; length at index 15 + 2 = 17.
@@ -205,7 +209,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = st_skip_to_response(out, 22.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const data_arr =
 		*(json::get(&result, "data") as *json::value) as []json::value;
 	// 4th token is `"hi"`; length at index 15 + 2 = 17.
@@ -235,7 +240,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = st_skip_to_response(out, 23.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const data_arr =
 		*(json::get(&result, "data") as *json::value) as []json::value;
 	// Tokens: let, r, =, 0, .., 10, ; → 7 tuples × 5 entries = 35.
@@ -266,7 +272,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = st_skip_to_response(out, 1.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const result_id = *(json::get(&result, "resultId") as *json::value) as str;
 	assert(len(result_id) > 0);
 	const data_arr =
@@ -293,14 +300,16 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v1 = st_skip_to_response(out, 1.0);
 	defer json::finish(v1);
 	const r1 =
-		*(json::get(&(v1 as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v1 as json::object),
+			"result") as *json::value) as json::object;
 	const id1 = *(json::get(&r1, "resultId") as *json::value) as str;
 
 	// Step 2: delta request with the same id (no edits made yet, so no
 	// changes — should produce empty edits).
 	const delta_params =
-		strings::concat(`{"textDocument":{"uri":"file:///x.ha"},"previousResultId":"`,
-			id1, `"}`)!;
+		strings::concat(
+			`{"textDocument":{"uri":"file:///x.ha"},"previousResultId":"`, id1,
+			`"}`)!;
 	defer free(delta_params);
 	let dpv = json::loadstr(delta_params)!;
 	defer json::finish(dpv);
@@ -314,7 +323,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v2 = st_skip_to_response(out, 2.0);
 	defer json::finish(v2);
 	const r2 =
-		*(json::get(&(v2 as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v2 as json::object),
+			"result") as *json::value) as json::object;
 	// Should have edits (possibly empty array) and a fresh resultId.
 	assert(json::get(&r2, "edits") is *json::value);
 	const edits = *(json::get(&r2, "edits") as *json::value) as []json::value;
@@ -341,7 +351,8 @@ fn st_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = st_skip_to_response(out, 5.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	// Falls back to full: has `data`, not `edits`.
 	assert(json::get(&result, "data") is *json::value);
 	assert(json::get(&result, "edits") is void);

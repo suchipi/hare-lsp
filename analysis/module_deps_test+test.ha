@@ -173,8 +173,10 @@ fn md_order_index_of(order: []module_dep, suffix: str) int = {
 	md_mkdirs(b);
 	md_mkdirs(c);
 	defer md_rmtree(root);
-	md_write(strings::concat(a, "/x.ha")!, "use b;\nexport fn x() void = void;\n");
-	md_write(strings::concat(b, "/x.ha")!, "use c;\nexport fn x() void = void;\n");
+	md_write(strings::concat(a, "/x.ha")!,
+		"use b;\nexport fn x() void = void;\n");
+	md_write(strings::concat(b, "/x.ha")!,
+		"use c;\nexport fn x() void = void;\n");
 	md_write(strings::concat(c, "/x.ha")!, "export fn x() void = void;\n");
 
 	let idents: []str = [];
@@ -216,8 +218,10 @@ fn md_order_index_of(order: []module_dep, suffix: str) int = {
 	// a -> b, a -> c, b -> d, c -> d.
 	md_write(strings::concat(a, "/x.ha")!,
 		"use b;\nuse c;\nexport fn x() void = void;\n");
-	md_write(strings::concat(b, "/x.ha")!, "use d;\nexport fn x() void = void;\n");
-	md_write(strings::concat(c, "/x.ha")!, "use d;\nexport fn x() void = void;\n");
+	md_write(strings::concat(b, "/x.ha")!,
+		"use d;\nexport fn x() void = void;\n");
+	md_write(strings::concat(c, "/x.ha")!,
+		"use d;\nexport fn x() void = void;\n");
 	md_write(strings::concat(d, "/x.ha")!, "export fn x() void = void;\n");
 
 	let idents: []str = [];
@@ -254,8 +258,10 @@ fn md_order_index_of(order: []module_dep, suffix: str) int = {
 	md_mkdirs(a);
 	md_mkdirs(b);
 	defer md_rmtree(root);
-	md_write(strings::concat(a, "/x.ha")!, "use b;\nexport fn x() void = void;\n");
-	md_write(strings::concat(b, "/x.ha")!, "use a;\nexport fn x() void = void;\n");
+	md_write(strings::concat(a, "/x.ha")!,
+		"use b;\nexport fn x() void = void;\n");
+	md_write(strings::concat(b, "/x.ha")!,
+		"use a;\nexport fn x() void = void;\n");
 
 	let idents: []str = [];
 	defer free(idents);
@@ -346,7 +352,8 @@ fn md_order_index_of(order: []module_dep, suffix: str) int = {
 	md_mkdirs(app);
 	md_mkdirs(testonly);
 	defer md_rmtree(root);
-	md_write(strings::concat(app, "/main.ha")!, "export fn main() void = void;\n");
+	md_write(strings::concat(app, "/main.ha")!,
+		"export fn main() void = void;\n");
 	// A +test file references `testonly` — should be ignored by the
 	// production-style dep walk.
 	md_write(strings::concat(app, "/main_test+test.ha")!,

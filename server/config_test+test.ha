@@ -225,7 +225,8 @@ fn cleanup_server(
 	defer json::finish(v);
 	const o = v as json::object;
 	assert(
-		*(json::get(&o, "method") as *json::value) as str == "workspace/configuration"
+		*(json::get(&o,
+			"method") as *json::value) as str == "workspace/configuration"
 	);
 	const params = *(json::get(&o, "params") as *json::value) as json::object;
 	const items = *(json::get(&params, "items") as *json::value) as []json::value;
@@ -284,7 +285,8 @@ fn cleanup_server(
 	defer cleanup_server(&s, scan, in_buf, out);
 
 	// Flip parameterNames from true to false.
-	const params = `{"settings":{"hare":{"inlayHints":{"parameterNames":false}}}}`;
+	const params =
+		`{"settings":{"hare":{"inlayHints":{"parameterNames":false}}}}`;
 	let pv = json::loadstr(params)!;
 	defer json::finish(pv);
 	const n = lsp::notification {

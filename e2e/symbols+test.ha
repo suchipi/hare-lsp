@@ -165,7 +165,10 @@ type direction = enum {
 			saw_enum = true;
 			const children =
 				*(json::get(&sym, "children") as *json::value) as []json::value;
-			assert(len(children) == 4, "enum direction must have four variant children");
+			assert(
+				len(children) == 4,
+				"enum direction must have four variant children"
+			);
 			// Spot-check a single variant's range — selectionRange must
 			// match the variant name length and lie on the right line.
 			// EAST is on the line that immediately follows SOUTH; if the

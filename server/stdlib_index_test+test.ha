@@ -37,7 +37,10 @@ fn stdlib_module_test_cleanup(
 	defer stdlib_module_test_cleanup(&s, scan, in_buf, out);
 	const got = stdlib_qualified_module(&s, "/r/bufio/scanner.ha");
 	defer free(got);
-	assert(got == "bufio", "single-segment stdlib module should round-trip as-is");
+	assert(
+		got == "bufio",
+		"single-segment stdlib module should round-trip as-is"
+	);
 };
 
 @test fn stdlib_qualified_module_nested_module() void = {
@@ -45,7 +48,10 @@ fn stdlib_module_test_cleanup(
 	defer stdlib_module_test_cleanup(&s, scan, in_buf, out);
 	const got = stdlib_qualified_module(&s, "/r/encoding/json/loader.ha");
 	defer free(got);
-	assert(got == "encoding::json", "nested directories must be joined with '::'");
+	assert(
+		got == "encoding::json",
+		"nested directories must be joined with '::'"
+	);
 };
 
 @test fn stdlib_qualified_module_peels_tag_dir() void = {

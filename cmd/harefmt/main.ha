@@ -144,8 +144,7 @@ fn parse_args(args: []str) (cli | cli_error) = {
 			c.opts.follow_file_symlinks = false;
 		case "--tab-width" =>
 			if (i + 1 >= len(args)) {
-				fmt::fprintln(os::stderr,
-					"harefmt: --tab-width requires a value")!;
+				fmt::fprintln(os::stderr, "harefmt: --tab-width requires a value")!;
 				free(c.paths);
 				return cli_error::USAGE;
 			};
@@ -153,21 +152,21 @@ fn parse_args(args: []str) (cli | cli_error) = {
 			c.tab_width = match (strconv::stoz(args[i])) {
 			case let n: size =>
 				if (n < 1) {
-					fmt::fprintfln(os::stderr,
-						"harefmt: --tab-width must be >= 1: {}", args[i])!;
+					fmt::fprintfln(os::stderr, "harefmt: --tab-width must be >= 1: {}",
+						args[i])!;
 					free(c.paths);
 					return cli_error::USAGE;
 				};
 				yield n;
 			case =>
-				fmt::fprintfln(os::stderr,
-					"harefmt: invalid --tab-width value: {}", args[i])!;
+				fmt::fprintfln(os::stderr, "harefmt: invalid --tab-width value: {}",
+					args[i])!;
 				free(c.paths);
 				return cli_error::USAGE;
 			};
 		case =>
-			if (strings::hasprefix(a, "--") ||
-					len(a) >= 2 && strings::hasprefix(a, "-") && a != "-") {
+			if (strings::hasprefix(a, "--")
+					|| len(a) >= 2 && strings::hasprefix(a, "-") && a != "-") {
 				fmt::fprintfln(os::stderr, "harefmt: unknown option: {}", a)!;
 				free(c.paths);
 				return cli_error::USAGE;
@@ -235,7 +234,8 @@ fn print_usage(out: io::handle) void = {
 		"                                for wrap decisions (default 8).")!;
 	fmt::fprintln(out,
 		"  -h, --help                    Show this help and exit.")!;
-	fmt::fprintln(out, "  -V, --version                 Print version and exit.")!;
+	fmt::fprintln(out,
+		"  -V, --version                 Print version and exit.")!;
 };
 
 // Handles --stdout mode for a single path. Returns the process exit

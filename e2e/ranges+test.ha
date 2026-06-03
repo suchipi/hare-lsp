@@ -137,13 +137,13 @@ export fn main() void = void;
 	const inner_start = field(&innermost_range, "start") as json::object;
 	const inner_end = field(&innermost_range, "end") as json::object;
 	assert(
-		field(&inner_start, "line") as f64 == 1.0 &&
-		field(&inner_start, "character") as f64 == 5.0,
+		field(&inner_start, "line") as f64 == 1.0
+		&& field(&inner_start, "character") as f64 == 5.0,
 		"innermost range must start at the `x` ident (line 1, char 5)"
 	);
 	assert(
-		field(&inner_end, "line") as f64 == 1.0 &&
-		field(&inner_end, "character") as f64 == 6.0,
+		field(&inner_end, "line") as f64 == 1.0
+		&& field(&inner_end, "character") as f64 == 6.0,
 		"innermost range must end after the `x` ident (line 1, char 6)"
 	);
 
@@ -180,8 +180,8 @@ export fn main() void = void;
 		const ends_later =
 			el > prev_end_line || el == prev_end_line && ec > prev_end_char;
 		const not_narrower =
-			!(sl > prev_start_line || sl == prev_start_line && sc > prev_start_char) &&
-			!(el < prev_end_line || el == prev_end_line && ec < prev_end_char);
+			!(sl > prev_start_line || sl == prev_start_line && sc > prev_start_char)
+			&& !(el < prev_end_line || el == prev_end_line && ec < prev_end_char);
 		assert(
 			not_narrower,
 			"parent range must contain the inner range, not be narrower"

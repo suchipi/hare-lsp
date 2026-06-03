@@ -65,7 +65,8 @@ fn sym_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -146,7 +147,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	const v = sym_skip_to_response(out, 1.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) == 3);
 };
 
@@ -178,7 +180,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	const v = sym_skip_to_response(out, 100.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(
 		len(result) == 1,
 		"hierarchical response must contain the one type decl"
@@ -191,7 +194,10 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	// still pass the kind check, but the children check below would
 	// catch it.
 	const top_kind = *(json::get(&top, "kind") as *json::value) as f64;
-	assert(top_kind == 23.0, "type-decl-of-struct must be SymbolKind.Struct (23)");
+	assert(
+		top_kind == 23.0,
+		"type-decl-of-struct must be SymbolKind.Struct (23)"
+	);
 	const children =
 		*(json::get(&top, "children") as *json::value) as []json::value;
 	assert(len(children) == 2, "struct point must expose two field children");
@@ -227,7 +233,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	const v = sym_skip_to_response(out, 101.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(
 		len(result) == 1,
 		"legacy response must contain one entry per top-level decl"
@@ -248,7 +255,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	let (s, scan, in_buf, out) = sym_test_server();
 	defer sym_test_cleanup(&s, scan, in_buf, out);
 	// Multi-line decl so it folds.
-	sym_open(&s, "file:///x.ha", "export fn long() void = {\\n\\treturn;\\n};\\n");
+	sym_open(&s, "file:///x.ha",
+		"export fn long() void = {\\n\\treturn;\\n};\\n");
 
 	const params = `{"textDocument":{"uri":"file:///x.ha"}}`;
 	let pv = json::loadstr(params)!;
@@ -263,7 +271,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	const v = sym_skip_to_response(out, 2.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) >= 1);
 };
 
@@ -286,7 +295,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	const v = sym_skip_to_response(out, 3.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) == 2);
 };
 
@@ -331,7 +341,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	const rv = sym_skip_to_response(out, 11.0);
 	defer json::finish(rv);
 	const ro =
-		*(json::get(&(rv as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(rv as json::object),
+			"result") as *json::value) as json::object;
 	// Should now have a `target` field pointing at a .ha file inside
 	// the io stdlib module. Build the expected prefix from $HAREPATH so
 	// the assertion is install-layout agnostic.
@@ -361,7 +372,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	const v = sym_skip_to_response(out, 4.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(result) >= 1);
 };
 
@@ -386,7 +398,8 @@ fn sym_stdlib_module_prefix(module: str) str = {
 	const v = sym_skip_to_response(out, 50.0);
 	defer json::finish(v);
 	const arr =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(arr) == 1);
 	// Walk the parent chain — should be at least 3 deep (ident → line/decl → file).
 	let depth = 0u32;

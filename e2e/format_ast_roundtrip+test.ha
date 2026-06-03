@@ -96,7 +96,8 @@ def HAREFMT_PATH: str = "./harefmt";
 
 		checked += 1;
 		if (before != after) {
-			append(failures, fmt::asprintf("{}: AST differs after harefmt", files[i])!)!;
+			append(failures, fmt::asprintf("{}: AST differs after harefmt",
+				files[i])!)!;
 			dump_ast_diff(files[i], before, after);
 		};
 	};
@@ -108,8 +109,11 @@ def HAREFMT_PATH: str = "./harefmt";
 		for (let i = 0z; i < len(failures); i += 1) {
 			fmt::errorfln("  {}", failures[i])!;
 		};
-		assert(false, "harefmt must preserve AST for every file "
-			"in the repo");
+		assert(
+			false,
+			"harefmt must preserve AST for every file "
+			"in the repo"
+		);
 	};
 	// Guard against the silent-pass failure mode where every file is
 	// either unreadable or unparseable: a `parse::subunit` regression

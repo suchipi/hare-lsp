@@ -238,8 +238,8 @@ fn parse_index_end_message(msg: str) index_end = {
 	for (let i = 0z; i < 50z; i += 1) {
 		const body = recv(&s);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, `"method":"$/progress"`) &&
-				strings::contains(text, `"kind":"begin"`)) {
+		if (strings::contains(text, `"method":"$/progress"`)
+				&& strings::contains(text, `"kind":"begin"`)) {
 			token = extract_progress_token(text);
 			free(body);
 			break;

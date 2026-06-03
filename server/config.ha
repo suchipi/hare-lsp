@@ -233,8 +233,8 @@ export fn handle_did_change_configuration(
 		match (json::get(&o, "hare")) {
 		case let p: *json::value =>
 			apply_settings(s, *p);
-			refresh_after_config_change(s, old_debounce, old_enable_build, old_ih_params,
-				old_ih_inferred, old_ih_depth);
+			refresh_after_config_change(s, old_debounce, old_enable_build,
+				old_ih_params, old_ih_inferred, old_ih_depth);
 			return;
 		case => void;
 		};
@@ -258,12 +258,12 @@ fn refresh_after_config_change(
 	old_ih_depth: u32,
 ) void = {
 	const diag_changed =
-		old_debounce != s.config.diagnostics_debounce_ms ||
-		old_enable_build != s.config.enable_build_diagnostics;
+		old_debounce != s.config.diagnostics_debounce_ms
+		|| old_enable_build != s.config.enable_build_diagnostics;
 	const ih_changed =
-		old_ih_params != s.config.inlay_hints_parameter_names ||
-		old_ih_inferred != s.config.inlay_hints_inferred_types ||
-		old_ih_depth != s.config.inlay_hints_inferred_types_max_depth;
+		old_ih_params != s.config.inlay_hints_parameter_names
+		|| old_ih_inferred != s.config.inlay_hints_inferred_types
+		|| old_ih_depth != s.config.inlay_hints_inferred_types_max_depth;
 
 	if (diag_changed) {
 		// Republish parse diagnostics for every open doc immediately

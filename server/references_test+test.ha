@@ -63,7 +63,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -108,7 +109,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = ref_skip_to_response(out, 1.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// Two occurrences: the decl and the call site.
 	assert(len(result) == 2);
 };
@@ -132,7 +134,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = ref_skip_to_response(out, 2.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	// Should be a Range.
 	const start = *(json::get(&result, "start") as *json::value) as json::object;
 	assert(*(json::get(&start, "character") as *json::value) as f64 == 3.0);
@@ -180,7 +183,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = ref_skip_to_response(out, 4.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const changes =
 		*(json::get(&result, "changes") as *json::value) as json::object;
 	const edits =
@@ -214,7 +218,8 @@ fn ref_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = ref_skip_to_response(out, 5.0);
 	defer json::finish(v);
 	const arr =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// Decl + call site = 2 hits exactly. Comments/strings must NOT match.
 	assert(len(arr) == 2);
 };

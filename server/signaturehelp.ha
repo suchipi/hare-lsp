@@ -34,7 +34,10 @@ export fn handle_signature_help(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const off = analysis::position_to_byte(data, doc.buf.line_index,
 		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	const ctx = match (find_call_context(data, off)) {
 	case let c: call_context =>
 		yield c;
@@ -193,9 +196,8 @@ fn find_call_context(data: []u8, off: size) (call_context | void) = {
 	// The callee name ends just before open_at, possibly preceded by
 	// spaces.
 	let e = open_at;
-	for (e > 0 &&
-	(data[e - 1] == ' ': u8 ||
-	data[e - 1] == '\t': u8); e -= 1) void;
+	for (e > 0 && (data[e - 1] == ' ': u8 || data[e - 1] == '\t': u8);
+			e -= 1) void;
 	let ns = e;
 	for (ns > 0; ns -= 1) {
 		const cb = data[ns - 1];

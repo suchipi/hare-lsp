@@ -484,7 +484,8 @@ fn apply_content_change(
 			line = range.end.line,
 			character = range.end.character,
 		});
-	analysis::replace_range(&doc.buf, start_byte, end_byte, strings::toutf8(text));
+	analysis::replace_range(&doc.buf, start_byte, end_byte,
+		strings::toutf8(text));
 	invalidate_parse_cache(doc);
 };
 

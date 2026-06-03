@@ -53,7 +53,8 @@ export fn echo() int = answer();
 		const loc = arr[i] as json::object;
 		const u = *(json::get(&loc, "uri") as *json::value) as str;
 		if (u != "file:///refs.ha") {
-			fmt::fatalf("e2e: references[{}].uri = {}, expected file:///refs.ha", i, u);
+			fmt::fatalf("e2e: references[{}].uri = {}, expected file:///refs.ha", i,
+				u);
 		};
 		const range = *(json::get(&loc, "range") as *json::value) as json::object;
 		const start = *(json::get(&range, "start") as *json::value) as json::object;
@@ -113,8 +114,8 @@ export fn echo() int = answer();
 	const end_line = *(json::get(&end, "line") as *json::value) as f64;
 	const end_char = *(json::get(&end, "character") as *json::value) as f64;
 	// `answer` is on line 0, cols 10..16.
-	if (start_line != 0.0 || end_line != 0.0 || start_char != 10.0 ||
-			end_char != 16.0) {
+	if (start_line != 0.0 || end_line != 0.0 || start_char != 10.0
+			|| end_char != 16.0) {
 		fmt::fatalf(
 			"e2e: prepareRename range = ({},{}..{},{}), expected (0,10..0,16). body={}",
 			start_line, start_char, end_line, end_char, text);
@@ -167,8 +168,9 @@ export fn ask() int = answer();
 		const e = edits[i] as json::object;
 		const new_text = *(json::get(&e, "newText") as *json::value) as str;
 		if (new_text != "result") {
-			fmt::fatalf("e2e: rename edit[{}].newText = {}, expected `result`. body={}",
-				i, new_text, text);
+			fmt::fatalf(
+				"e2e: rename edit[{}].newText = {}, expected `result`. body={}", i,
+				new_text, text);
 		};
 		const range = *(json::get(&e, "range") as *json::value) as json::object;
 		const start = *(json::get(&range, "start") as *json::value) as json::object;
@@ -233,7 +235,8 @@ export fn shadow() void = {
 	const changes =
 		*(json::get(&result, "changes") as *json::value) as json::object;
 	const edits =
-		*(json::get(&changes, "file:///shadow.ha") as *json::value) as []json::value;
+		*(json::get(&changes,
+			"file:///shadow.ha") as *json::value) as []json::value;
 	// Exactly two edits expected: line 7 (`\tlet foo: ...`, foo at col 5)
 	// and line 8 (`\tfoo = 11;`, foo at col 1). The previous `line >= 7.0`
 	// permitted any line at or below 7 (including off-buffer positions),
@@ -331,8 +334,8 @@ export fn shadow() void = {
 		// to contain `mod_a` in their name; `hassuffix` pins the exact
 		// per-module file.
 		if (!strings::hassuffix(u, "/mod_a/file.ha")) {
-			fmt::fatalf("e2e: references[{}].uri = {}; expected suffix /mod_a/file.ha",
-				i, u);
+			fmt::fatalf(
+				"e2e: references[{}].uri = {}; expected suffix /mod_a/file.ha", i, u);
 		};
 	};
 };

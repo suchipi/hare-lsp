@@ -111,7 +111,8 @@ export fn finish_index(idx: *file_index) void = {
 // @param idx: borrowed
 // @param d: borrowed
 fn index_decl(idx: *file_index, d: *ast::decl) void = {
-	const docs = if (len(d.docs) > 0) strings::dup(d.docs)! else strings::dup("")!;
+	const docs = if (len(d.docs) > 0) strings::dup(d.docs)!
+		else strings::dup("")!;
 	match (d.decl) {
 	case let f: ast::decl_func =>
 		const params = extract_param_names(f);
@@ -127,11 +128,12 @@ fn index_decl(idx: *file_index, d: *ast::decl) void = {
 	case let g: ast::decl_global =>
 		const k = if (g.is_const) symbol_kind::CONST else symbol_kind::GLOBAL;
 		const fact = annotations_from_docs(docs, false);
-		add_symbol(idx, g.ident, k, d.loc, docs, d.exported, false, [], fact, [], []);
+		add_symbol(idx, g.ident, k, d.loc, docs, d.exported, false, [], fact, [],
+			[]);
 	case let c: ast::decl_const =>
 		const fact = annotations_from_docs(docs, false);
-		add_symbol(idx, c.ident, symbol_kind::DEF, d.loc, docs, d.exported, false, [],
-			fact, [], []);
+		add_symbol(idx, c.ident, symbol_kind::DEF, d.loc, docs, d.exported, false,
+			[], fact, [], []);
 	case ast::assert_expr =>
 		// `static assert(...)` — no symbol introduced.
 		free(docs);

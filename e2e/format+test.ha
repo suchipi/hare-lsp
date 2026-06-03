@@ -109,8 +109,8 @@ export fn main() void = {
 	);
 	// The non-canonical `let x  = 1;` must be collapsed to single-space.
 	assert(
-		strings::contains(new_text, "let x = 1;") &&
-		!strings::contains(new_text, "let x  = 1;"),
+		strings::contains(new_text, "let x = 1;")
+		&& !strings::contains(new_text, "let x  = 1;"),
 		"formatter must normalize the double space introduced in the fixture"
 	);
 };
@@ -438,7 +438,8 @@ use     io;
 	let v8 = json::loadstr(strings::fromutf8(body8)!)!;
 	defer json::finish(v8);
 	const arr8 =
-		*(json::get(&(v8 as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v8 as json::object),
+			"result") as *json::value) as []json::value;
 	assert(len(arr8) == 1, "tabSize 8 must produce a wrapping edit");
 	const new8 =
 		*(json::get(&(arr8[0] as json::object), "newText") as *json::value) as str;
@@ -462,7 +463,8 @@ use     io;
 	let v1 = json::loadstr(strings::fromutf8(body1)!)!;
 	defer json::finish(v1);
 	const arr1 =
-		*(json::get(&(v1 as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v1 as json::object),
+			"result") as *json::value) as []json::value;
 	assert(
 		len(arr1) == 0,
 		"tabSize 1 leaves the one-line condition untouched (no-op)"

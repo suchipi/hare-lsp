@@ -207,7 +207,8 @@ fn open_log_in_dir(dir: str, name: str) (io::file | void) = {
 	if (len(dir) == 0) return;
 	const path = strings::concat(dir, "/", name)!;
 	defer free(path);
-	match (os::create(path, 0o644: fs::mode, fs::flag::WRONLY | fs::flag::TRUNC)) {
+	match (os::create(path, 0o644: fs::mode,
+		fs::flag::WRONLY | fs::flag::TRUNC)) {
 	case let f: io::file =>
 		return f;
 	case fs::error =>

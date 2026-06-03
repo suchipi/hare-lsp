@@ -190,7 +190,8 @@ export fn handle_code_lens_resolve(s: *server, r: lsp::request) void = {
 	// Count references across the workspace.
 	let count = 0z;
 	for (let i = 0z; i < len(s.documents); i += 1) {
-		count += count_token_occurrences(analysis::bytes(&s.documents[i].buf), name);
+		count += count_token_occurrences(analysis::bytes(&s.documents[i].buf),
+			name);
 	};
 
 	// Build the command "N references". The client needs uri + position
@@ -254,8 +255,8 @@ fn count_token_occurrences(data: []u8, name: str) size = {
 	let i = 0z;
 	for (i + len(t) <= len(data); i += 1) {
 		if (i > 0 && analysis::is_ident_byte(data[i - 1])) continue;
-		if (i + len(t) < len(data) &&
-				analysis::is_ident_byte(data[i + len(t)])) continue;
+		if (i + len(t) < len(data)
+				&& analysis::is_ident_byte(data[i + len(t)])) continue;
 		let ok = true;
 		for (let j = 0z; j < len(t); j += 1) {
 			if (data[i + j] != t[j]) {
@@ -407,8 +408,8 @@ fn find_ident_within(
 		};
 		if (!ok) continue;
 		if (i > span_start && analysis::is_ident_byte(data[i - 1])) continue;
-		if (i + len(target) < end &&
-				analysis::is_ident_byte(data[i + len(target)])) continue;
+		if (i + len(target) < end
+				&& analysis::is_ident_byte(data[i + len(target)])) continue;
 		return i;
 	};
 	return span_start;

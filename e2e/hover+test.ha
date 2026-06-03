@@ -282,7 +282,8 @@ export fn main() void = {
 	};
 	const uri_str = *(json::get(&loc, "uri") as *json::value) as str;
 	assert(
-		strings::contains(uri_str, "/getopt/") && strings::hassuffix(uri_str, ".ha"),
+		strings::contains(uri_str, "/getopt/")
+		&& strings::hassuffix(uri_str, ".ha"),
 		"tuple definition should resolve into the stdlib getopt module"
 	);
 };
@@ -506,8 +507,8 @@ export fn main() void = {
 	};
 	const uri_str = *(json::get(&loc, "uri") as *json::value) as str;
 	assert(
-		strings::contains(uri_str, "/os/+") &&
-		strings::hassuffix(uri_str, "/stdfd.ha"),
+		strings::contains(uri_str, "/os/+")
+		&& strings::hassuffix(uri_str, "/stdfd.ha"),
 		"definition should resolve to os/<platform-tag>/stdfd.ha"
 	);
 };
@@ -912,7 +913,8 @@ export fn main() void = {
 	const tmpl =
 		`{"jsonrpc":"2.0","id":120,"method":"textDocument/hover","params":{"textDocument":{"uri":"`;
 	const req =
-		strings::concat(tmpl, test_uri, `"},"position":{"line":1,"character":11}}}`)!;
+		strings::concat(tmpl, test_uri,
+			`"},"position":{"line":1,"character":11}}}`)!;
 	defer free(req);
 	send(&s, strings::toutf8(req));
 
@@ -1054,7 +1056,8 @@ export fn make_widget() *int = alloc(0);
 		case let o: json::object =>
 			yield o;
 		case =>
-			fmt::fatalf("e2e: ownership-annotation hover returned null. body={}", text);
+			fmt::fatalf("e2e: ownership-annotation hover returned null. body={}",
+				text);
 		};
 	case void =>
 		fmt::fatalf("e2e: ownership hover missing result: {}", text);
@@ -1081,7 +1084,8 @@ export fn make_widget() *int = alloc(0);
 	send(&s,
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
-	const sample = `export fn use_it() void = {
+	const sample =
+		`export fn use_it() void = {
 	let x = alloc(0);
 	free(x);
 };

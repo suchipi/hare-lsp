@@ -575,8 +575,8 @@ fn handle_notification(s: *server, n: lsp::notification) void = {
 			return;
 		};
 	case server_state::INITIALIZING =>
-		if (n.method != "initialized" && n.method != "exit" &&
-				!strings::hasprefix(n.method, "$/")) {
+		if (n.method != "initialized" && n.method != "exit"
+				&& !strings::hasprefix(n.method, "$/")) {
 			return;
 		};
 	case => void;
@@ -1257,7 +1257,12 @@ fn quote_bytes_for_log(data: []u8) str = {
 		} else if (b >= 0x20 && b < 0x7f) {
 			append(out, b)!;
 		} else {
-			append(out, ['\\': u8, 'x': u8, hex[b >> 4], hex[b & 0xf]]...)!;
+			append(out, [
+				'\\': u8,
+				'x': u8,
+				hex[b >> 4],
+				hex[b & 0xf],
+			]...)!;
 		};
 	};
 	append(out, '"': u8)!;

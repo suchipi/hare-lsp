@@ -361,8 +361,8 @@ fn render(
 			else if (tail_width == WIDTH_INFINITY) WIDTH_INFINITY
 			else if (w > WIDTH_INFINITY - tail_width) WIDTH_INFINITY
 			else w + tail_width;
-		const child_mode = if (total <= remaining &&
-				fits_all(g.items)) render_mode::FLAT else render_mode::BROKEN;
+		const child_mode = if (total <= remaining
+				&& fits_all(g.items)) render_mode::FLAT else render_mode::BROKEN;
 		render_items(out, g.items, child_mode, max_col, indent, tab_width,
 			tail_width, cur_col, written, pending_tabs)?;
 	// Decide flat-or-broken based on remaining columns,
@@ -371,11 +371,11 @@ fn render(
 	// in flat mode.
 
 	case let n: doc_nest =>
-		render(out, n.inner, mode, max_col, indent + n.delta, tab_width,
-			tail_width, cur_col, written, pending_tabs)?;
+		render(out, n.inner, mode, max_col, indent + n.delta, tab_width, tail_width,
+			cur_col, written, pending_tabs)?;
 	case let c: doc_concat =>
-		render_items(out, c.items, mode, max_col, indent, tab_width,
-			tail_width, cur_col, written, pending_tabs)?;
+		render_items(out, c.items, mode, max_col, indent, tab_width, tail_width,
+			cur_col, written, pending_tabs)?;
 	case let cm: doc_comment =>
 		// Trailing comments stay glued to the preceding code with
 		// a single space separator (e.g. `assert(...);  // note`).
@@ -407,8 +407,8 @@ fn render(
 			emit_str(out, ib.text, tab_width, cur_col, written, pending_tabs)?;
 		};
 	case let f: doc_fill =>
-		render_fill(out, f.items, max_col, indent, tab_width, tail_width,
-			cur_col, written, pending_tabs)?;
+		render_fill(out, f.items, max_col, indent, tab_width, tail_width, cur_col,
+			written, pending_tabs)?;
 	};
 };
 
@@ -449,8 +449,8 @@ fn render_fill(
 	if (first_need != WIDTH_INFINITY && first_need > remaining0 && *cur_col > 0) {
 		emit_break(out, indent, tab_width, cur_col, written, pending_tabs)?;
 	};
-	render(out, &items[0], render_mode::FLAT, max_col, indent, tab_width,
-		0z, cur_col, written, pending_tabs)?;
+	render(out, &items[0], render_mode::FLAT, max_col, indent, tab_width, 0z,
+		cur_col, written, pending_tabs)?;
 	let i = 1z;
 	for (i + 1 < len(items); i += 2) {
 		// items[i] is the separator (a doc_line); items[i+1] is
@@ -460,14 +460,15 @@ fn render_fill(
 		const sep_flat_w = flat_width(&items[i], tab_width);
 		const content_flat_w = flat_width(&items[i + 1], tab_width);
 		const tail = if (i + 2 >= len(items)) outer_tail else 0z;
-		const need = saturating_add(saturating_add(sep_flat_w, content_flat_w), tail);
+		const need = saturating_add(saturating_add(sep_flat_w, content_flat_w),
+			tail);
 		const remaining = if (*cur_col >= max_col) 0z else max_col - *cur_col;
 		const can_fit =
-			need != WIDTH_INFINITY && need <= remaining && fits_flat(&items[i]) &&
-			fits_flat(&items[i + 1]);
+			need != WIDTH_INFINITY && need <= remaining && fits_flat(&items[i])
+			&& fits_flat(&items[i + 1]);
 		if (can_fit) {
-			render(out, &items[i], render_mode::FLAT, max_col, indent, tab_width,
-				0z, cur_col, written, pending_tabs)?;
+			render(out, &items[i], render_mode::FLAT, max_col, indent, tab_width, 0z,
+				cur_col, written, pending_tabs)?;
 			render(out, &items[i + 1], render_mode::FLAT, max_col, indent, tab_width,
 				0z, cur_col, written, pending_tabs)?;
 		} else {
@@ -475,8 +476,8 @@ fn render_fill(
 			// (which itself may be a group that decides its own
 			// flat-or-broken layout).
 			emit_break(out, indent, tab_width, cur_col, written, pending_tabs)?;
-			render(out, &items[i + 1], render_mode::BROKEN, max_col, indent, tab_width,
-				0z, cur_col, written, pending_tabs)?;
+			render(out, &items[i + 1], render_mode::BROKEN, max_col, indent,
+				tab_width, 0z, cur_col, written, pending_tabs)?;
 		};
 	};
 };
@@ -673,7 +674,7 @@ fn emit_str(
 // leading indentation is accounted for in [[emit_break]].
 fn next_tab_stop(col: size, tab_width: size) size = {
 	if (tab_width == 0) return col;
-	return col - (col % tab_width) + tab_width;
+	return col - col % tab_width + tab_width;
 };
 
 // @param cur_col: borrowed
@@ -696,7 +697,7 @@ fn emit_break(
 	// One indent level emits one tab character but occupies
 	// `tab_width` display columns; the column tracker counts display
 	// columns so wrap decisions match what the reader sees.
-	*cur_col = if (indent < 0) 0z else (indent: size) * tab_width;
+	*cur_col = if (indent < 0) 0z else indent: size * tab_width;
 };
 
 // Convenience: pretty-print to a freshly-allocated string. Caller

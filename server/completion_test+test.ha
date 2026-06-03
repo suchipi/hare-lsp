@@ -64,7 +64,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -108,7 +109,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 1.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	// Should at least contain the keyword "let".
 	let found_let = false;
@@ -145,7 +147,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 2.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	// All labels should start with "ret".
 	for (let i = 0z; i < len(items); i += 1) {
@@ -184,7 +187,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 3.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found_helper = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -216,7 +220,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 4.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -225,7 +230,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		if (label != "greet") continue;
 		found = true;
 		// Snippet insertText and Snippet format.
-		const insert_text = *(json::get(&item, "insertText") as *json::value) as str;
+		const insert_text =
+			*(json::get(&item, "insertText") as *json::value) as str;
 		assert(insert_text == "greet(${1:name}, ${2:age})$0");
 		const fmt_val =
 			*(json::get(&item, "insertTextFormat") as *json::value) as f64;
@@ -264,7 +270,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 50.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -273,7 +280,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		if (label != "barbar") continue;
 		found = true;
 		const edits =
-			*(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
+			*(json::get(&item,
+				"additionalTextEdits") as *json::value) as []json::value;
 		assert(len(edits) >= 1);
 		const e0 = edits[0] as json::object;
 		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
@@ -308,7 +316,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 51.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	for (let i = 0z; i < len(items); i += 1) {
 		const item = items[i] as json::object;
@@ -358,7 +367,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 90.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -408,7 +418,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 70.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -417,7 +428,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		if (label != "loadstr") continue;
 		found = true;
 		const edits =
-			*(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
+			*(json::get(&item,
+				"additionalTextEdits") as *json::value) as []json::value;
 		assert(len(edits) >= 1);
 		const e0 = edits[0] as json::object;
 		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
@@ -427,7 +439,10 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		);
 		break;
 	};
-	assert(found, "stdlib loadstr should be offered as an unqualified completion");
+	assert(
+		found,
+		"stdlib loadstr should be offered as an unqualified completion"
+	);
 };
 
 @test fn completion_auto_import_for_stdlib_skipped_when_qualified_import_present(
@@ -462,7 +477,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 71.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -511,7 +527,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 80.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -527,7 +544,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 			"module-name completion detail must show the qualified path"
 		);
 		const edits =
-			*(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
+			*(json::get(&item,
+				"additionalTextEdits") as *json::value) as []json::value;
 		assert(len(edits) >= 1);
 		const e0 = edits[0] as json::object;
 		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
@@ -569,7 +587,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 81.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let bufio_count = 0;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -615,7 +634,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 82.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -659,7 +679,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 83.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -670,7 +691,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		if (kind != 9.0) continue;
 		found = true;
 		const edits =
-			*(json::get(&item, "additionalTextEdits") as *json::value) as []json::value;
+			*(json::get(&item,
+				"additionalTextEdits") as *json::value) as []json::value;
 		assert(len(edits) >= 1);
 		const e0 = edits[0] as json::object;
 		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
@@ -710,7 +732,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 72.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	for (let i = 0z; i < len(items); i += 1) {
 		const item = items[i] as json::object;
@@ -752,7 +775,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 60.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found_mymod = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -792,7 +816,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 61.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found_dup = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -838,7 +863,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 63.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found_concat = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -882,7 +908,8 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = comp_skip_to_response(out, 62.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let found_shown = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -920,7 +947,8 @@ fn run_completion(
 	const v = comp_skip_to_response(out, req_id);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	// Return a duplicated copy so callers can inspect after json::finish.
 	let dup_items: []json::value = [];
@@ -1256,8 +1284,8 @@ fn free_labels(labels: []str) void = {
 		};
 	};
 	assert(
-		saw_keyword || labels_contains(labels, "let") ||
-		labels_contains(labels, "return"),
+		saw_keyword || labels_contains(labels, "let")
+		|| labels_contains(labels, "return"),
 		"`..` must fall back to PLAIN completion (at least one keyword expected)"
 	);
 };
@@ -1482,7 +1510,8 @@ fn free_labels(labels: []str) void = {
 	const v = comp_skip_to_response(out, 5.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 	let saw_let = false;
 	for (let i = 0z; i < len(items); i += 1) {
@@ -1533,7 +1562,8 @@ fn free_labels(labels: []str) void = {
 	const v = comp_skip_to_response(out, 600.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items = *(json::get(&result, "items") as *json::value) as []json::value;
 
 	let data_dup: json::value = json::_null;
@@ -1573,7 +1603,8 @@ fn free_labels(labels: []str) void = {
 	const v2 = comp_skip_to_response(out, 601.0);
 	defer json::finish(v2);
 	const result2 =
-		*(json::get(&(v2 as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v2 as json::object),
+			"result") as *json::value) as json::object;
 
 	// detail must contain the rendered signature: starts with `fn`
 	// and includes the full identifier as written.
@@ -1626,7 +1657,8 @@ fn free_labels(labels: []str) void = {
 	const v = comp_skip_to_response(out, 610.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const label = *(json::get(&result, "label") as *json::value) as str;
 	assert(label == "foo");
 	const kind = *(json::get(&result, "kind") as *json::value) as f64;
@@ -1654,7 +1686,8 @@ fn free_labels(labels: []str) void = {
 	const v = comp_skip_to_response(out, 611.0);
 	defer json::finish(v);
 	const result =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const detail = *(json::get(&result, "detail") as *json::value) as str;
 	assert(
 		detail == "orig",
@@ -1784,7 +1817,8 @@ fn free_labels(labels: []str) void = {
 	// `done` and `nomem` are builtin types accepted by hare::parse's
 	// primitive_type, so they must be offered in a type position even
 	// though they read like control-flow / error keywords elsewhere.
-	comp_open(&s, "file:///tdone.ha", "fn main() void = {\\n\\tlet x: do\\n};\\n");
+	comp_open(&s, "file:///tdone.ha",
+		"fn main() void = {\\n\\tlet x: do\\n};\\n");
 	const items_d = run_completion(&s, out, "file:///tdone.ha", 1, 10, 2010.0);
 	defer finish_items(items_d);
 	const labels_d = item_labels(items_d);

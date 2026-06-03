@@ -38,7 +38,10 @@ export fn handle_prepare_type_hierarchy(s: *server, r: lsp::request) void = {
 	const data = analysis::bytes(&doc.buf);
 	const off = analysis::position_to_byte(data, doc.buf.line_index,
 		position_encoding(s),
-		analysis::position { line = pos.line, character = pos.character });
+		analysis::position {
+			line = pos.line,
+			character = pos.character,
+		});
 	const cache = parse_of(doc);
 	const sym = match (analysis::symbol_at(&cache.idx, off)) {
 	case let p: *analysis::symbol =>
@@ -267,8 +270,8 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 					match (analysis::workspace_lookup_for_subunit(&s.workspace_index,
 						&fpe.pr.subunit, file_module, qualifier, item.name)) {
 					case let r: *analysis::workspace_entry =>
-						if (r.path == exp.path && r.short_name == exp.short_name &&
-								r.kind == exp.kind) {
+						if (r.path == exp.path && r.short_name == exp.short_name
+								&& r.kind == exp.kind) {
 							matched = true;
 						};
 					case void => void;
@@ -284,8 +287,8 @@ export fn handle_subtypes(s: *server, r: lsp::request) void = {
 			if (visited_pair_has(visited, e.uri, short)) continue;
 			const sp_off = d.loc.start.off: size;
 			const ep_off = d.loc.end.off: size;
-			append(arr, build_type_item_for_path(s, e.path, e.uri, short, sp_off, ep_off,
-				fpe.text))!;
+			append(arr, build_type_item_for_path(s, e.path, e.uri, short, sp_off,
+				ep_off, fpe.text))!;
 			append(visited, (e.uri, short))!;
 		};
 	};
@@ -580,8 +583,8 @@ fn find_ident_in_type_decl(
 		};
 		if (!ok) continue;
 		if (i > span_start && analysis::is_ident_byte(data[i - 1])) continue;
-		if (i + len(target) < end &&
-				analysis::is_ident_byte(data[i + len(target)])) continue;
+		if (i + len(target) < end
+				&& analysis::is_ident_byte(data[i + len(target)])) continue;
 		return i;
 	};
 	return span_start;

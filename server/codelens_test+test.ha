@@ -63,7 +63,8 @@ fn cl_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		for (let i = 0z; i < len(lines); i += 1) {
 			const idx = strings::index(lines[i], ':') as size;
 			const name = strings::sub(lines[i], 0, idx);
-			const value = strings::trim(strings::sub(lines[i], idx + 1, strings::end));
+			const value = strings::trim(
+				strings::sub(lines[i], idx + 1, strings::end));
 			if (name == "Content-Length") {
 				length = strconv::stoz(value)!;
 			};
@@ -113,7 +114,8 @@ fn cl_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = cl_skip_to_response(out, 71.0);
 	defer json::finish(v);
 	const arr =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	let found = false;
 	for (let i = 0z; i < len(arr); i += 1) {
 		const lens = arr[i] as json::object;
@@ -154,7 +156,8 @@ fn cl_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const v = cl_skip_to_response(out, 70.0);
 	defer json::finish(v);
 	const arr =
-		*(json::get(&(v as json::object), "result") as *json::value) as []json::value;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as []json::value;
 	// At least one lens — the run-test one.
 	let found = false;
 	for (let i = 0z; i < len(arr); i += 1) {
@@ -170,7 +173,8 @@ fn cl_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 		if (cmd_str != "hare-lsp.runTest") continue;
 		const title = *(json::get(&cmd, "title") as *json::value) as str;
 		assert(strings::contains(title, "my_test"));
-		const args = *(json::get(&cmd, "arguments") as *json::value) as []json::value;
+		const args =
+			*(json::get(&cmd, "arguments") as *json::value) as []json::value;
 		// args = [uri, "my_test"].
 		assert(len(args) == 2);
 		assert(args[1] as str == "my_test");

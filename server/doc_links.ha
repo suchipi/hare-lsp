@@ -286,8 +286,8 @@ fn format_ref_link(label: str, t: ref_target) str = {
 	defer free(args_json);
 	const encoded = percent_encode_uri_component(args_json);
 	defer free(encoded);
-	return strings::concat("[", label, "](command:hare-lsp.openLocation?", encoded,
-		")")!;
+	return strings::concat("[", label, "](command:hare-lsp.openLocation?",
+		encoded, ")")!;
 };
 
 // Percent-encodes `s` for use inside a URI's query/path component.

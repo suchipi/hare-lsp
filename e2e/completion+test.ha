@@ -60,7 +60,8 @@ export fn main() void = {
 			strings::hasprefix(it_text, label),
 			"function snippet insertText should start with the function name"
 		);
-		const fmt_kind = *(json::get(&it, "insertTextFormat") as *json::value) as f64;
+		const fmt_kind =
+			*(json::get(&it, "insertTextFormat") as *json::value) as f64;
 		assert(
 			fmt_kind == 2.0,
 			"function completion items must be Snippet (insertTextFormat=2)"
@@ -152,8 +153,8 @@ export fn main() void = {
 		const body = recv(&s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed") &&
-				strings::contains(text, "file(s)")) break;
+		if (strings::contains(text, "indexed")
+				&& strings::contains(text, "file(s)")) break;
 	};
 
 	// Cursor right after `server::` on line 2, character 17.
@@ -213,7 +214,8 @@ export fn main() void = {
 	send(&s,
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 
-	const sample = `use strings;
+	const sample =
+		`use strings;
 export fn main() void = {
 	let _ = strings::
 };
@@ -228,8 +230,8 @@ export fn main() void = {
 		const body = recv(&s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed") &&
-				strings::contains(text, "file(s)")) break;
+		if (strings::contains(text, "indexed")
+				&& strings::contains(text, "file(s)")) break;
 	};
 
 	// Cursor right after `strings::` on line 2, character 18.
@@ -308,8 +310,8 @@ export fn main() void = {
 		const body = recv(&s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed stdlib") &&
-				strings::contains(text, "file(s)")) break;
+		if (strings::contains(text, "indexed stdlib")
+				&& strings::contains(text, "file(s)")) break;
 	};
 
 	// Cursor sits right after "newsca" on line 1, character 15.
@@ -339,7 +341,10 @@ export fn main() void = {
 			"stdlib auto-import: newscanner item must carry additionalTextEdits"
 		);
 		};
-		assert(len(edits) >= 1, "stdlib auto-import: edits array must be non-empty");
+		assert(
+			len(edits) >= 1,
+			"stdlib auto-import: edits array must be non-empty"
+		);
 		const e0 = edits[0] as json::object;
 		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
 		assert(
@@ -389,8 +394,8 @@ export fn main() void = {
 		const body = recv(&s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed stdlib") &&
-				strings::contains(text, "file(s)")) break;
+		if (strings::contains(text, "indexed stdlib")
+				&& strings::contains(text, "file(s)")) break;
 	};
 
 	// Cursor sits right after "newobje" on line 1, character 16.
@@ -465,8 +470,8 @@ export fn main() void = {
 		const body = recv(&s);
 		defer free(body);
 		const text = strings::fromutf8(body)!;
-		if (strings::contains(text, "indexed stdlib") &&
-				strings::contains(text, "file(s)")) break;
+		if (strings::contains(text, "indexed stdlib")
+				&& strings::contains(text, "file(s)")) break;
 	};
 
 	// Cursor sits right after "json" on line 1, character 5.
@@ -637,7 +642,10 @@ export fn main(b: buffer) void = {
 			// Member completion items must carry kind=Field(5) so
 			// editors can render them distinctly from locals/keywords.
 			const kind = *(json::get(&it, "kind") as *json::value) as f64;
-			assert(kind == 5.0, "struct field completion item must have kind=Field(5)");
+			assert(
+				kind == 5.0,
+				"struct field completion item must have kind=Field(5)"
+			);
 		};
 		if (label == "line_index") saw_line_index = true;
 		// MEMBER completion is exclusive - keywords/locals must NOT leak in.
@@ -727,7 +735,8 @@ export fn main() void = {
 	let v = json::loadstr(strings::fromutf8(body)!)!;
 	defer json::finish(v);
 	const result_obj =
-		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
 	const items =
 		*(json::get(&result_obj, "items") as *json::value) as []json::value;
 
