@@ -20,6 +20,7 @@ use io;
 use os;
 use path;
 use server;
+use strconv;
 use strings;
 use unix;
 
@@ -36,12 +37,16 @@ type cli = struct {
 	mode: mode,
 	paths: []str,
 	opts: ignore_opts,
+	// Display columns per indentation tab, used for wrap decisions.
+	// Defaults to [[server::DEFAULT_TAB_WIDTH]] (8).
+	tab_width: size,
 };
 
 type state = struct {
 	mode: mode,
 	any_unformatted: bool,
 	any_error: bool,
+	tab_width: size,
 };
 
 type cli_error = enum {
@@ -70,13 +75,14 @@ export fn main() void = {
 	defer free(c.paths);
 
 	if (c.mode == mode::STDOUT) {
-		os::exit(run_stdout(c.paths[0]));
+		os::exit(run_stdout(c.paths[0], c.tab_width));
 	};
 
 	let st = state {
 		mode = c.mode,
 		any_unformatted = false,
 		any_error = false,
+		tab_width = c.tab_width,
 	};
 	for (let i = 0z; i < len(c.paths); i += 1) {
 		process_path(c.paths[i], c.opts, &st);
@@ -98,6 +104,7 @@ fn parse_args(args: []str) (cli | cli_error) = {
 		mode = mode::NONE,
 		paths = [],
 		opts = default_opts(),
+		tab_width = server::DEFAULT_TAB_WIDTH,
 	};
 
 	for (let i = 0z; i < len(args); i += 1) {
@@ -135,6 +142,29 @@ fn parse_args(args: []str) (cli | cli_error) = {
 			c.opts.follow_dir_symlinks = true;
 		case "--no-follow-file-symlinks" =>
 			c.opts.follow_file_symlinks = false;
+		case "--tab-width" =>
+			if (i + 1 >= len(args)) {
+				fmt::fprintln(os::stderr,
+					"harefmt: --tab-width requires a value")!;
+				free(c.paths);
+				return cli_error::USAGE;
+			};
+			i += 1;
+			c.tab_width = match (strconv::stoz(args[i])) {
+			case let n: size =>
+				if (n < 1) {
+					fmt::fprintfln(os::stderr,
+						"harefmt: --tab-width must be >= 1: {}", args[i])!;
+					free(c.paths);
+					return cli_error::USAGE;
+				};
+				yield n;
+			case =>
+				fmt::fprintfln(os::stderr,
+					"harefmt: invalid --tab-width value: {}", args[i])!;
+				free(c.paths);
+				return cli_error::USAGE;
+			};
 		case =>
 			if (strings::hasprefix(a, "--") ||
 					len(a) >= 2 && strings::hasprefix(a, "-") && a != "-") {
@@ -200,6 +230,10 @@ fn print_usage(out: io::handle) void = {
 	fmt::fprintln(out,
 		"      --no-follow-file-symlinks Skip symlinked regular files.")!;
 	fmt::fprintln(out,
+		"      --tab-width N             Display columns per indentation tab")!;
+	fmt::fprintln(out,
+		"                                for wrap decisions (default 8).")!;
+	fmt::fprintln(out,
 		"  -h, --help                    Show this help and exit.")!;
 	fmt::fprintln(out, "  -V, --version                 Print version and exit.")!;
 };
@@ -208,7 +242,7 @@ fn print_usage(out: io::handle) void = {
 // code.
 //
 // @param path: borrowed
-fn run_stdout(path: str) int = {
+fn run_stdout(path: str, tab_width: size) int = {
 	const label = if (path == "-") "<stdin>" else path;
 	const data = if (path == "-") {
 		yield match (io::drain(os::stdin)) {
@@ -229,7 +263,7 @@ fn run_stdout(path: str) int = {
 	};
 	defer free(data);
 
-	const result = match (server::format_source(data, label)) {
+	const result = match (server::format_source(data, label, tab_width)) {
 	case let s: str =>
 		yield s;
 	case let e: server::format_error =>
@@ -315,7 +349,7 @@ fn process_file(abs: str, st: *state) void = {
 	};
 	defer free(data);
 
-	const result = match (server::format_source(data, abs)) {
+	const result = match (server::format_source(data, abs, st.tab_width)) {
 	case let s: str =>
 		yield s;
 	case let e: server::format_error =>

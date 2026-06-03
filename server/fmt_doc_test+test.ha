@@ -6,7 +6,7 @@ use strings;
 @test fn fmt_doc_text_renders_verbatim() void = {
 	let d = text("hello");
 	defer doc_finish(&d);
-	const out = pretty_str(&d, 80, 0)!;
+	const out = pretty_str(&d, 80, 0, 8)!;
 	defer free(out);
 	assert(out == "hello");
 };
@@ -17,7 +17,7 @@ use strings;
 	append(items, text("bar"))!;
 	let d = concat(items);
 	defer doc_finish(&d);
-	const out = pretty_str(&d, 80, 0)!;
+	const out = pretty_str(&d, 80, 0, 8)!;
 	defer free(out);
 	assert(out == "foobar");
 };
@@ -30,7 +30,7 @@ use strings;
 	append(items, text("b"))!;
 	let d = group(items);
 	defer doc_finish(&d);
-	const out = pretty_str(&d, 80, 0)!;
+	const out = pretty_str(&d, 80, 0, 8)!;
 	defer free(out);
 	assert(out == "a b");
 };
@@ -43,7 +43,7 @@ use strings;
 	append(items, text("bbb"))!;
 	let d = group(items);
 	defer doc_finish(&d);
-	const out = pretty_str(&d, 4, 0)!;
+	const out = pretty_str(&d, 4, 0, 8)!;
 	defer free(out);
 	// Width is 7 flat ("aaa bbb"), exceeds 4, so break.
 	assert(out == "aaa\nbbb");
@@ -58,7 +58,7 @@ use strings;
 	let inner = group(inner_items);
 	let d = nest(1, inner);
 	defer doc_finish(&d);
-	const out = pretty_str(&d, 80, 0)!;
+	const out = pretty_str(&d, 80, 0, 8)!;
 	defer free(out);
 	assert(out == "a\n\tb");
 };
@@ -74,7 +74,7 @@ use strings;
 	append(items, text("after"))!;
 	let d = concat(items);
 	defer doc_finish(&d);
-	const out = pretty_str(&d, 80, 0)!;
+	const out = pretty_str(&d, 80, 0, 8)!;
 	defer free(out);
 	assert(strings::contains(out, "// hi"));
 	assert(strings::contains(out, "before"));
@@ -90,7 +90,7 @@ use strings;
 	append(items, text("b"))!;
 	let d = group(items);
 	defer doc_finish(&d);
-	const out = pretty_str(&d, 80, 0)!;
+	const out = pretty_str(&d, 80, 0, 8)!;
 	defer free(out);
 	assert(out == "a\nb");
 };
@@ -104,7 +104,7 @@ use strings;
 	append(flat_items, text(")"))!;
 	let flat_d = group(flat_items);
 	defer doc_finish(&flat_d);
-	const flat_out = pretty_str(&flat_d, 80, 0)!;
+	const flat_out = pretty_str(&flat_d, 80, 0, 8)!;
 	defer free(flat_out);
 	assert(flat_out == "(x)");
 
@@ -117,7 +117,7 @@ use strings;
 	append(br_items, text(")"))!;
 	let br_d = group(br_items);
 	defer doc_finish(&br_d);
-	const br_out = pretty_str(&br_d, 80, 0)!;
+	const br_out = pretty_str(&br_d, 80, 0, 8)!;
 	defer free(br_out);
 	assert(br_out == "(\nx,)");
 };
@@ -130,7 +130,36 @@ use strings;
 	append(items, text("x"))!;
 	let d = group(items);
 	defer doc_finish(&d);
-	const out = pretty_str(&d, 80, 0)!;
+	const out = pretty_str(&d, 80, 0, 8)!;
 	defer free(out);
 	assert(out == "(x");
+};
+
+@test fn fmt_doc_flat_width_counts_embedded_tab() void = {
+	// A doc_text carrying a literal tab (as a backtick raw string does)
+	// must be measured with the tab at its display width when the group
+	// decides flat-vs-broken; otherwise the group lays out flat and the
+	// rendered line overshoots. With max_col 10 this group fits when a
+	// tab is 1 column (2 + 1 + 3 = 6) but not when it is 8 columns
+	// (2 + 1 + 10 = 13), so it must stay flat at tab width 1 and break
+	// at tab width 8.
+	let flat_items: []doc = alloc([], 3)!;
+	append(flat_items, text("ab"))!;
+	append(flat_items, line(" "))!;
+	append(flat_items, text("x\ty"))!;
+	let flat_d = group(flat_items);
+	defer doc_finish(&flat_d);
+	const narrow = pretty_str(&flat_d, 10, 0, 1)!;
+	defer free(narrow);
+	assert(narrow == "ab x\ty", "tab as 1 column: group fits on one line");
+
+	let br_items: []doc = alloc([], 3)!;
+	append(br_items, text("ab"))!;
+	append(br_items, line(" "))!;
+	append(br_items, text("x\ty"))!;
+	let br_d = group(br_items);
+	defer doc_finish(&br_d);
+	const wide = pretty_str(&br_d, 10, 0, 8)!;
+	defer free(wide);
+	assert(wide == "ab\nx\ty", "tab as 8 columns: group breaks to avoid overshoot");
 };

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Formatter**: line-wrap decisions now count a leading tab as a
+  configurable number of display columns, defaulting to 8 per the Hare
+  style guide. Previously a tab counted as 1 column, so deeply-indented
+  lines (e.g. a long `&&` chain inside a nested block) stayed on one line
+  even though they ran well past 80 columns on screen. The LSP honours the
+  client's `tabSize` from the `textDocument/formatting` request (a required
+  FormattingOptions field); `harefmt` takes a `--tab-width N` flag. Only
+  wrapping is affected - indentation is still always emitted as literal
+  tabs.
 - **Formatter**: removed `hare.format.indentStyle`, `hare.format.indentWidth`,
   `hare.format.trimFinalNewlines`, and `hare.format.insertFinalNewline`. The
   formatter is now fully opinionated and follows Hare's style guide: tab

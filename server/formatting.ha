@@ -32,6 +32,13 @@ export fn format_error_finish(e: *format_error) void = {
 	free(e.message);
 };
 
+// The Hare style guide says the tab size SHOULD be 8 columns
+// (https://harelang.org/documentation/usage/style.html). It is a
+// SHOULD, not a MUST, so the formatter's tab width is configurable;
+// this is the default used when no client `tabSize` / `--tab-width`
+// is supplied.
+export def DEFAULT_TAB_WIDTH: size = 8;
+
 // Formats `data` end-to-end and returns the reformatted source as a
 // freshly-allocated string the caller owns. `path` is an opaque label
 // used in parser diagnostics.
@@ -54,13 +61,22 @@ export fn format_error_finish(e: *format_error) void = {
 // invocation always produces output that `harefmt --check .`
 // immediately accepts.
 //
+// `tab_width` is how many display columns one indentation tab occupies
+// when deciding where to wrap (see [[DEFAULT_TAB_WIDTH]]). It changes
+// only wrap decisions, never the emitted indentation, which is always
+// literal tabs.
+//
 // @param data: borrowed
 // @param path: borrowed
 // @returns: owned
-export fn format_source(data: []u8, path: str) (str | format_error) = {
-	const first = format_source_once(data, path)?;
+export fn format_source(
+	data: []u8,
+	path: str,
+	tab_width: size,
+) (str | format_error) = {
+	const first = format_source_once(data, path, tab_width)?;
 	defer free(first);
-	const second = format_source_once(strings::toutf8(first), path)?;
+	const second = format_source_once(strings::toutf8(first), path, tab_width)?;
 	defer free(second);
 	return normalize_eof(second);
 };
@@ -95,7 +111,11 @@ fn normalize_eof(s: str) str = {
 //
 // @param data: borrowed
 // @param path: borrowed
-fn format_source_once(data: []u8, path: str) (str | format_error) = {
+fn format_source_once(
+	data: []u8,
+	path: str,
+	tab_width: size,
+) (str | format_error) = {
 	let pr = analysis::parse_recover(data, path);
 	defer analysis::finish_parse_result(&pr);
 	if (len(pr.errors) > 0) {
@@ -116,7 +136,7 @@ fn format_source_once(data: []u8, path: str) (str | format_error) = {
 
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
-	match (pretty(&buf, &d, 80, 0)) {
+	match (pretty(&buf, &d, 80, 0, tab_width)) {
 	case size => void;
 	case =>
 		return format_error {
@@ -125,6 +145,45 @@ fn format_source_once(data: []u8, path: str) (str | format_error) = {
 		};
 	};
 	return strings::dup(memio::string(&buf)!)!;
+};
+
+// Reads `options.tabSize` from a formatting request's params. The LSP
+// spec marks `tabSize` as a required field of FormattingOptions, so a
+// conformant client always sends it; we still fall back to
+// [[DEFAULT_TAB_WIDTH]] when the field is missing or not a positive
+// integer, so a misbehaving client can't produce degenerate output.
+//
+// @param params: borrowed
+fn formatting_tab_width(params: (json::value | void)) size = {
+	const obj = match (lsp::params_object(params)) {
+	case let o: json::object =>
+		yield o;
+	case void =>
+		return DEFAULT_TAB_WIDTH;
+	};
+	const opts = match (json::get(&obj, "options")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			return DEFAULT_TAB_WIDTH;
+		};
+	case =>
+		return DEFAULT_TAB_WIDTH;
+	};
+	match (json::get(&opts, "tabSize")) {
+	case let p: *json::value =>
+		match (*p) {
+		case let f: f64 =>
+			if (f >= 1.0) return f: size;
+			return DEFAULT_TAB_WIDTH;
+		case =>
+			return DEFAULT_TAB_WIDTH;
+		};
+	case =>
+		return DEFAULT_TAB_WIDTH;
+	};
 };
 
 // @param s: borrowed
@@ -154,6 +213,12 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 
+	// The client sends its display tab size in FormattingOptions
+	// (a required field per the LSP spec); we wrap to fit 80 columns
+	// at that width so the result matches what the user sees. Falls
+	// back to 8 if a nonconformant client omits it.
+	const tab_width = formatting_tab_width(r.params);
+
 	// Build the doc tree from the AST + comment cursor.
 	const cs = collect_comments(data);
 	defer finish_comments(cs);
@@ -165,7 +230,7 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
-	match (pretty(&buf, &d, 80, 0)) {
+	match (pretty(&buf, &d, 80, 0, tab_width)) {
 	case size => void;
 	case =>
 		send_array_result(s, r.id, []);
@@ -177,7 +242,7 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 	// LSP and the harefmt CLI produce byte-identical output.
 	const first_pass = memio::string(&buf)!;
 	const second_pass = match (format_source_once(strings::toutf8(first_pass),
-		uri)) {
+		uri, tab_width)) {
 	case let s: str =>
 		yield s;
 	case let e: format_error =>
@@ -264,6 +329,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 		send_array_result(s, r.id, []);
 		return;
 	};
+	const tab_width = formatting_tab_width(r.params);
 
 	// Convert range to byte offsets.
 	const enc = position_encoding(s);
@@ -318,7 +384,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 
 	let buf = memio::dynamic();
 	defer lsp::safe_close(&buf);
-	match (pretty(&buf, &d, 80, 0)) {
+	match (pretty(&buf, &d, 80, 0, tab_width)) {
 	case size => void;
 	case =>
 		send_array_result(s, r.id, []);

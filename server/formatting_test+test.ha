@@ -199,7 +199,7 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 @test fn format_source_normalizes_eof() void = {
 	const input = strings::toutf8(
 		"export fn alphabet() str = \"αβγ\";\n   \n\n");
-	const out = format_source(input, "<test>") as str;
+	const out = format_source(input, "<test>", 8) as str;
 	defer free(out);
 	assert(strings::hassuffix(out, "\n"));
 	assert(!strings::hassuffix(out, "  \n"));
@@ -211,7 +211,7 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	// Trailing line comment with a multi-byte rune; the formatter must
 	// preserve the comment AND add the missing terminal newline.
 	const input = strings::toutf8("export fn x() void = void; // φοο");
-	const out = format_source(input, "<test>") as str;
+	const out = format_source(input, "<test>", 8) as str;
 	defer free(out);
 	assert(strings::hassuffix(out, "\n"));
 	assert(strings::contains(out, "φοο"));
@@ -221,15 +221,48 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 // and should produce a single newline, not the empty string. Asserts
 // the rule is uniform with no special-case for empty buffers.
 @test fn format_source_empty_input_yields_single_newline() void = {
-	const out = format_source([], "<test>") as str;
+	const out = format_source([], "<test>", 8) as str;
 	defer free(out);
 	assert(out == "\n");
 };
 
 @test fn format_source_whitespace_only_input_yields_single_newline() void = {
-	const out = format_source(strings::toutf8("   \n\n\t\n"), "<test>") as str;
+	const out = format_source(strings::toutf8("   \n\n\t\n"), "<test>", 8) as str;
 	defer free(out);
 	assert(out == "\n");
+};
+
+// The formatter wraps to fit 80 display columns at the configured tab
+// width, so an indented `&&` chain that fits on one line when a tab
+// counts as 1 column wraps once a tab is the Hare-idiomatic 8 columns.
+// Same input, two tab widths, two layouts - this is the knob the LSP's
+// `tabSize` and harefmt's `--tab-width` drive.
+@test fn format_source_tab_width_controls_wrapping() void = {
+	const input = strings::toutf8(
+		"export fn f(omit_leading_dot: bool, part: str) void = {\n"
+		"\tif (omit_leading_dot && len(part) > 0 && "
+		"strings::sub(part, 0, 1) == \".\") {\n"
+		"\t\treturn;\n"
+		"\t};\n"
+		"};\n");
+
+	// Tab as 8 columns (the default): the indented condition runs past
+	// 80 columns and wraps after the outer `&&`.
+	const wide = format_source(input, "<test>", 8) as str;
+	defer free(wide);
+	assert(
+		strings::contains(wide, "len(part) > 0 &&\n"),
+		"at tab width 8 the && chain wraps after the outer &&"
+	);
+
+	// Tab as 1 column: the same line is only 77 columns and stays
+	// flat, reproducing the pre-configurability behavior.
+	const narrow = format_source(input, "<test>", 1) as str;
+	defer free(narrow);
+	assert(
+		strings::contains(narrow, "len(part) > 0 && strings::sub(part, 0, 1)"),
+		"at tab width 1 the && chain stays on one line"
+	);
 };
 
 @test fn on_type_formatting_reindents_close_brace() void = {
