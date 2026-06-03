@@ -113,6 +113,7 @@ const KEYWORDS: []str = [
 const TYPE_KEYWORDS: []str = [
 	"bool",
 	"const",
+	"done",
 	"enum",
 	"f32",
 	"f64",
@@ -123,6 +124,7 @@ const TYPE_KEYWORDS: []str = [
 	"i8",
 	"int",
 	"never",
+	"nomem",
 	"nullable",
 	"opaque",
 	"rune",

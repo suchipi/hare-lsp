@@ -1778,6 +1778,34 @@ fn free_labels(labels: []str) void = {
 	);
 };
 
+@test fn completion_type_position_offers_done_and_nomem() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// `done` and `nomem` are builtin types accepted by hare::parse's
+	// primitive_type, so they must be offered in a type position even
+	// though they read like control-flow / error keywords elsewhere.
+	comp_open(&s, "file:///tdone.ha", "fn main() void = {\\n\\tlet x: do\\n};\\n");
+	const items_d = run_completion(&s, out, "file:///tdone.ha", 1, 10, 2010.0);
+	defer finish_items(items_d);
+	const labels_d = item_labels(items_d);
+	defer free_labels(labels_d);
+	assert(
+		labels_contains(labels_d, "done"),
+		"type position must offer the builtin type `done`"
+	);
+
+	comp_open(&s, "file:///tnomem.ha",
+		"fn main() void = {\\n\\tlet x: no\\n};\\n");
+	const items_n = run_completion(&s, out, "file:///tnomem.ha", 1, 10, 2011.0);
+	defer finish_items(items_n);
+	const labels_n = item_labels(items_n);
+	defer free_labels(labels_n);
+	assert(
+		labels_contains(labels_n, "nomem"),
+		"type position must offer the builtin type `nomem`"
+	);
+};
+
 @test fn completion_type_position_qualified_filters_to_types() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);
