@@ -204,6 +204,15 @@
             "minimum": 0,
             "description": "Maximum wall-clock ms to wait for `hare build` (or `hare test` / `hare run`) before SIGTERM. 0 disables the timeout."
           },
+          "hare.formatting.tabWidth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null,
+            "minimum": 1,
+            "description": "Overrides the display columns per indentation tab used for line-wrap decisions, taking precedence over the editor's tabSize. When unset (null), the formatter uses the editor's tabSize from the formatting request (falling back to 8). Indentation is always emitted as literal tabs regardless. Lets collaborators who render tabs at different display sizes wrap to the same width."
+          },
           "hare.inlayHints.parameterNames": {
             "type": "boolean",
             "default": true,

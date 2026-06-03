@@ -275,6 +275,42 @@ fn fmt_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	);
 };
 
+// The `hare.formatting.tabWidth` config option overrides the client's
+// `tabSize`; when unset the request's `tabSize` is used (falling back
+// to DEFAULT_TAB_WIDTH when the client omits it entirely). This pins
+// the precedence the wrap decisions depend on.
+@test fn formatting_tab_width_config_overrides_request() void = {
+	let (s, scan, in_buf, out) = fmt_test_server();
+	defer fmt_test_cleanup(&s, scan, in_buf, out);
+
+	const params =
+		`{"textDocument":{"uri":"file:///x.ha"},"options":{"tabSize":8,"insertSpaces":false}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+
+	// No override: reads tabSize from the request.
+	assert(formatting_tab_width(&s, pv) == 8);
+
+	// Override set: wins over the request's tabSize.
+	s.config.formatting_tab_width = 3;
+	assert(formatting_tab_width(&s, pv) == 3);
+
+	// Override cleared: back to the request's tabSize.
+	s.config.formatting_tab_width = void;
+	assert(formatting_tab_width(&s, pv) == 8);
+
+	// Override set, request missing FormattingOptions: still the override.
+	const noopts = `{"textDocument":{"uri":"file:///x.ha"}}`;
+	let nv = json::loadstr(noopts)!;
+	defer json::finish(nv);
+	s.config.formatting_tab_width = 5;
+	assert(formatting_tab_width(&s, nv) == 5);
+
+	// Override unset and no FormattingOptions: DEFAULT_TAB_WIDTH.
+	s.config.formatting_tab_width = void;
+	assert(formatting_tab_width(&s, nv) == DEFAULT_TAB_WIDTH);
+};
+
 @test fn on_type_formatting_reindents_close_brace() void = {
 	let (s, scan, in_buf, out) = fmt_test_server();
 	defer fmt_test_cleanup(&s, scan, in_buf, out);
