@@ -515,6 +515,93 @@ export fn main() void = {
 	);
 };
 
+@test fn e2e_completion_value_position_suggests_local_binding() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	// A `let counter = 0;` binding should be offered when the user starts
+	// typing `cou` on a later line — the value-position case the feature
+	// targets, exercised end-to-end over the wire.
+	const sample = `export fn main() void = {
+	let counter = 0;
+	cou
+};
+`;
+	open_doc(&s, "file:///vpos_e2e.ha", sample);
+
+	// Line 2 = `\tcou`; char 4 sits right after `cou` (tab=0, then `cou`).
+	const req =
+		`{"jsonrpc":"2.0","id":1860,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///vpos_e2e.ha"},"position":{"line":2,"character":4}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1860.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let saw_counter = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		if (label != "counter") continue;
+		saw_counter = true;
+		// The local must present as a Variable so editors render it
+		// distinctly from keywords / functions.
+		const kind = *(json::get(&it, "kind") as *json::value) as f64;
+		assert(kind == 6.0, "local binding completion must be Variable(6)");
+	};
+	assert(
+		saw_counter,
+		"value-position completion must offer the in-scope local `counter`"
+	);
+};
+
+@test fn e2e_completion_type_position_suggests_builtin_type() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	// Typing a type annotation `let x: s` (no initializer yet — the
+	// realistic mid-typing state) must offer the builtin type `str` while
+	// suppressing non-type keywords like `static`.
+	const sample = `export fn main() void = {
+	let x: s
+};
+`;
+	open_doc(&s, "file:///tpos_e2e.ha", sample);
+
+	// Line 1 = `\tlet x: s`; char 9 sits right after `s`
+	// (tab=0, `let x: s` = 8 chars).
+	const req =
+		`{"jsonrpc":"2.0","id":1861,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///tpos_e2e.ha"},"position":{"line":1,"character":9}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1861.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let saw_str = false, saw_static = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		if (label == "str") saw_str = true;
+		if (label == "static") saw_static = true;
+	};
+	assert(saw_str, "type-position completion must offer the builtin type `str`");
+	assert(
+		!saw_static,
+		"type position must exclude the non-type keyword `static`"
+	);
+};
+
 @test fn e2e_completion_member_access_returns_struct_fields() void = {
 	let s = spawn_session();
 	defer finish_session(&s);

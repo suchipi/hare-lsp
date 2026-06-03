@@ -102,6 +102,46 @@ const KEYWORDS: []str = [
 	"yield",
 ];
 
+// Subset of [[KEYWORDS]] valid in a type position: the builtin types plus
+// the type-constructor / qualifier keywords (`struct`, `union`, `enum`,
+// `fn`, `nullable`, `const`). Used to filter keyword completions when the
+// cursor sits in a type annotation, cast / `as` / `is` operand, or a
+// type-alias body, so non-type keywords like `static` or `switch` don't
+// surface where only a type is grammatical. Kept sorted.
+//
+// @borrowed
+const TYPE_KEYWORDS: []str = [
+	"bool",
+	"const",
+	"done",
+	"enum",
+	"f32",
+	"f64",
+	"fn",
+	"i16",
+	"i32",
+	"i64",
+	"i8",
+	"int",
+	"never",
+	"nomem",
+	"nullable",
+	"opaque",
+	"rune",
+	"size",
+	"str",
+	"struct",
+	"u16",
+	"u32",
+	"u64",
+	"u8",
+	"uint",
+	"uintptr",
+	"union",
+	"valist",
+	"void",
+];
+
 // LSP CompletionItemKind values.
 def CIK_TEXT: f64 = 1.0;
 
@@ -171,8 +211,12 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 	switch (prefix_info.kind) {
 	case prefix_kind::QUALIFIED =>
 		// Module-qualified: list exported workspace + stdlib symbols
-		// whose module matches `prefix_info.module`.
-		add_module_members(s, &arr, prefix_info.module, prefix_info.partial);
+		// whose module matches `prefix_info.module`. When the qualified
+		// reference sits in a type position (e.g. `let x: io::|`), only
+		// type-kind members are grammatical, so filter to those.
+		const types_only = is_type_position(data, prefix_info.module_start);
+		add_module_members(s, &arr, prefix_info.module, prefix_info.partial,
+			types_only);
 	case prefix_kind::MEMBER =>
 		// `<expr>.<partial>`: re-parse with a sentinel, resolve the
 		// receiver expression's type, and enumerate the struct/union
@@ -181,11 +225,27 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 		// grammar position only accepts a field name.
 		add_struct_members(s, doc, data, &prefix_info, &arr);
 	case prefix_kind::PLAIN =>
-		add_keywords(&arr, prefix_info.partial);
-		add_file_locals(&arr, doc, prefix_info.partial);
-		add_workspace_symbols(s, doc, &arr, prefix_info.partial);
-		add_stdlib_symbols(s, doc, &arr, prefix_info.partial);
-		add_module_name_completions(s, doc, &arr, prefix_info.partial);
+		if (is_type_position(data, prefix_info.partial_start)) {
+			// Type position: offer only what can name a type — the
+			// type keywords and TYPE-kind declarations — plus module
+			// names so the user can reach `mod::sometype`.
+			add_keywords(&arr, prefix_info.partial, TYPE_KEYWORDS);
+			add_file_locals(&arr, doc, prefix_info.partial, true, []);
+			add_workspace_symbols(s, doc, &arr, prefix_info.partial, true);
+			add_stdlib_symbols(s, doc, &arr, prefix_info.partial, true);
+			add_module_name_completions(s, doc, &arr, prefix_info.partial);
+		} else {
+			// Value position: surface in-scope local bindings (let /
+			// const / def, parameters, for / match captures) first,
+			// then keywords and the file / workspace / stdlib symbols.
+			const locals = add_local_bindings(&arr, doc, data, &prefix_info);
+			defer analysis::free_str_slice(locals);
+			add_keywords(&arr, prefix_info.partial, KEYWORDS);
+			add_file_locals(&arr, doc, prefix_info.partial, false, locals);
+			add_workspace_symbols(s, doc, &arr, prefix_info.partial, false);
+			add_stdlib_symbols(s, doc, &arr, prefix_info.partial, false);
+			add_module_name_completions(s, doc, &arr, prefix_info.partial);
+		};
 	};
 	free(prefix_info.module);
 	free(prefix_info.partial);
@@ -230,6 +290,11 @@ type prefix_info = struct {
 	// a word). For MEMBER, the splice replaces [partial_start, ident_end)
 	// with the sentinel so the parser sees a single, complete identifier.
 	ident_end: size,
+	// For QUALIFIED, the byte offset where the module identifier begins
+	// (so the type-position classifier can inspect what precedes the
+	// whole `mod::partial` reference). For MEMBER/PLAIN this mirrors
+	// partial_start and is unused.
+	module_start: size,
 };
 
 // @param data: borrowed
@@ -268,6 +333,7 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 			partial_start = s,
 			partial_end = off,
 			ident_end = e,
+			module_start = s,
 		};
 	};
 
@@ -286,6 +352,7 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 			partial_start = s,
 			partial_end = off,
 			ident_end = e,
+			module_start = m,
 		};
 	};
 
@@ -296,6 +363,7 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 		partial_start = s,
 		partial_end = off,
 		ident_end = e,
+		module_start = s,
 	};
 };
 
@@ -350,17 +418,22 @@ def SORT_KEYWORD: str = "3-";
 // @borrowed
 def SORT_STDLIB: str = "4-";
 
+// Emits a keyword completion item for every entry of `kws` matching
+// `partial`. Callers pass [[KEYWORDS]] in a value position and the
+// type-only subset [[TYPE_KEYWORDS]] in a type position.
+//
 // @param arr: borrowed
 // @param partial: borrowed
-fn add_keywords(arr: *[]json::value, partial: str) void = {
+// @param kws: borrowed
+fn add_keywords(arr: *[]json::value, partial: str, kws: []str) void = {
 	let a = *arr;
-	for (let i = 0z; i < len(KEYWORDS); i += 1) {
-		if (len(partial) > 0 && !strings::hasprefix(KEYWORDS[i], partial)) continue;
+	for (let i = 0z; i < len(kws); i += 1) {
+		if (len(partial) > 0 && !strings::hasprefix(kws[i], partial)) continue;
 		let item = json::newobject();
-		json::set(&item, "label", KEYWORDS[i]: json::value)!;
+		json::set(&item, "label", kws[i]: json::value)!;
 		json::put(&item, "kind", CIK_KEYWORD)!;
 		json::set(&item, "detail", "keyword": json::value)!;
-		const sort = strings::concat(SORT_KEYWORD, KEYWORDS[i])!;
+		const sort = strings::concat(SORT_KEYWORD, kws[i])!;
 		defer free(sort);
 		json::set(&item, "sortText", sort: json::value)!;
 		append(a, item: json::value)!;
@@ -368,16 +441,152 @@ fn add_keywords(arr: *[]json::value, partial: str) void = {
 	*arr = a;
 };
 
+// Emits a completion item for every local binding visible at the cursor
+// — let / const / def bindings, function parameters, and for / match
+// captures — filtered by `info.partial`. Top-level declarations (the
+// scope graph's TOPLEVEL_DECL kind) are skipped here because
+// [[add_file_locals]] already surfaces them from the file index with
+// richer detail and resolve data.
+//
+// The buffer the user is mid-typing is frequently unparseable as written
+// — a statement like `th` with no trailing `;` makes the whole enclosing
+// function fail to parse, and the recovering parser only resyncs at
+// top-level decl boundaries, so every local in that function would vanish
+// from the AST. To stay robust we splice a sentinel in at the cursor
+// (replacing the partial word) and build the scope graph from the
+// re-parse, exactly as the struct-member path does. We try the bare
+// splice first (handles mid-expression cursors), then a `;`-terminated
+// splice (handles end-of-statement cursors like `{ let x = 1;\n\tth }`).
+//
+// Returns the owned list of emitted names so the caller can pass it to
+// [[add_file_locals]] as an exclusion set, avoiding a duplicate entry when
+// a local shadows a top-level decl of the same name. Release with
+// analysis::free_str_slice.
+//
+// @param arr: borrowed
+// @param doc: borrowed
+// @param data: borrowed
+// @param info: borrowed
+// @returns: owned
+fn add_local_bindings(
+	arr: *[]json::value,
+	doc: *document,
+	data: []u8,
+	info: *prefix_info,
+) []str = {
+	let bindings = local_bindings_via_splice(doc, data, info, false);
+	if (count_non_toplevel_bindings(bindings) == 0) {
+		analysis::finish_scope_bindings(bindings);
+		bindings = local_bindings_via_splice(doc, data, info, true);
+	};
+	defer analysis::finish_scope_bindings(bindings);
+
+	let names: []str = [];
+	let a = *arr;
+	for (let i = 0z; i < len(bindings); i += 1) {
+		const b = &bindings[i];
+		if (b.kind == analysis::binding_kind::TOPLEVEL_DECL) continue;
+		if (len(info.partial) > 0 &&
+				!strings::hasprefix(b.name, info.partial)) continue;
+		let item = json::newobject();
+		json::set(&item, "label", b.name: json::value)!;
+		json::put(&item, "kind", binding_kind_to_completion(b.kind))!;
+		json::set(&item, "detail", binding_kind_detail(b.kind): json::value)!;
+		const sort = strings::concat(SORT_LOCAL, b.name)!;
+		defer free(sort);
+		json::set(&item, "sortText", sort: json::value)!;
+		append(a, item: json::value)!;
+		append(names, strings::dup(b.name)!)!;
+	};
+	*arr = a;
+	return names;
+};
+
+// Parses the buffer with a completion sentinel spliced in at the cursor
+// (per [[parse_with_sentinel]]) and returns every binding visible at the
+// splice site. Building the scope graph from the spliced parse — rather
+// than the cached raw-buffer graph — is what keeps local completion
+// working on the half-typed statements completion always sees. The
+// returned bindings own their names (collect_scope_bindings dups them) so
+// they outlive the temporary parse; release with finish_scope_bindings.
+//
+// @param doc: borrowed
+// @param data: borrowed
+// @param info: borrowed
+// @returns: owned
+fn local_bindings_via_splice(
+	doc: *document,
+	data: []u8,
+	info: *prefix_info,
+	add_semi: bool,
+) []analysis::scope_binding = {
+	let pr = parse_with_sentinel(data, info, doc.uri, add_semi);
+	defer analysis::finish_parse_result(&pr);
+	let g = analysis::build_scope_graph(&pr.subunit);
+	defer analysis::finish_scope_graph(&g);
+	return analysis::collect_scope_bindings(&g, info.partial_start: u32);
+};
+
+// @param bindings: borrowed
+fn count_non_toplevel_bindings(bindings: []analysis::scope_binding) size = {
+	let n = 0z;
+	for (let i = 0z; i < len(bindings); i += 1) {
+		if (bindings[i].kind != analysis::binding_kind::TOPLEVEL_DECL) n += 1;
+	};
+	return n;
+};
+
+// Maps a scope-graph binding kind to an LSP CompletionItemKind: `def`
+// bindings are constants, everything else (let / const / parameters /
+// captures) presents as a variable.
+fn binding_kind_to_completion(k: analysis::binding_kind) f64 = {
+	switch (k) {
+	case analysis::binding_kind::DEF =>
+		return CIK_CONSTANT;
+	case =>
+		return CIK_VARIABLE;
+	};
+};
+
+// Human-readable `detail` label for a local binding completion item.
+//
+// @returns: borrowed
+fn binding_kind_detail(k: analysis::binding_kind) str = {
+	switch (k) {
+	case analysis::binding_kind::FUNC_PARAM =>
+		return "parameter";
+	case analysis::binding_kind::DEF =>
+		return "local def";
+	case =>
+		return "local binding";
+	};
+};
+
+// Emits completion items for the open document's top-level declarations,
+// filtered by `partial`. When `types_only` is true only TYPE-kind decls
+// are offered (the cursor is in a type position). `exclude` lists names
+// already emitted as local bindings so a local shadowing a top-level decl
+// isn't offered twice.
+//
 // @param arr: borrowed
 // @param doc: borrowed
 // @param partial: borrowed
-fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
+// @param exclude: borrowed
+fn add_file_locals(
+	arr: *[]json::value,
+	doc: *document,
+	partial: str,
+	types_only: bool,
+	exclude: []str,
+) void = {
 	let a = *arr;
 	const cache = parse_of(doc);
 	for (let i = 0z; i < len(cache.idx.symbols); i += 1) {
 		const sym = &cache.idx.symbols[i];
+		if (types_only && sym.kind != analysis::symbol_kind::TYPE) continue;
 		if (len(partial) > 0 &&
 				!strings::hasprefix(sym.short_name, partial)) continue;
+		if (already_emitted(exclude, sym.short_name)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", sym.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_completion(sym.kind))!;
@@ -397,6 +606,10 @@ fn add_file_locals(arr: *[]json::value, doc: *document, partial: str) void = {
 	*arr = a;
 };
 
+// Emits completion items for workspace declarations matching `partial`.
+// When `types_only` is true only TYPE-kind entries are offered (the cursor
+// is in a type position).
+//
 // @param s: borrowed
 // @param doc: borrowed
 // @param arr: borrowed
@@ -406,6 +619,7 @@ fn add_workspace_symbols(
 	doc: *document,
 	arr: *[]json::value,
 	partial: str,
+	types_only: bool,
 ) void = {
 	let a = *arr;
 	const cap = if (len(s.workspace_index.entries) < 500z) {
@@ -420,6 +634,7 @@ fn add_workspace_symbols(
 	let added = 0z;
 	for (let i = 0z; i < cap && added < 200z; i += 1) {
 		const e = &s.workspace_index.entries[i];
+		if (types_only && e.kind != analysis::symbol_kind::TYPE) continue;
 		if (len(partial) > 0 && !strings::hasprefix(e.short_name, partial)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", e.short_name: json::value)!;
@@ -460,6 +675,7 @@ fn add_stdlib_symbols(
 	doc: *document,
 	arr: *[]json::value,
 	partial: str,
+	types_only: bool,
 ) void = {
 	let a = *arr;
 	// Stdlib has ~10k entries on a typical Hare install; without at
@@ -476,6 +692,7 @@ fn add_stdlib_symbols(
 	for (let i = 0z; i < len(s.stdlib_index.entries) && added < 200z; i += 1) {
 		const e = &s.stdlib_index.entries[i];
 		if (!e.exported) continue;
+		if (types_only && e.kind != analysis::symbol_kind::TYPE) continue;
 		if (!strings::hasprefix(e.short_name, partial)) continue;
 		const qualified = stdlib_qualified_module(s, e.path);
 		defer free(qualified);
@@ -730,16 +947,20 @@ fn add_module_members(
 	arr: *[]json::value,
 	module: str,
 	partial: str,
+	types_only: bool,
 ) void = {
 	// Stdlib modules (strings, io, etc.) live outside the user's workspace
 	// folders, so they're not in workspace_index. Lazy-index the module on
 	// demand so e.g. `strings::` lists stdlib symbols; a no-op once the
 	// module has already been indexed or when it isn't on any search path.
 	ensure_stdlib_module_indexed(s, module);
-	emit_module_members_from(&s.workspace_index, arr, module, partial);
-	emit_module_members_from(&s.stdlib_index, arr, module, partial);
+	emit_module_members_from(&s.workspace_index, arr, module, partial, types_only);
+	emit_module_members_from(&s.stdlib_index, arr, module, partial, types_only);
 };
 
+// When `types_only` is true only TYPE-kind members are emitted, for use
+// when the qualified reference sits in a type position (`let x: mod::T`).
+//
 // @param idx: borrowed
 // @param arr: borrowed
 // @param module: borrowed
@@ -749,12 +970,14 @@ fn emit_module_members_from(
 	arr: *[]json::value,
 	module: str,
 	partial: str,
+	types_only: bool,
 ) void = {
 	let a = *arr;
 	for (let i = 0z; i < len(idx.entries); i += 1) {
 		const e = &idx.entries[i];
 		if (e.module != module) continue;
 		if (!e.exported) continue;
+		if (types_only && e.kind != analysis::symbol_kind::TYPE) continue;
 		if (len(partial) > 0 && !strings::hasprefix(e.short_name, partial)) continue;
 		let item = json::newobject();
 		json::set(&item, "label", e.short_name: json::value)!;
