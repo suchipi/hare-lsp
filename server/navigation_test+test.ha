@@ -2348,6 +2348,148 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(!strings::contains(value, "match"));
 };
 
+// Regression: hovering the binding name in a match case header
+// (`case let index: size =>`) must resolve to the local match binding,
+// not fall through to an unrelated workspace function of the same name.
+// The case body (mc.exprs) does not cover the header, so the binding's
+// name had to be located separately. See navigation.ha
+// match_case_name_range and walk_for_local (match_expr arm).
+@test fn hover_on_match_case_binding_decl_resolves_local() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// An unrelated workspace function also named `index` (mirrors
+	// strings::index). Hovering the match binding must not resolve to it.
+	const def_path = ".tmp/hare-lsp-nav-hover-match-binding-index.ha";
+	const def_text = "export fn index() void = void;\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
+
+	const src =
+		"fn caller(input: str) void = { const output = match (2z: (size | void)) { case let index: size => yield index; case void => yield 0z; }; };\\n";
+	nav_open(&s, "file:///mb.ha", src);
+
+	// Cursor on the binding name `index` in `case let index` (char 85).
+	const params =
+		`{"textDocument":{"uri":"file:///mb.ha"},"position":{"line":0,"character":85}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 495.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 495.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "(match binding) index: size"));
+	assert(!strings::contains(value, "fn index"));
+};
+
+// Companion to the decl-site test: hovering the binding at its *use*
+// site (in the case body) already resolves to the local binding. This
+// guards against the fix for the decl site regressing the body path.
+@test fn hover_on_match_case_binding_use_resolves_local() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const def_path = ".tmp/hare-lsp-nav-hover-match-binding-use-index.ha";
+	const def_text = "export fn index() void = void;\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
+
+	const src =
+		"fn caller(input: str) void = { const output = match (2z: (size | void)) { case let index: size => yield index; case void => yield 0z; }; };\\n";
+	nav_open(&s, "file:///mbu.ha", src);
+
+	// Cursor on the use of `index` in `yield index` (char 106).
+	const params =
+		`{"textDocument":{"uri":"file:///mbu.ha"},"position":{"line":0,"character":106}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 496.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 496.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "(match binding) index: size"));
+	assert(!strings::contains(value, "fn index"));
+};
+
+// Multi-byte guard for the decl-site fix: a multi-byte rune literal
+// (`'☃'`) before the match makes byte offsets diverge from the UTF-16
+// LSP character offsets, so this fails if match_case_name_range works in
+// the wrong unit. The `☃` adds two extra bytes, so the decl `index` sits
+// at UTF-16 character 98-102 but a higher byte offset.
+@test fn hover_on_match_case_binding_decl_multibyte() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const def_path = ".tmp/hare-lsp-nav-hover-match-binding-mb-index.ha";
+	const def_text = "export fn index() void = void;\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
+
+	const src =
+		"fn caller(input: str) void = { const c = '☃'; const output = match (2z: (size | void)) { case let index: size => yield index; case void => yield 0z; }; };\\n";
+	nav_open(&s, "file:///mbm.ha", src);
+
+	// Cursor on the binding name `index` (UTF-16 character 100, mid-token).
+	const params =
+		`{"textDocument":{"uri":"file:///mbm.ha"},"position":{"line":0,"character":100}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 497.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 497.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(strings::contains(value, "(match binding) index: size"));
+	assert(!strings::contains(value, "fn index"));
+};
+
 // Regression: an `if`/`else` whose true branch diverges via a
 // never-returning call must infer the false branch's type, not `never`.
 // The compiler reduces `(never | int)` to `int`. See navigation.ha

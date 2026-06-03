@@ -1236,3 +1236,75 @@ export fn main() void = {
 		"source for strings::dup should be the doc-comment table"
 	);
 };
+
+// The reported bug: hovering the binding name in `case let index: size =>`
+// showed the unrelated stdlib function `strings::index` instead of the
+// match binding. The case body (mc.exprs) doesn't cover the header, so
+// before the fix a hover on the declared name fell through to the
+// workspace/stdlib lookup. With the real stdlib on HAREPATH, `index` is
+// a genuine reachable function, so this proves we prefer the local
+// binding. Mirrors try-hare/main.ha's extname().
+@test fn e2e_hover_on_match_case_binding_prefers_local() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample =
+		`use strings;
+export fn extname(input: str) str = {
+	const result = strings::index(input, ".");
+	return match (result) {
+	case let index: size =>
+		yield strings::sub(input, index);
+	case void =>
+		yield "";
+	};
+};
+`;
+	const did_open = build_did_open("file:///extname.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Hover on the binding name `index` in `case let index: size =>`.
+	// Line 4, char 12 (the leading tab counts as one column).
+	const hover_req =
+		`{"jsonrpc":"2.0","id":930,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///extname.ha"},"position":{"line":4,"character":12}}}`;
+	send(&s, strings::toutf8(hover_req));
+
+	const body = wait_for_response(&s, 930.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result_obj = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield match (*p) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			fmt::fatalf("e2e: match-binding hover returned null. body={}", text);
+		};
+	case void =>
+		fmt::fatalf("e2e: match-binding hover missing result: {}", text);
+	};
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "(match binding) index: size"),
+		"hover on the match binding name should resolve to the local binding"
+	);
+	// Must not fall through to the unrelated stdlib `strings::index`.
+	assert(
+		!strings::contains(md, "fn index"),
+		"match-binding hover must not resolve to the same-named function"
+	);
+};

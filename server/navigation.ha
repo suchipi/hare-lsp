@@ -8,6 +8,7 @@
 // no per-file AST cache yet).
 
 use analysis;
+use bytes;
 use encoding::json;
 use hare::ast;
 use hare::unparse;
@@ -1152,6 +1153,20 @@ fn walk_for_local(
 		// "in scope" by checking whether off lies within any expr.
 		for (let i = 0z; i < len(m.cases); i += 1) {
 			const mc = &m.cases[i];
+			// Cursor directly on the binding name in the case header
+			// (`case let <name>: T =>`). mc.exprs only covers the case
+			// *body*, so the header is checked separately; without this
+			// a hover on the declared name falls through to a same-named
+			// workspace symbol.
+			if (mc.name == name) {
+				match (match_case_name_range(data, mc)) {
+				case let nr: (size, size) =>
+					if (off >= nr.0 && off <= nr.1) {
+						return render_match_case_binding(mc);
+					};
+				case void => void;
+				};
+			};
 			const in_case = case_contains(mc.exprs, off);
 			if (in_case && mc.name == name) {
 				return render_match_case_binding(mc);
@@ -2675,6 +2690,47 @@ fn decl_from_workspace_entry(
 	case void =>
 		return void;
 	};
+};
+
+// Returns the [start, end) byte range of the binding name in a
+// `case let <name>: <type> =>` header, or void when the case has no
+// binding (a type-only or default case) or the name can't be located.
+// There is no AST node for the name itself, so we anchor on the
+// (fixed-up) type location and scan backward over the `:` separator and
+// any surrounding whitespace, then take len(mc.name) bytes. A bytes
+// equality check guards against the scan landing somewhere unexpected
+// (e.g. after a recovering parse) — on mismatch we decline rather than
+// report a bogus range.
+//
+// @param data: borrowed
+// @param mc: borrowed
+fn match_case_name_range(
+	data: []u8,
+	mc: *ast::match_case,
+) ((size, size) | void) = {
+	if (len(mc.name) == 0) return void;
+	const t = match (mc._type) {
+	case let t: *ast::_type =>
+		yield t;
+	case null =>
+		return void;
+	};
+	let i = t.loc.start.off: size;
+	if (i > len(data)) return void;
+	// Whitespace between the `:` and the type.
+	for (i > 0 && is_ws_byte(data[i - 1])) i -= 1;
+	// The `:` separating the name from its type.
+	if (i == 0 || data[i - 1] != ':': u8) return void;
+	i -= 1;
+	// Whitespace between the name and the `:`.
+	for (i > 0 && is_ws_byte(data[i - 1])) i -= 1;
+	const name_end = i;
+	if (name_end < len(mc.name)) return void;
+	const name_start = name_end - len(mc.name);
+	if (!bytes::equal(data[name_start..name_end], strings::toutf8(mc.name))) {
+		return void;
+	};
+	return (name_start, name_end);
 };
 
 // True when at least one expression in `exprs` textually encloses `off`.
