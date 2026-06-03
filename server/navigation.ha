@@ -113,11 +113,22 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 			match (find_decl_by_name(&cache.pr.subunit, ident_str)) {
 			case let i: size =>
 				const d = &cache.pr.subunit.decls[i];
-				sig = render_decl_signature(s, doc, d);
-				docs = strings::dup(p.docs)!;
-				analysis::finish_ownership_fact(&fact);
-				fact = ownership_for_local_symbol(p);
-				found_local = true;
+				// A same-file `@test fn` shadows the real symbol it
+				// tests (test files are routinely named after the
+				// function under test). Resolve to the test decl ONLY
+				// when the cursor is on the test function's own name in
+				// its declaration; every other reference (e.g. a call
+				// in the test body) should show the real implementation,
+				// so fall through to the workspace lookup below.
+				const use_local =
+					!p.is_test || cursor_on_decl_name(data, d, ident_str, ident_range.0);
+				if (use_local) {
+					sig = render_decl_signature(s, doc, d);
+					docs = strings::dup(p.docs)!;
+					analysis::finish_ownership_fact(&fact);
+					fact = ownership_for_local_symbol(p);
+					found_local = true;
+				};
 			case void => void;
 			};
 		case void => void;
@@ -194,6 +205,30 @@ export fn handle_hover(s: *server, r: lsp::request) void = {
 	json::put(&result, "range", range)!;
 
 	send_with_finish(s, r.id, result: json::value);
+};
+
+// Returns true when the cursor's identifier (starting at byte `ident_start`)
+// is the declaration's own name occurrence, as opposed to a reference to the
+// same name elsewhere within the decl span. Used to decide whether a
+// same-name `@test fn` should resolve to itself (cursor on its declaration
+// name) or be skipped in favour of the real implementation it tests (cursor
+// on a body reference). `decl_name_range` returns an empty range when its
+// scan fails; we treat that as "not the declaration name" so an ambiguous
+// case prefers the real implementation.
+//
+// @param data: borrowed
+// @param d: borrowed
+// @param name: borrowed
+fn cursor_on_decl_name(
+	data: []u8,
+	d: *ast::decl,
+	name: str,
+	ident_start: size,
+) bool = {
+	const (ns, ne) = decl_name_range(data, d.loc.start.off: size,
+		d.loc.end.off: size, name);
+	if (ns == ne) return false;
+	return ident_start == ns;
 };
 
 // Sends a hover response whose contents is `md` and whose range is the
@@ -486,8 +521,18 @@ fn send_location_for_ident(s: *server, r: lsp::request) void = {
 	if (len(qualifier_peek) == 0) {
 		match (analysis::find_by_short_name(&cache.idx, ident_str)) {
 		case let p: *analysis::symbol =>
-			send_location(s, r.id, uri, p.span, doc);
-			return;
+			// Skip a same-file `@test fn` that shadows the real
+			// symbol it tests. Test files are routinely named after
+			// the function under test (e.g. `lookup_ext` in
+			// mime/entries+test.ha), so a bare reference inside the
+			// test body matches the local test decl first; resolving
+			// to the test itself is useless. Fall through to the
+			// workspace lookup, which finds the real implementation
+			// (the sibling non-test file) and also skips test decls.
+			if (!p.is_test) {
+				send_location(s, r.id, uri, p.span, doc);
+				return;
+			};
 		case void => void;
 		};
 	};

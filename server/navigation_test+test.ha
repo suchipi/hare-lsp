@@ -1718,6 +1718,59 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::hassuffix(uri, "hare-lsp-nav-crossfile.ha"));
 };
 
+// Same-file shadowing: the open buffer is a test file whose `@test fn`
+// shares a name with the function under test. Jump-to-definition on a call
+// to that function inside the test body must resolve to the real
+// implementation (indexed from a sibling file), not to the enclosing
+// `@test fn` in the open buffer. Without skipping the local test decl, the
+// per-file index match wins and definition uselessly lands on the test
+// itself.
+@test fn definition_skips_local_test_fn_shadowing_real_decl() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// Real implementation on disk, indexed into the workspace.
+	const def_path = ".tmp/hare-lsp-nav-samefile-impl.ha";
+	const def_text = "export fn samename(x: int) int = x;\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
+
+	// Open a test buffer declaring a same-named `@test fn` that calls the
+	// real function. Its file-local index contains only the test fn.
+	nav_open(&s, "file:///samename+test.ha",
+		"@test fn samename() void = { let _ = samename(1); };\\n");
+
+	// Cursor on the `samename` *call* inside the test body. The line is
+	// "@test fn samename() void = { let _ = samename(1); };"; the call's
+	// `samename` starts at column 37, so char 40 lands inside it.
+	const params =
+		`{"textDocument":{"uri":"file:///samename+test.ha"},"position":{"line":0,"character":40}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 402.0,
+		method = strings::dup("textDocument/definition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_definition(&s, r);
+
+	const v = skip_to_response(out, 402.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const uri = *(json::get(&result, "uri") as *json::value) as str;
+	assert(
+		strings::hassuffix(uri, "hare-lsp-nav-samefile-impl.ha"),
+		"definition must resolve to the real impl, not the local @test fn"
+	);
+};
+
 @test fn hover_falls_back_to_workspace_index_for_cross_file() void = {
 	let (s, scan, in_buf, out) = nav_test_server();
 	defer nav_test_cleanup(&s, scan, in_buf, out);
@@ -1757,6 +1810,102 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	const value = *(json::get(&contents, "value") as *json::value) as str;
 	// Hover markdown should contain the cross-file decl signature.
 	assert(strings::contains(value, "answer"));
+};
+
+// Same-file `@test fn` shadowing for hover: hovering on a *reference* to
+// the test-named function (a call in the test body) must show the real
+// implementation indexed from a sibling file, not the local `@test fn`.
+@test fn hover_on_test_fn_reference_shows_real_impl() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const def_path = ".tmp/hare-lsp-nav-hover-testshadow.ha";
+	const def_text = "export fn samename(needle: str) int = 0;\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
+
+	nav_open(&s, "file:///samename+test.ha",
+		"@test fn samename() void = { let _ = samename(0); };\\n");
+
+	// Cursor on the `samename` *call* (cols 37-44); char 40 is inside.
+	const params =
+		`{"textDocument":{"uri":"file:///samename+test.ha"},"position":{"line":0,"character":40}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 410.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 410.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(value, "needle: str"),
+		"hover on a test-fn reference must show the real implementation's signature"
+	);
+};
+
+// The one case that DOES resolve to the test fn: hovering on the test
+// function's own name in its declaration shows the test function itself,
+// not the shadowed real implementation.
+@test fn hover_on_test_fn_definition_name_shows_test_fn() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const def_path = ".tmp/hare-lsp-nav-hover-testshadow-def.ha";
+	const def_text = "export fn samename(needle: str) int = 0;\n";
+	let _ = match (nav_write(def_path, def_text)) {
+	case bool =>
+		yield true;
+	case => abort("cannot write fixture");
+	};
+	defer nav_rm(def_path);
+	analysis::index_file(&s.workspace_index, def_path, strings::toutf8(def_text));
+
+	nav_open(&s, "file:///samename+test.ha",
+		"@test fn samename() void = { let _ = samename(0); };\\n");
+
+	// Cursor on the `samename` in the *declaration* (cols 9-16); char 11.
+	const params =
+		`{"textDocument":{"uri":"file:///samename+test.ha"},"position":{"line":0,"character":11}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 411.0,
+		method = strings::dup("textDocument/hover")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_hover(&s, r);
+
+	const v = skip_to_response(out, 411.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object), "result") as *json::value) as json::object;
+	const contents =
+		*(json::get(&result, "contents") as *json::value) as json::object;
+	const value = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(value, "samename() void"),
+		"hover on the test fn's own declaration name must show the test function"
+	);
+	assert(
+		!strings::contains(value, "needle"),
+		"hover on the test fn declaration must not show the real implementation"
+	);
 };
 
 @test fn hover_on_let_binding_with_propagate_strips_error_variants() void = {

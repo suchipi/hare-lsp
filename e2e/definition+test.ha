@@ -366,3 +366,135 @@ export fn main() void = {
 		"definition's range must be non-empty"
 	);
 };
+
+// Regression: go-to-definition on `mime::lookup_ext` must resolve to the
+// real `export fn lookup_ext` in stdlib's mime/lookup.ha, NOT the
+// same-named `@test fn lookup_ext` in mime/entries+test.ha. The stdlib
+// indexer walks every `*.ha` file in the module (including `+test.ha`),
+// so without filtering out `@test` decls the test function could win the
+// lookup. Exercises the full lazy-stdlib-index + workspace-fallback path.
+@test fn e2e_definition_skips_test_function_in_stdlib() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	const sample =
+		`use mime;
+
+export fn main() void = {
+	let _ = mime::lookup_ext("txt");
+};
+`;
+	const did_open = build_did_open("file:///def_test_attr.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// Line 3: "\tlet _ = mime::lookup_ext(\"txt\");". After the tab,
+	// `let _ = mime::` is 14 cols, so `lookup_ext` starts at col 15;
+	// char 17 lands inside it.
+	const req =
+		`{"jsonrpc":"2.0","id":702,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///def_test_attr.ha"},"position":{"line":3,"character":17}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 702.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield *p;
+	case void =>
+		fmt::fatalf("e2e: definition response missing result: {}", text);
+	};
+	const loc = match (result) {
+	case let o: json::object =>
+		yield o;
+	case =>
+		fmt::fatalf(
+			"e2e: definition on mime::lookup_ext returned null/non-object -- stdlib fallback regressed. body={}",
+			text);
+	};
+	const uri = *(json::get(&loc, "uri") as *json::value) as str;
+	assert(
+		!strings::hassuffix(uri, "/mime/entries+test.ha"),
+		"definition must not resolve to the @test fn in mime/entries+test.ha"
+	);
+	assert(
+		strings::hassuffix(uri, "/mime/lookup.ha"),
+		"definition on mime::lookup_ext should point at the real impl in mime/lookup.ha"
+	);
+};
+
+// Same-file regression: editing a test file whose `@test fn` is named after
+// the function under test, a bare call to that function inside the test body
+// must jump to the real implementation in the sibling file, not to the
+// enclosing `@test fn`. Test files are routinely named after the function
+// they test, so landing on the test itself is useless.
+@test fn e2e_definition_skips_local_test_fn_for_real_impl() void = {
+	const files: [](str, str) = [
+		("mymod/impl.ha", "export fn samename(x: int) int = x;\n"),
+		(
+			"mymod/impl+test.ha",
+			"@test fn samename() void = {\n\tlet _ = samename(1);\n};\n",
+		),
+	];
+	const root = make_workspace("def-samefile-test", files);
+	defer cleanup_workspace(root);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init_with_workspace(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const test_uri = strings::concat("file://", root, "/mymod/impl+test.ha")!;
+	defer free(test_uri);
+	open_doc(&s, test_uri, files[1].1);
+
+	// Line 1: "\tlet _ = samename(1);". After the tab, `let _ = ` is 8
+	// cols, so the call `samename` starts at col 9; char 11 lands inside.
+	const tmpl =
+		`{"jsonrpc":"2.0","id":703,"method":"textDocument/definition","params":{"textDocument":{"uri":"`;
+	const req =
+		strings::concat(tmpl, test_uri, `"},"position":{"line":1,"character":11}}}`)!;
+	defer free(req);
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 703.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield *p;
+	case void =>
+		fmt::fatalf("e2e: definition response missing result: {}", text);
+	};
+	const loc = match (result) {
+	case let o: json::object =>
+		yield o;
+	case =>
+		fmt::fatalf(
+			"e2e: same-file definition returned null/non-object -- workspace fallback regressed. body={}",
+			text);
+	};
+	const uri = *(json::get(&loc, "uri") as *json::value) as str;
+	assert(
+		!strings::hassuffix(uri, "/mymod/impl+test.ha"),
+		"definition must not land on the enclosing @test fn in the open test file"
+	);
+	assert(
+		strings::hassuffix(uri, "/mymod/impl.ha"),
+		"definition should resolve to the real impl in the sibling mymod/impl.ha"
+	);
+};

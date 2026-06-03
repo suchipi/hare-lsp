@@ -37,6 +37,12 @@ export type workspace_entry = struct {
 	// @owned
 	docs: str,
 	exported: bool,
+	// For FUNCTION-kind entries: whether the decl carries `@test`. The
+	// navigation lookups ([[find_in_module]], [[find_in_imports]],
+	// [[find_first_by_short_name]]) skip these so go-to-definition /
+	// hover resolve to a real implementation rather than a same-named
+	// test function. Always false for non-functions.
+	is_test: bool,
 	// The module this entry lives in, derived from the basename of
 	// the file's containing directory. For /repo/foo/bar.ha this is
 	// "foo". Matches the Hare convention that directory == module name.
@@ -190,6 +196,7 @@ export fn index_file(idx: *workspace_index, file_path: str, text: []u8) void = {
 			end_off = sym.span.end.off: u32,
 			docs = strings::dup(sym.docs)!,
 			exported = sym.exported,
+			is_test = sym.is_test,
 			module = strings::dup(module)!,
 			param_names = pn,
 			signature = signature,
@@ -385,6 +392,7 @@ export fn find_first_by_short_name(
 	name: str,
 ) (*workspace_entry | void) = {
 	for (let i = 0z; i < len(idx.entries); i += 1) {
+		if (idx.entries[i].is_test) continue;
 		if (idx.entries[i].short_name == name) {
 			return &idx.entries[i];
 		};
@@ -406,6 +414,7 @@ export fn find_in_module(
 ) (*workspace_entry | void) = {
 	for (let i = 0z; i < len(idx.entries); i += 1) {
 		const e = &idx.entries[i];
+		if (e.is_test) continue;
 		if (e.short_name == name && e.module == module) {
 			return e;
 		};
@@ -433,6 +442,7 @@ export fn find_in_imports(
 	if (len(imported_modules) == 0) return void;
 	for (let i = 0z; i < len(idx.entries); i += 1) {
 		const e = &idx.entries[i];
+		if (e.is_test) continue;
 		if (e.short_name != name) continue;
 		for (let j = 0z; j < len(imported_modules); j += 1) {
 			if (e.module == imported_modules[j]) {

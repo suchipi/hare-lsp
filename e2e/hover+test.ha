@@ -884,6 +884,67 @@ export fn main() void = {
 	);
 };
 
+// Same-file regression: hovering on a bare reference to a function whose
+// `@test fn` (named after it) lives in the open test buffer must show the
+// real implementation from the sibling file, not the local test function.
+@test fn e2e_hover_on_test_fn_reference_shows_real_impl() void = {
+	const files: [](str, str) = [
+		("mymod/impl.ha", "export fn samename(needle: str) int = 0;\n"),
+		(
+			"mymod/impl+test.ha",
+			"@test fn samename() void = {\n\tlet _ = samename(0);\n};\n",
+		),
+	];
+	const root = make_workspace("hover-samefile-test", files);
+	defer cleanup_workspace(root);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init_with_workspace(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const test_uri = strings::concat("file://", root, "/mymod/impl+test.ha")!;
+	defer free(test_uri);
+	open_doc(&s, test_uri, files[1].1);
+
+	// Line 1: "\tlet _ = samename(0);". After the tab, `let _ = ` is 8
+	// cols, so the call `samename` starts at col 9; char 11 lands inside.
+	const tmpl =
+		`{"jsonrpc":"2.0","id":120,"method":"textDocument/hover","params":{"textDocument":{"uri":"`;
+	const req =
+		strings::concat(tmpl, test_uri, `"},"position":{"line":1,"character":11}}}`)!;
+	defer free(req);
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 120.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield *p;
+	case void =>
+		fmt::fatalf("e2e: hover response has no result: {}", text);
+	};
+	const result_obj = match (result) {
+	case let o: json::object =>
+		yield o;
+	case =>
+		fmt::fatalf(
+			"e2e: same-file hover returned null -- workspace fallback regressed. body={}",
+			text);
+	};
+	const contents =
+		*(json::get(&result_obj, "contents") as *json::value) as json::object;
+	const md = *(json::get(&contents, "value") as *json::value) as str;
+	assert(
+		strings::contains(md, "needle: str"),
+		"hover on a test-fn reference should render the real implementation's signature"
+	);
+};
+
 @test fn e2e_hover_on_identifier() void = {
 	// Pinned to spawn_session_with_logs so the log-dir codepath is
 	// exercised on every test run. See e2e/README.md.
