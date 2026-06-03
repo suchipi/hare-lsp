@@ -57,14 +57,14 @@ require("hare-lsp").setup({})
 
 `setup()` accepts:
 
-| Key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `cmd` | `string[]` | `{ "hare-lsp" }` | Command to spawn the server. |
-| `settings` | `table` | see source | Merged onto the default `hare.*` settings. |
-| `init_options` | `table` | `{}` | Sent as `initializationOptions`. |
-| `root_dir` | `function(bufnr) -> string` | `.git`/`Makefile` walk | Workspace root resolver. |
-| `on_attach` | `function(client, bufnr)` | `nil` | Attach hook. |
-| `capabilities` | `table` | `nil` | Extra LSP client capabilities. |
+| Key            | Type                        | Default                | Description                                |
+| -------------- | --------------------------- | ---------------------- | ------------------------------------------ |
+| `cmd`          | `string[]`                  | `{ "hare-lsp" }`       | Command to spawn the server.               |
+| `settings`     | `table`                     | see source             | Merged onto the default `hare.*` settings. |
+| `init_options` | `table`                     | `{}`                   | Sent as `initializationOptions`.           |
+| `root_dir`     | `function(bufnr) -> string` | `.git`/`Makefile` walk | Workspace root resolver.                   |
+| `on_attach`    | `function(client, bufnr)`   | `nil`                  | Attach hook.                               |
+| `capabilities` | `table`                     | `nil`                  | Extra LSP client capabilities.             |
 
 The full set of `hare.*` settings is documented in the
 [main README](../../README.md#configuration). The defaults exposed here

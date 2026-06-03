@@ -170,27 +170,27 @@ Settings are read from the `hare` namespace; the canonical schema is
 
 Highlights:
 
-| Key | Default | Notes |
-| --- | --- | --- |
-| `hare.path` | `"hare"` | Path to the `hare` binary. |
-| `hare.harepath` | `""` | Colon-separated module search path overriding `$HAREPATH`. |
-| `hare.tags` | `[]` | Build tags (`-T <tag>`). |
-| `hare.diagnostics.debounceMs` | `300` | Parse-diagnostics debounce. |
-| `hare.diagnostics.enableBuild` | `true` | Run `hare build` on save. |
-| `hare.diagnostics.buildTimeoutMs` | `60000` | Build wall-clock cap; `0` disables. |
-| `hare.hover.useHtml` | `true` | Wrap the Ownership line in `<small>` so HTML-aware clients render it as fine print. Disable for editors whose hover renderer doesn't process HTML. |
-| `hare.inlayHints.parameterNames` | `true` | Param-name hints at call sites. |
-| `hare.inlayHints.inferredTypes` | `true` | Inferred-type hints on `let` / `const`. |
-| `hare.inlayHints.inferredTypesMaxDepth` | `10` | Max recursion depth for inferred-type hints; follows call return types and type aliases. Cycles are guarded by a visited set, so larger values are safe. |
-| `hare.limits.maxTotalBufferBytes` | `268435456` | Cap on summed open-buffer bytes (256 MiB). |
-| `hare.limits.maxDiagnosticsPerFile` | `1000` | Cap on diagnostics published per file. |
+| Key                                     | Default     | Notes                                                                                                                                                    |
+| --------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hare.path`                             | `"hare"`    | Path to the `hare` binary.                                                                                                                               |
+| `hare.harepath`                         | `""`        | Colon-separated module search path overriding `$HAREPATH`.                                                                                               |
+| `hare.tags`                             | `[]`        | Build tags (`-T <tag>`).                                                                                                                                 |
+| `hare.diagnostics.debounceMs`           | `300`       | Parse-diagnostics debounce.                                                                                                                              |
+| `hare.diagnostics.enableBuild`          | `true`      | Run `hare build` on save.                                                                                                                                |
+| `hare.diagnostics.buildTimeoutMs`       | `60000`     | Build wall-clock cap; `0` disables.                                                                                                                      |
+| `hare.hover.useHtml`                    | `true`      | Wrap the Ownership line in `<small>` so HTML-aware clients render it as fine print. Disable for editors whose hover renderer doesn't process HTML.       |
+| `hare.inlayHints.parameterNames`        | `true`      | Param-name hints at call sites.                                                                                                                          |
+| `hare.inlayHints.inferredTypes`         | `true`      | Inferred-type hints on `let` / `const`.                                                                                                                  |
+| `hare.inlayHints.inferredTypesMaxDepth` | `10`        | Max recursion depth for inferred-type hints; follows call return types and type aliases. Cycles are guarded by a visited set, so larger values are safe. |
+| `hare.limits.maxTotalBufferBytes`       | `268435456` | Cap on summed open-buffer bytes (256 MiB).                                                                                                               |
+| `hare.limits.maxDiagnosticsPerFile`     | `1000`      | Cap on diagnostics published per file.                                                                                                                   |
 
 ## Environment
 
-| Variable | Description |
-| --- | --- |
-| `HARE_LSP_LOG_DIR` | Absolute directory to tee `hare-lsp-{in,out,err}.log` into. |
-| `HARE_LSP_LOG_LEVEL` | Minimum stderr log severity (`debug`/`info`/`warn`/`error`, default `info`). |
+| Variable                  | Description                                                                                                                               |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `HARE_LSP_LOG_DIR`        | Absolute directory to tee `hare-lsp-{in,out,err}.log` into.                                                                               |
+| `HARE_LSP_LOG_LEVEL`      | Minimum stderr log severity (`debug`/`info`/`warn`/`error`, default `info`).                                                              |
 | `HARE_LSP_MAX_BODY_BYTES` | Override the LSP transport's max request body size (default 32 MiB). Read at startup because the cap applies before `initialize` arrives. |
 
 ## CLI

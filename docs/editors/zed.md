@@ -15,23 +15,23 @@ extension or your own), point Zed at `hare-lsp` in
 {
   "languages": {
     "Hare": {
-      "language_servers": ["hare-lsp"]
-    }
+      "language_servers": ["hare-lsp"],
+    },
   },
   "lsp": {
     "hare-lsp": {
       "binary": {
         "path": "hare-lsp",
-        "arguments": []
+        "arguments": [],
       },
       "settings": {
         "hare": {
           "diagnostics": { "enableBuild": true, "debounceMs": 300 },
-          "inlayHints": { "parameterNames": true, "inferredTypes": true }
-        }
-      }
-    }
-  }
+          "inlayHints": { "parameterNames": true, "inferredTypes": true },
+        },
+      },
+    },
+  },
 }
 ```
 

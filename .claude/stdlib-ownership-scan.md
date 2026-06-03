@@ -63,7 +63,7 @@ For owned entries, the `detail` string is `"doc comment: <short paraphrase>"`. K
 - "is a slice borrowed from <X>"
 - "Borrows" (as the leading word of a sentence)
 
-For borrowed entries, if a `from <name>` parameter is named, capture the name and write the detail as ``"doc comment: borrowed from `<name>`"``. If there's no named source, write ``"doc comment: borrowed"`` (no trailer needed).
+For borrowed entries, if a `from <name>` parameter is named, capture the name and write the detail as ``"doc comment: borrowed from `<name>`"``. If there's no named source, write `"doc comment: borrowed"` (no trailer needed).
 
 **Skip cases** (no entry):
 
@@ -135,14 +135,14 @@ You're the agent. Do this:
 
 If any of these is missing or wrong after your scan, you got something wrong. Re-read the source file and fix.
 
-| Symbol               | kind     | detail                                       |
-| -------------------- | -------- | -------------------------------------------- |
-| `strings::dup`       | OWNED    | doc comment: the result must be freed after use |
-| `strings::concat`    | OWNED    | doc comment: the caller must free the return value |
-| `strings::runes`     | OWNED    | doc comment: the caller must free the return value |
-| `strings::trim`      | BORROWED | doc comment: borrowed from `in`              |
-| `strings::tokenize`  | BORROWED | doc comment: borrowed from `in`              |
-| `bufio::newscanner`  | OWNED    | doc comment: must free with finish           |
+| Symbol              | kind     | detail                                             |
+| ------------------- | -------- | -------------------------------------------------- |
+| `strings::dup`      | OWNED    | doc comment: the result must be freed after use    |
+| `strings::concat`   | OWNED    | doc comment: the caller must free the return value |
+| `strings::runes`    | OWNED    | doc comment: the caller must free the return value |
+| `strings::trim`     | BORROWED | doc comment: borrowed from `in`                    |
+| `strings::tokenize` | BORROWED | doc comment: borrowed from `in`                    |
+| `bufio::newscanner` | OWNED    | doc comment: must free with finish                 |
 
 If the upstream stdlib has reworded these phrases since the anchors were written, update the `detail` field to match the new wording — but the `kind` must not change.
 

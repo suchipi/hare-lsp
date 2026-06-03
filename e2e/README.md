@@ -80,7 +80,7 @@ a helper in more than one file, move it there rather than copying it locally.
   The caller-supplied duration is floored at `E2E_EXIT_TIMEOUT_MS` (default
   10 s, raised to 15 s for `make test`) so a 2 s caller still gets real
   headroom under parallel-shard load. Use `finish_session` everywhere
-  *except* tests that specifically assert the server exits cleanly after
+  _except_ tests that specifically assert the server exits cleanly after
   the `exit` notification — `assert_clean_exit` upgrades that check from
   "process eventually goes away" to "process exited with status 0."
 
@@ -104,7 +104,7 @@ a helper in more than one file, move it there rather than copying it locally.
 
 - `next_id(*session) f64` — allocates the next per-session JSON-RPC id.
 - `make_request(method, id, params_json) str` / `make_notification(method,
-  params_json) str` — splice params into a framed request body. Caller
+params_json) str` — splice params into a framed request body. Caller
   frees. `params_json` is spliced as-is (must already be valid JSON).
 - `build_did_open(uri, body) str` — builds a `textDocument/didOpen`
   notification body. Caller frees.
@@ -116,7 +116,7 @@ a helper in more than one file, move it there rather than copying it locally.
   `rootUri` and `workspaceFolders[0].uri` set to `file://<root>`. Use this
   for tests that rely on the workspace index.
 - `open_doc(*session, uri, body) void` — convenience around `build_did_open`
-  + `send`.
+  - `send`.
 
 ### Response waiters
 
@@ -129,7 +129,7 @@ a helper in more than one file, move it there rather than copying it locally.
   `json::finish(root)` when done; the diagnostics slice becomes invalid
   at that point.
 - `drain_until_indexed(*session) void` / `drain_until_indexed_ref(*session)
-  void` — drain log messages until the server announces "indexed N file(s)".
+void` — drain log messages until the server announces "indexed N file(s)".
   The first variant fatals on timeout; the second tolerates silence and
   silently returns. Both are typically called after `do_init_with_workspace`;
   pick the silent variant when the test is willing to proceed even if the
@@ -212,14 +212,14 @@ These tests always use `spawn_session_with_logs(label)` so the log-dir
 codepath is exercised on every full test run. Each label is unique to its
 test, so the directories don't collide even when shards run in parallel:
 
-| Test                                            | Label                  |
-|-------------------------------------------------|------------------------|
-| `e2e_codelens_references_anchored_at_name`      | `logs-codelens`        |
-| `e2e_did_change_full_replaces_document`         | `logs-did-change`      |
-| `e2e_hover_on_identifier`                       | `logs-hover`           |
-| `e2e_initialize_returns_response`               | `logs-init`            |
-| `e2e_references_finds_call_site_and_decl`       | `logs-refs`            |
-| `e2e_workspace_symbol_finds_open_decl`          | `logs-workspace-symbol`|
+| Test                                       | Label                   |
+| ------------------------------------------ | ----------------------- |
+| `e2e_codelens_references_anchored_at_name` | `logs-codelens`         |
+| `e2e_did_change_full_replaces_document`    | `logs-did-change`       |
+| `e2e_hover_on_identifier`                  | `logs-hover`            |
+| `e2e_initialize_returns_response`          | `logs-init`             |
+| `e2e_references_finds_call_site_and_decl`  | `logs-refs`             |
+| `e2e_workspace_symbol_finds_open_decl`     | `logs-workspace-symbol` |
 
 One representative test per parallel shard (c, d, e-h, i-p, r-s, t-z) so
 each shard touches `HARE_LSP_LOG_DIR` at least once. If you add to the
