@@ -43,6 +43,8 @@ fn cleanup_server(
 	assert(c.build_timeout_ms == 60000);
 	assert(c.inlay_hints_parameter_names);
 	assert(c.inlay_hints_inferred_types);
+	// Unset by default: formatting falls back to the request's tabSize.
+	assert(c.formatting_tab_width is void);
 };
 
 @test fn apply_settings_full_object() void = {
@@ -155,6 +157,48 @@ fn cleanup_server(
 	defer json::finish(cv);
 	apply_settings(&s, cv);
 	assert(len(s.config.extra_args_build) == 0);
+};
+
+@test fn apply_settings_formatting_tab_width() void = {
+	let (s, scan, in_buf, out) = fresh_server();
+	defer cleanup_server(&s, scan, in_buf, out);
+
+	// Unset by default.
+	assert(s.config.formatting_tab_width is void);
+
+	// A positive integer sets the override.
+	const set = `{"formatting":{"tabWidth":4}}`;
+	let sv = json::loadstr(set)!;
+	defer json::finish(sv);
+	apply_settings(&s, sv);
+	assert(s.config.formatting_tab_width as size == 4);
+
+	// A settings object without `formatting` preserves the override.
+	const other = `{"diagnostics":{"debounceMs":500}}`;
+	let ov = json::loadstr(other)!;
+	defer json::finish(ov);
+	apply_settings(&s, ov);
+	assert(s.config.formatting_tab_width as size == 4);
+
+	// null clears it back to "use the request's tabSize".
+	const clear = `{"formatting":{"tabWidth":null}}`;
+	let cv = json::loadstr(clear)!;
+	defer json::finish(cv);
+	apply_settings(&s, cv);
+	assert(s.config.formatting_tab_width is void);
+
+	// Re-establish an override so the next step has something to clear.
+	const reset = `{"formatting":{"tabWidth":3}}`;
+	let rv = json::loadstr(reset)!;
+	defer json::finish(rv);
+	apply_settings(&s, rv);
+	assert(s.config.formatting_tab_width as size == 3);
+	// A degenerate value (< 1) also clears the override.
+	const zero = `{"formatting":{"tabWidth":0}}`;
+	let zv = json::loadstr(zero)!;
+	defer json::finish(zv);
+	apply_settings(&s, zv);
+	assert(s.config.formatting_tab_width is void);
 };
 
 @test fn did_change_configuration_with_namespace() void = {

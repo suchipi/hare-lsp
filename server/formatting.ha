@@ -147,14 +147,24 @@ fn format_source_once(
 	return strings::dup(memio::string(&buf)!)!;
 };
 
-// Reads `options.tabSize` from a formatting request's params. The LSP
-// spec marks `tabSize` as a required field of FormattingOptions, so a
-// conformant client always sends it; we still fall back to
-// [[DEFAULT_TAB_WIDTH]] when the field is missing or not a positive
-// integer, so a misbehaving client can't produce degenerate output.
+// Determines the wrap tab width for a formatting request. When the
+// `hare.formatting.tabWidth` config option is set it takes precedence
+// over the client's `tabSize`, so a team can pin one wrap width even
+// when members render tabs at different display sizes. Otherwise we
+// read `options.tabSize` from the request's FormattingOptions. The LSP
+// spec marks `tabSize` as a required field, so a conformant client
+// always sends it; we still fall back to [[DEFAULT_TAB_WIDTH]] when the
+// option is unset and the field is missing or not a positive integer,
+// so a misbehaving client can't produce degenerate output.
 //
+// @param s: borrowed
 // @param params: borrowed
-fn formatting_tab_width(params: (json::value | void)) size = {
+fn formatting_tab_width(s: *server, params: (json::value | void)) size = {
+	match (s.config.formatting_tab_width) {
+	case let w: size =>
+		return w;
+	case void => void;
+	};
 	const obj = match (lsp::params_object(params)) {
 	case let o: json::object =>
 		yield o;
@@ -213,11 +223,12 @@ export fn handle_formatting(s: *server, r: lsp::request) void = {
 		return;
 	};
 
-	// The client sends its display tab size in FormattingOptions
-	// (a required field per the LSP spec); we wrap to fit 80 columns
-	// at that width so the result matches what the user sees. Falls
-	// back to 8 if a nonconformant client omits it.
-	const tab_width = formatting_tab_width(r.params);
+	// Wrap to fit 80 columns at the tab width: the
+	// `hare.formatting.tabWidth` config option when set, else the
+	// client's display `tabSize` from FormattingOptions (a required
+	// field per the LSP spec) so the result matches what the user
+	// sees, else 8 for a nonconformant client that omits both.
+	const tab_width = formatting_tab_width(s, r.params);
 
 	// Build the doc tree from the AST + comment cursor.
 	const cs = collect_comments(data);
@@ -330,7 +341,7 @@ export fn handle_range_formatting(s: *server, r: lsp::request) void = {
 		send_array_result(s, r.id, []);
 		return;
 	};
-	const tab_width = formatting_tab_width(r.params);
+	const tab_width = formatting_tab_width(s, r.params);
 
 	// Convert range to byte offsets.
 	const enc = position_encoding(s);

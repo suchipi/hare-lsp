@@ -78,6 +78,14 @@ export type config = struct {
 	// Alias chains are also cycle-guarded by visited-set tracking in
 	// [[follow_alias_chain]], so an unbounded value won't loop.
 	inlay_hints_inferred_types_max_depth: u32,
+	// Overrides the formatter's wrap tab width. When void (the default),
+	// each `textDocument/formatting` request uses the client's `tabSize`
+	// from FormattingOptions (falling back to [[DEFAULT_TAB_WIDTH]] when
+	// the client omits it). When set, this value takes precedence over
+	// the request's `tabSize` for line-wrap decisions; indentation is
+	// always emitted as literal tabs regardless. Lets collaborators who
+	// render tabs at different display sizes share a single wrap width.
+	formatting_tab_width: (size | void),
 	// Configurable resource caps. See [[limits]] / [[default_limits]].
 	limits: limits,
 };
@@ -97,6 +105,7 @@ export fn default_config() config = config {
 	inlay_hints_parameter_names = true,
 	inlay_hints_inferred_types = true,
 	inlay_hints_inferred_types_max_depth = 10,
+	formatting_tab_width = void,
 	limits = default_limits(),
 };
 
@@ -419,6 +428,33 @@ export fn apply_settings(s: *server, v: json::value) void = {
 					if (f >= 0.0) {
 						s.config.inlay_hints_inferred_types_max_depth = f: u32;
 					};
+				case => void;
+				};
+			case => void;
+			};
+		case => void;
+		};
+	case => void;
+	};
+
+	// "formatting": {"tabWidth": N}. A positive integer overrides the
+	// client's `tabSize` for wrap decisions; null (or any value < 1)
+	// clears the override so the request's `tabSize` is used again.
+	match (json::get(&o, "formatting")) {
+	case let p: *json::value =>
+		match (*p) {
+		case let fobj: json::object =>
+			match (json::get(&fobj, "tabWidth")) {
+			case let fp: *json::value =>
+				match (*fp) {
+				case let f: f64 =>
+					if (f >= 1.0) {
+						s.config.formatting_tab_width = f: size;
+					} else {
+						s.config.formatting_tab_width = void;
+					};
+				case json::_null =>
+					s.config.formatting_tab_width = void;
 				case => void;
 				};
 			case => void;

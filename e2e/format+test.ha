@@ -470,3 +470,86 @@ use     io;
 		"tabSize 1 leaves the one-line condition untouched (no-op)"
 	);
 };
+
+// The `hare.formatting.tabWidth` config option overrides the client's
+// `tabSize` for wrap decisions. With the option set to 1, a request
+// that sends `tabSize: 8` must NOT wrap the indented `&&` chain (it
+// would wrap at width 8), proving the option wins over the request's
+// tabSize. Clearing the option (null) restores tabSize-driven wrapping.
+@test fn e2e_format_config_tab_width_overrides_client_tab_size() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`
+		));
+	free(wait_for_response(&s, 1.0));
+	send(&s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+
+	// Pin the wrap width to 1 column per tab via configuration.
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"hare":{"formatting":{"tabWidth":1}}}}}`
+		));
+
+	// Canonical when a tab counts as 1 column: the `if` condition is
+	// 77 columns and fits on one line.
+	const sample =
+		"export fn f(omit_leading_dot: bool, part: str) void = {\n"
+		"\tif (omit_leading_dot && len(part) > 0 && "
+		"strings::sub(part, 0, 1) == \".\") {\n"
+		"\t\treturn;\n"
+		"\t};\n"
+		"};\n";
+	const did_open = build_did_open("file:///cfgtab.ha", sample);
+	defer free(did_open);
+	send(&s, strings::toutf8(did_open));
+
+	// tabSize 8 would wrap, but the tabWidth=1 override keeps the line
+	// flat, so the already-canonical document is a no-op (no edits).
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":910,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///cfgtab.ha"},"options":{"tabSize":8,"insertSpaces":false}}}`
+		));
+	const body_ovr = wait_for_response(&s, 910.0);
+	defer free(body_ovr);
+	let v_ovr = json::loadstr(strings::fromutf8(body_ovr)!)!;
+	defer json::finish(v_ovr);
+	const arr_ovr =
+		*(json::get(&(v_ovr as json::object),
+			"result") as *json::value) as []json::value;
+	assert(
+		len(arr_ovr) == 0,
+		"tabWidth=1 override keeps the line flat despite tabSize 8"
+	);
+
+	// Clear the override; tabSize 8 should now drive wrapping again.
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"hare":{"formatting":{"tabWidth":null}}}}}`
+		));
+	send(&s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":911,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///cfgtab.ha"},"options":{"tabSize":8,"insertSpaces":false}}}`
+		));
+	const body_clr = wait_for_response(&s, 911.0);
+	defer free(body_clr);
+	let v_clr = json::loadstr(strings::fromutf8(body_clr)!)!;
+	defer json::finish(v_clr);
+	const arr_clr =
+		*(json::get(&(v_clr as json::object),
+			"result") as *json::value) as []json::value;
+	assert(
+		len(arr_clr) == 1,
+		"clearing the override restores tabSize-driven wrapping"
+	);
+	const new_clr =
+		*(json::get(&(arr_clr[0] as json::object),
+			"newText") as *json::value) as str;
+	assert(
+		strings::contains(new_clr, "len(part) > 0\n"),
+		"tabSize 8 wraps the condition before the trailing &&"
+	);
+};
