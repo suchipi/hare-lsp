@@ -46,7 +46,7 @@ Currently handled by Engine B: identifier (local + workspace + stdlib), `.field`
 2. Add the expression case to the named function. For Engine A rows that mirror Engine B, prefer delegating to `type_of_expr` + `render_type_plain` (navigation.ha:1970) over hand-rolling.
 3. Write a **unit test** in `server/navigation_test+test.ha` (Engine A) or `server/struct_member_test+test.ha` (Engine B). **Use at least one identifier longer than one ASCII char** (ideally multi-byte) - single-char names mask the `loc.end` rune bug. See the existing `hover_on_for_each_*` and `hover_const_match_init_*` tests for the harness shape.
 4. If the form involves resolving through the stdlib, add an e2e test under `e2e/` (per the project's "always write e2e tests" convention).
-5. `make test` and `make vscode-test` must stay green. `./harefmt --write .` before committing.
+5. `make test` and `make vscode-test` must stay green. `./harefmt --tab-width 2 --write .` before committing.
 
 ## Shared fix strategy (A1-A4, the access forms)
 

@@ -24,7 +24,7 @@ The project is driven entirely by the [Makefile](Makefile). It pins `HAREPATH` t
 
 There is no separate lint step; rely on `hare build` errors, `make test`, `make vscode-test`, `make vscode-e2e`, and `make nvim-test`.
 
-Before committing, run `./harefmt --write .` to format Hare files in the repo.
+Before committing, run `./harefmt --tab-width 2 --write .` to format Hare files in the repo.
 
 ### Running a single test
 
@@ -71,7 +71,7 @@ Parser, buffer, indices, type queries. None of this depends on `lsp` or `server`
 - [analysis/resolver.ha](analysis/resolver.ha), [analysis/types.ha](analysis/types.ha), [analysis/type_walk.ha](analysis/type_walk.ha): name resolution and best-effort type-of-expression for hover, inlay hints, and type hierarchy.
 - [analysis/scope_graph.ha](analysis/scope_graph.ha): lexical scope graph for a parsed file. Lets references/rename bound their search to a binding's scope when the cursor resolves to a local.
 - [analysis/token_scan.ha](analysis/token_scan.ha): byte scanner that skips comments, strings, char literals, and raw strings. Used by references/rename's text scan, signature-help comma counting, and the formatter's brace-depth tracker.
-- [analysis/loc_fixup.ha](analysis/loc_fixup.ha): the Hare AST reports `loc.off` as a rune index; the LSP needs byte offsets. This module fixes those up. See "Byte / rune offsets" below — fixup translates the unit but not the *semantic* of `loc.end`, which still points at the start of the last rune of the last token.
+- [analysis/loc_fixup.ha](analysis/loc_fixup.ha): the Hare AST reports `loc.off` as a rune index; the LSP needs byte offsets. This module fixes those up. See "Byte / rune offsets" below — fixup translates the unit but not the _semantic_ of `loc.end`, which still points at the start of the last rune of the last token.
 
 ### `server/` — feature handlers
 

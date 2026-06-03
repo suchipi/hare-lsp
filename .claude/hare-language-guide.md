@@ -13,7 +13,7 @@ If a syntactic detail isn't covered here, the authoritative reference is the std
 - Explicit error handling via tagged unions, with two sugar operators (`!`, `?`).
 - **No generics.** No traits. No interfaces (the `io::stream` "vtable" pattern is the closest substitute, hand-rolled per type).
 - **Targets Hare v0.26.0 in this repo.** Hare evolves; APIs from older versions of the stdlib won't match.
-- Source files end in `.ha`. Format with `./harefmt --write .` from the repo root before committing.
+- Source files end in `.ha`. Format with `./harefmt --tab-width 2 --write .` from the repo root before committing.
 
 A trivial program:
 
@@ -92,7 +92,7 @@ let sub = b[1..3];                    // half-open slice, refers into b
 
 ### Strings
 
-- `str` is **UTF-8 bytes plus a length**, *not* a sequence of runes.
+- `str` is **UTF-8 bytes plus a length**, _not_ a sequence of runes.
 - `len(s)` returns **bytes**, not runes.
 - `strings::toutf8(s)` returns a `[]u8` view (borrowed; do not free unless documented).
 - `strings::fromutf8(buf)` returns `(str | utf8::invalid)` — a borrowed view over the same bytes.
@@ -423,23 +423,23 @@ The repo's testing convention: prefer real `@test` functions over external probe
 
 Read the `README` next to each module in `/usr/local/src/hare/stdlib/<module>/` for a one-line description; read the source for the rest.
 
-| Module | What it gives you |
-|---|---|
-| `fmt` | `print(ln)`, `printf(ln)`, `fprintf(ln)`, `asprintf` (allocates), `bsprintf` (writes into a buffer). Format syntax: `{}`, `{0}`, `{:x}`, `{:-10}`, `{:.2f}`. See README quoted above. |
-| `io` | `handle` = `(file | *stream)`. `read`, `write`, `close`, `drain` (read-all), `copy`, `tee`. `*stream` is the "implement your own I/O object" interface. |
-| `os` | `args`, `getenv`, `stdin`, `stdout`, `stdout_file` (unbuffered), `stderr`, `open`, `create`, `exit`. The unbuffered `stdout_file` matters for this LSP — see `cmd/hare_lsp/main.ha` for why. |
-| `strings` | `toutf8`/`fromutf8`, `concat` (allocs; free with `free`), `join`, `split`, `cut`, `iter`/`next` for runes, `hasprefix`/`hassuffix`/`contains`, `trim`/`ltrim`/`rtrim`, `dup`, `freeall`. |
-| `strconv` | `stoi`, `stou`, `stoz`, `itos`, `ftos`. |
-| `bufio` | `newscanner`, `scan_line`, `scan_string`, `scan_rune`, `scan_bytes`. Heads-up on `scan_string` with multi-byte delimiters: see `memory/feedback_bufio_multibyte_delim.md`. |
-| `memio` | In-memory `io::handle` (`fixed` over a buffer, `dynamic` that grows). The standard way to build a string without `strings::concat` calls. |
-| `bytes` | Byte-slice helpers (`index`, `contains`, `equal`). |
-| `errors` | Reusable error variants: `nomem`, `noaccess`, `noentry`, `invalid`, `unsupported`, `busy`, `exists`, `cancelled`, etc. Embed these in your own error unions to make them interoperate. |
-| `encoding::json` | This repo uses `hare-json` at `/usr/local/src/hare/third-party/encoding/json/`. `json::value` is `(f64 | str | bool | json::object | []json::value | _null)`. `json::get`, `json::put`, `json::take`, `json::finish`. Read `feedback_json_object_append_pattern.md` before mutating a `json::object`. |
-| `hare::lex` | Tokenizer over Hare source. Produces `token = (ltok, value, location)`. |
-| `hare::parse` | Parser producing `hare::ast` nodes. The stock version aborts on partial input — **this repo vendors a fixed copy under `hare/parse/`** (see Section 11). |
-| `hare::ast` | The AST: `subunit`, `decl`, `expr`, `_type`, `import`, `ident`, `loc`. **`loc.off` is a rune offset, not a byte offset.** See `analysis/loc_fixup.ha`. |
-| `hare::unparse` | AST -> source text. Use it sparingly and only where the formatter actually wants stdlib behavior; in many cases this project unparses by hand to preserve syntactic detail the stdlib drops. |
-| `time` | `instant`, `now`, durations. |
+| Module           | What it gives you                                                                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---- | ------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fmt`            | `print(ln)`, `printf(ln)`, `fprintf(ln)`, `asprintf` (allocates), `bsprintf` (writes into a buffer). Format syntax: `{}`, `{0}`, `{:x}`, `{:-10}`, `{:.2f}`. See README quoted above.        |
+| `io`             | `handle` = `(file                                                                                                                                                                            | *stream)`. `read`, `write`, `close`, `drain`(read-all),`copy`, `tee`. `*stream` is the "implement your own I/O object" interface. |
+| `os`             | `args`, `getenv`, `stdin`, `stdout`, `stdout_file` (unbuffered), `stderr`, `open`, `create`, `exit`. The unbuffered `stdout_file` matters for this LSP — see `cmd/hare_lsp/main.ha` for why. |
+| `strings`        | `toutf8`/`fromutf8`, `concat` (allocs; free with `free`), `join`, `split`, `cut`, `iter`/`next` for runes, `hasprefix`/`hassuffix`/`contains`, `trim`/`ltrim`/`rtrim`, `dup`, `freeall`.     |
+| `strconv`        | `stoi`, `stou`, `stoz`, `itos`, `ftos`.                                                                                                                                                      |
+| `bufio`          | `newscanner`, `scan_line`, `scan_string`, `scan_rune`, `scan_bytes`. Heads-up on `scan_string` with multi-byte delimiters: see `memory/feedback_bufio_multibyte_delim.md`.                   |
+| `memio`          | In-memory `io::handle` (`fixed` over a buffer, `dynamic` that grows). The standard way to build a string without `strings::concat` calls.                                                    |
+| `bytes`          | Byte-slice helpers (`index`, `contains`, `equal`).                                                                                                                                           |
+| `errors`         | Reusable error variants: `nomem`, `noaccess`, `noentry`, `invalid`, `unsupported`, `busy`, `exists`, `cancelled`, etc. Embed these in your own error unions to make them interoperate.       |
+| `encoding::json` | This repo uses `hare-json` at `/usr/local/src/hare/third-party/encoding/json/`. `json::value` is `(f64                                                                                       | str                                                                                                                               | bool | json::object | []json::value | \_null)`. `json::get`, `json::put`, `json::take`, `json::finish`. Read `feedback_json_object_append_pattern.md`before mutating a`json::object`. |
+| `hare::lex`      | Tokenizer over Hare source. Produces `token = (ltok, value, location)`.                                                                                                                      |
+| `hare::parse`    | Parser producing `hare::ast` nodes. The stock version aborts on partial input — **this repo vendors a fixed copy under `hare/parse/`** (see Section 11).                                     |
+| `hare::ast`      | The AST: `subunit`, `decl`, `expr`, `_type`, `import`, `ident`, `loc`. **`loc.off` is a rune offset, not a byte offset.** See `analysis/loc_fixup.ha`.                                       |
+| `hare::unparse`  | AST -> source text. Use it sparingly and only where the formatter actually wants stdlib behavior; in many cases this project unparses by hand to preserve syntactic detail the stdlib drops. |
+| `time`           | `instant`, `now`, durations.                                                                                                                                                                 |
 
 ---
 
@@ -511,7 +511,7 @@ These are documented in detail elsewhere; the summary here saves you a discovery
 
 - **Vendored stdlib lives under `hare/<module>/`.** The Makefile's `HAREPATH` puts the repo root first, so a file at `hare/parse/parse.ha` shadows `/usr/local/src/hare/stdlib/hare/parse/parse.ha`. We currently vendor `hare/parse/` to fix an abort-on-partial-input bug. If you find a stdlib limitation, vendor only the file(s) you need to change and add a header comment explaining the divergence. See `memory/feedback_vendor_when_stdlib_blocks.md`.
 - **`hare::ast` loc offsets are rune indices.** Convert to bytes via `analysis/loc_fixup.ha` before anything LSP-facing.
-- **`loc.end.off` is the start of the LAST RUNE of the last consumed token, not the end of that token.** This comes from `hare::lex::prevloc`. For `b.x`, `loc.end.off` of the access_field equals the start of `x` — and *also* equals the end of `x`, because `x` is a single rune. For `b.data` it points at `a` (start of the last rune of `data`), not at `d` and not past `a`. Tests that use single-character names will not catch a mishandling of this. See the "Byte / rune offsets" section of [CLAUDE.md](../CLAUDE.md).
+- **`loc.end.off` is the start of the LAST RUNE of the last consumed token, not the end of that token.** This comes from `hare::lex::prevloc`. For `b.x`, `loc.end.off` of the access_field equals the start of `x` — and _also_ equals the end of `x`, because `x` is a single rune. For `b.data` it points at `a` (start of the last rune of `data`), not at `d` and not past `a`. Tests that use single-character names will not catch a mishandling of this. See the "Byte / rune offsets" section of [CLAUDE.md](../CLAUDE.md).
 - **Multiple LSP "position" encodings.** UTF-8 / UTF-16 / UTF-32 is negotiated at `initialize`. Use `analysis/positions.ha`; do not roll your own offset math.
 - **`bufio::scan_string("\r\n")` is unsafe across read-ahead boundaries.** Use `scan_line` + `strings::rtrim('\r')`. See `memory/feedback_bufio_multibyte_delim.md`.
 - **Appending into a `json::value` that lives in a `json::object` is a use-after-free pattern.** Take the value out first, mutate, put it back. See `memory/feedback_json_object_append_pattern.md`.
