@@ -39,6 +39,14 @@ export type symbol = struct {
 	docs: str,
 	// Whether the decl was declared `export`.
 	exported: bool,
+	// For FUNCTION-kind symbols: whether the decl carries the `@test`
+	// attribute. Test functions are never valid cross-module navigation
+	// targets (they can't be referenced by name from other modules), so
+	// the workspace/stdlib lookups skip them — otherwise go-to-definition
+	// on a name like `mime::lookup_ext` could land on a same-named
+	// `@test fn` instead of the real implementation. Always false for
+	// non-functions.
+	is_test: bool,
 	// For FUNCTION-kind symbols: parameter names from the prototype, in
 	// order. Empty for unnamed parameters and for non-function symbols.
 	// Used by completion to render snippet placeholders like ${1:path}.
@@ -109,20 +117,21 @@ fn index_decl(idx: *file_index, d: *ast::decl) void = {
 		const params = extract_param_names(f);
 		const fact = annotations_from_docs(docs, true);
 		const po = param_annotations_from_docs(docs, params);
+		const is_test = f.attrs == ast::fndecl_attr::TEST;
 		add_symbol(idx, f.ident, symbol_kind::FUNCTION, d.loc, docs, d.exported,
-			params, fact, po.0, po.1);
+			is_test, params, fact, po.0, po.1);
 	case let t: ast::decl_type =>
 		const fact = empty_ownership_fact();
-		add_symbol(idx, t.ident, symbol_kind::TYPE, d.loc, docs, d.exported, [], fact,
-			[], []);
+		add_symbol(idx, t.ident, symbol_kind::TYPE, d.loc, docs, d.exported, false,
+			[], fact, [], []);
 	case let g: ast::decl_global =>
 		const k = if (g.is_const) symbol_kind::CONST else symbol_kind::GLOBAL;
 		const fact = annotations_from_docs(docs, false);
-		add_symbol(idx, g.ident, k, d.loc, docs, d.exported, [], fact, [], []);
+		add_symbol(idx, g.ident, k, d.loc, docs, d.exported, false, [], fact, [], []);
 	case let c: ast::decl_const =>
 		const fact = annotations_from_docs(docs, false);
-		add_symbol(idx, c.ident, symbol_kind::DEF, d.loc, docs, d.exported, [], fact,
-			[], []);
+		add_symbol(idx, c.ident, symbol_kind::DEF, d.loc, docs, d.exported, false, [],
+			fact, [], []);
 	case ast::assert_expr =>
 		// `static assert(...)` — no symbol introduced.
 		free(docs);
@@ -154,6 +163,7 @@ fn add_symbol(
 	loc: ast::location,
 	docs: str,
 	exported: bool,
+	is_test: bool,
 	param_names: []str,
 	fact: ownership_fact,
 	param_ownerships: []ownership,
@@ -169,6 +179,7 @@ fn add_symbol(
 		span = loc,
 		docs = docs,
 		exported = exported,
+		is_test = is_test,
 		param_names = param_names,
 		return_ownership = fact.kind,
 		return_ownership_source = fact.source,

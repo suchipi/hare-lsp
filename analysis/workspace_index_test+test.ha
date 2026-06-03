@@ -103,6 +103,61 @@ fn write_tmp(path: str, body: str) void = {
 	const _ = io::writeall(f, strings::toutf8(body));
 };
 
+// A `@test fn` must never win a navigation lookup against a real
+// implementation of the same name. We index the test file FIRST so that a
+// naive first-match lookup would return the test entry; the navigation
+// lookups must skip it and resolve to the real `export fn`. Regression
+// test for go-to-definition on `mime::lookup_ext` landing on the
+// same-named `@test fn` in mime/entries+test.ha.
+@test fn navigation_lookups_skip_test_functions() void = {
+	let idx = new_workspace_index();
+	defer finish_workspace_index(&idx);
+
+	index_file(&idx, "/repo/mime/entries+test.ha",
+		strings::toutf8("@test fn lookup_ext() void = void;\n"));
+	index_file(&idx, "/repo/mime/lookup.ha",
+		strings::toutf8("export fn lookup_ext() void = void;\n"));
+
+	// Both decls are still indexed (so document-symbol / workspace-symbol
+	// keep listing tests); only the navigation lookups skip the test one.
+	let saw_test = false, saw_real = false;
+	for (let i = 0z; i < len(idx.entries); i += 1) {
+		if (idx.entries[i].short_name != "lookup_ext") continue;
+		if (idx.entries[i].is_test) {
+			saw_test = true;
+		} else {
+			saw_real = true;
+		};
+	};
+	assert(saw_test, "@test fn should still be indexed");
+	assert(saw_real, "real fn should still be indexed");
+
+	const e = find_in_module(&idx, "mime", "lookup_ext") as *workspace_entry;
+	assert(!e.is_test, "find_in_module must skip @test fn");
+	assert(strings::hassuffix(e.path, "/lookup.ha"));
+
+	let imp: []str = ["mime"];
+	const e2 = find_in_imports(&idx, imp, "lookup_ext") as *workspace_entry;
+	assert(!e2.is_test, "find_in_imports must skip @test fn");
+
+	const e3 = find_first_by_short_name(&idx, "lookup_ext") as *workspace_entry;
+	assert(!e3.is_test, "find_first_by_short_name must skip @test fn");
+};
+
+// When the only declaration of a name is a `@test fn`, navigation must not
+// resolve to it at all — "go-to-definition should not consider functions
+// with the @test attribute" means returning no target, not the test fn.
+@test fn navigation_lookups_ignore_test_only_names() void = {
+	let idx = new_workspace_index();
+	defer finish_workspace_index(&idx);
+	index_file(&idx, "/repo/mime/entries+test.ha",
+		strings::toutf8("@test fn only_in_test() void = void;\n"));
+	assert(find_in_module(&idx, "mime", "only_in_test") is void);
+	assert(find_first_by_short_name(&idx, "only_in_test") is void);
+	let imp: []str = ["mime"];
+	assert(find_in_imports(&idx, imp, "only_in_test") is void);
+};
+
 @test fn fuzzy_search_substring_match() void = {
 	let idx = new_workspace_index();
 	defer finish_workspace_index(&idx);
