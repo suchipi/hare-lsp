@@ -669,6 +669,107 @@ export fn main(b: buffer) void = {
 	);
 };
 
+// Match case-arm completion against the real stdlib `io::error`, the
+// canonical recursive union: `!(...errors::error | underread | nomem)`.
+// Exercises the full cross-module path over the wire - alias resolution
+// into io and errors, recursion through the spread `errors::error`, name
+// qualification relative to the edited file, and the auto-import edit for
+// the not-yet-imported `errors` module. A `match (e) { case |` cursor must
+// offer the named unions (`io::error`, `errors::error`) for whole-subset
+// matching plus every individual variant (`io::underread`, `nomem`, and
+// the `errors::error` members like `errors::invalid`).
+@test fn e2e_completion_match_case_io_error_variants() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	// Double-quoted so the trailing space after `case` is explicit (and
+	// survives `harefmt`); `\n`/`\t` are real newlines/tabs that
+	// build_did_open re-encodes as JSON.
+	const sample =
+		"use io;\nexport fn handle(e: io::error) void = {\n\tmatch (e) {\n\tcase \n\t};\n};\n";
+	open_doc(&s, "file:///mc_io.ha", sample);
+
+	// Line 3 = "\tcase "; char 6 sits right after the trailing space.
+	const req =
+		`{"jsonrpc":"2.0","id":1870,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///mc_io.ha"},"position":{"line":3,"character":6}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1870.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = *(json::get(&obj, "result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+
+	let saw_io_error = false, saw_errors_error = false, saw_underread = false;
+	let saw_nomem = false, saw_errors_invalid = false, saw_keyword_leak = false;
+	let errors_invalid_imports = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const it = items[i] as json::object;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		switch (label) {
+		case "io::error" =>
+			saw_io_error = true;
+		case "errors::error" =>
+			saw_errors_error = true;
+		case "io::underread" =>
+			saw_underread = true;
+		case "nomem" =>
+			saw_nomem = true;
+		case "errors::invalid" =>
+			saw_errors_invalid = true;
+			// The doc imports `io` but not `errors`, so picking an
+			// `errors::` variant must offer to insert `use errors;`.
+			match (json::get(&it, "additionalTextEdits")) {
+			case let p: *json::value =>
+				const edits = *p as []json::value;
+				for (let j = 0z; j < len(edits); j += 1) {
+					const e0 = edits[j] as json::object;
+					const nt = *(json::get(&e0, "newText") as *json::value) as str;
+					if (strings::contains(nt, "use errors;")) {
+						errors_invalid_imports = true;
+					};
+				};
+			case => void;
+			};
+		// Exclusivity: ordinary value-position keywords must not leak.
+
+		case =>
+			if (label == "for" || label == "return" || label == "if") {
+				saw_keyword_leak = true;
+			};
+		};
+	};
+	assert(
+		saw_io_error,
+		"matching io::error must offer the union itself (whole-subset match)"
+	);
+	assert(
+		saw_errors_error,
+		"must offer the spread-in named union errors::error (whole-subset match)"
+	);
+	assert(
+		saw_underread,
+		"must offer io::underread, qualified relative to the edited file"
+	);
+	assert(saw_nomem, "must offer the builtin variant nomem");
+	assert(
+		saw_errors_invalid,
+		"must recurse into errors::error and offer its members (errors::invalid)"
+	);
+	assert(
+		errors_invalid_imports,
+		"an errors:: variant must carry an auto-import edit for `use errors;`"
+	);
+	assert(
+		!saw_keyword_leak,
+		"match case-arm completion is exclusive (no value-position keywords)"
+	);
+};
+
 @test fn e2e_completion_resolve_passthrough() void = {
 	let s = spawn_session();
 	defer finish_session(&s);

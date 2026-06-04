@@ -211,43 +211,50 @@ export fn handle_completion(s: *server, r: lsp::request) void = {
 
 	let arr: []json::value = [];
 
-	switch (prefix_info.kind) {
-	case prefix_kind::QUALIFIED =>
-		// Module-qualified: list exported workspace + stdlib symbols
-		// whose module matches `prefix_info.module`. When the qualified
-		// reference sits in a type position (e.g. `let x: io::|`), only
-		// type-kind members are grammatical, so filter to those.
-		const types_only = is_type_position(data, prefix_info.module_start);
-		add_module_members(s, &arr, prefix_info.module, prefix_info.partial,
-			types_only);
-	case prefix_kind::MEMBER =>
-		// `<expr>.<partial>`: re-parse with a sentinel, resolve the
-		// receiver expression's type, and enumerate the struct/union
-		// fields that the type exposes. Member completion is exclusive
-		// (no keywords, locals, or workspace symbols) because the
-		// grammar position only accepts a field name.
-		add_struct_members(s, doc, data, &prefix_info, &arr);
-	case prefix_kind::PLAIN =>
-		if (is_type_position(data, prefix_info.partial_start)) {
-			// Type position: offer only what can name a type — the
-			// type keywords and TYPE-kind declarations — plus module
-			// names so the user can reach `mod::sometype`.
-			add_keywords(&arr, prefix_info.partial, TYPE_KEYWORDS);
-			add_file_locals(&arr, doc, prefix_info.partial, true, []);
-			add_workspace_symbols(s, doc, &arr, prefix_info.partial, true);
-			add_stdlib_symbols(s, doc, &arr, prefix_info.partial, true);
-			add_module_name_completions(s, doc, &arr, prefix_info.partial);
-		} else {
-			// Value position: surface in-scope local bindings (let /
-			// const / def, parameters, for / match captures) first,
-			// then keywords and the file / workspace / stdlib symbols.
-			const locals = add_local_bindings(&arr, doc, data, &prefix_info);
-			defer analysis::free_str_slice(locals);
-			add_keywords(&arr, prefix_info.partial, KEYWORDS);
-			add_file_locals(&arr, doc, prefix_info.partial, false, locals);
-			add_workspace_symbols(s, doc, &arr, prefix_info.partial, false);
-			add_stdlib_symbols(s, doc, &arr, prefix_info.partial, false);
-			add_module_name_completions(s, doc, &arr, prefix_info.partial);
+	// A match case-arm type position is exclusive: when the cursor sits
+	// after `case` in a `match` over a tagged union, only that union's
+	// variants are grammatical. When detected, [[try_match_case_completion]]
+	// populates `arr` and we skip the ordinary keyword / symbol / member
+	// dispatch.
+	if (!try_match_case_completion(s, doc, data, off, &arr)) {
+		switch (prefix_info.kind) {
+		case prefix_kind::QUALIFIED =>
+			// Module-qualified: list exported workspace + stdlib symbols
+			// whose module matches `prefix_info.module`. When the qualified
+			// reference sits in a type position (e.g. `let x: io::|`), only
+			// type-kind members are grammatical, so filter to those.
+			const types_only = is_type_position(data, prefix_info.module_start);
+			add_module_members(s, &arr, prefix_info.module, prefix_info.partial,
+				types_only);
+		case prefix_kind::MEMBER =>
+			// `<expr>.<partial>`: re-parse with a sentinel, resolve the
+			// receiver expression's type, and enumerate the struct/union
+			// fields that the type exposes. Member completion is exclusive
+			// (no keywords, locals, or workspace symbols) because the
+			// grammar position only accepts a field name.
+			add_struct_members(s, doc, data, &prefix_info, &arr);
+		case prefix_kind::PLAIN =>
+			if (is_type_position(data, prefix_info.partial_start)) {
+				// Type position: offer only what can name a type — the
+				// type keywords and TYPE-kind declarations — plus module
+				// names so the user can reach `mod::sometype`.
+				add_keywords(&arr, prefix_info.partial, TYPE_KEYWORDS);
+				add_file_locals(&arr, doc, prefix_info.partial, true, []);
+				add_workspace_symbols(s, doc, &arr, prefix_info.partial, true);
+				add_stdlib_symbols(s, doc, &arr, prefix_info.partial, true);
+				add_module_name_completions(s, doc, &arr, prefix_info.partial);
+			} else {
+				// Value position: surface in-scope local bindings (let /
+				// const / def, parameters, for / match captures) first,
+				// then keywords and the file / workspace / stdlib symbols.
+				const locals = add_local_bindings(&arr, doc, data, &prefix_info);
+				defer analysis::free_str_slice(locals);
+				add_keywords(&arr, prefix_info.partial, KEYWORDS);
+				add_file_locals(&arr, doc, prefix_info.partial, false, locals);
+				add_workspace_symbols(s, doc, &arr, prefix_info.partial, false);
+				add_stdlib_symbols(s, doc, &arr, prefix_info.partial, false);
+				add_module_name_completions(s, doc, &arr, prefix_info.partial);
+			};
 		};
 	};
 	free(prefix_info.module);
