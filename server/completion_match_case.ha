@@ -69,12 +69,13 @@ fn try_match_case_completion(
 	off: size,
 	arr: *[]json::value,
 ) bool = {
-	const type_start = match (match_case_type_start(data, off)) {
-	case let ts: size =>
-		yield ts;
+	const pos = match (match_case_type_start(data, off)) {
+	case let r: (size, bool) =>
+		yield r;
 	case void =>
 		return false;
 	};
+	const type_start = pos.0, binding_form = pos.1;
 	// Capture any trailing identifier bytes so a mid-word cursor
 	// (`case io::er|ror`) splices over the whole token.
 	let ident_end = off;
@@ -125,13 +126,14 @@ fn try_match_case_completion(
 	walk_match_variant(s, lt, user_mod, &variants, 0);
 	if (len(variants) == 0) return false;
 
-	emit_match_variants(s, doc, &variants, full_typed, arr);
+	emit_match_variants(s, doc, &variants, full_typed, binding_form, arr);
 	return true;
 };
 
-// Byte-level pre-check: returns the start offset of the type token being
-// typed when `off` sits in a match case-arm type position, else void. Two
-// forms are recognised:
+// Byte-level pre-check: when `off` sits in a match case-arm type position,
+// returns the start offset of the type token being typed plus a flag that
+// is true for the binding form (so `let` is not re-offered in the type
+// slot); returns void otherwise. Two forms are recognised:
 //   1. `case <type>`              (the type token may be empty)
 //   2. `case let NAME: <type>`    (the binding form)
 // The check is intentionally conservative on the cheap path; the sentinel
@@ -140,7 +142,7 @@ fn try_match_case_completion(
 // match case and so falls through).
 //
 // @param data: borrowed
-fn match_case_type_start(data: []u8, off: size) (size | void) = {
+fn match_case_type_start(data: []u8, off: size) ((size, bool) | void) = {
 	// Walk back over the partial type token: identifier bytes plus the
 	// `:` of a qualified `mod::name`. A `: ` binding separator has a space
 	// after it, which stops this scan, so it is not absorbed here.
@@ -155,7 +157,7 @@ fn match_case_type_start(data: []u8, off: size) (size | void) = {
 	};
 	const before = skip_ws_back(data, ts);
 	// Form 1: `case <type>`.
-	if (word_ends_at(data, before, "case")) return ts;
+	if (word_ends_at(data, before, "case")) return (ts, false);
 	// Form 2: `case let NAME: <type>`.
 	if (before > 0 && data[before - 1] == ':': u8) {
 		let j = skip_ws_back(data, before - 1);
@@ -165,7 +167,7 @@ fn match_case_type_start(data: []u8, off: size) (size | void) = {
 		j = skip_ws_back(data, j);
 		if (!word_ends_at(data, j, "let")) return void;
 		j = skip_ws_back(data, j - 3);
-		if (word_ends_at(data, j, "case")) return ts;
+		if (word_ends_at(data, j, "case")) return (ts, true);
 	};
 	return void;
 };
@@ -896,9 +898,11 @@ fn qualified_module_for_uri(s: *server, uri: str) str = {
 // Emits a completion item for each collected variant, filtered by what the
 // user has typed. When a `mod::` qualifier is already present the label is
 // the bare leaf (the qualifier stays); otherwise the label is the fully
-// qualified spelling and an auto-import edit is attached. A `let` keyword
-// item is also offered (in the unqualified case) so the binding form
-// `case let x: T =>` remains reachable.
+// qualified spelling and an auto-import edit is attached. In the bare
+// `case <type>` form a `let` keyword item is also offered so the binding
+// form `case let x: T =>` stays reachable; it is suppressed for the binding
+// form itself (`case let x: |`), where the cursor is already past `let` and
+// offering it would yield the invalid `case let x: let`.
 //
 // @param s: borrowed
 // @param doc: borrowed
@@ -910,6 +914,7 @@ fn emit_match_variants(
 	doc: *document,
 	variants: *[]match_variant,
 	full_typed: str,
+	binding_form: bool,
 	arr: *[]json::value,
 ) void = {
 	const qualified = strings::contains(full_typed, "::");
@@ -937,9 +942,11 @@ fn emit_match_variants(
 		};
 		append(a, item: json::value)!;
 	};
-	// The binding form is grammatical in any non-default case, so keep
-	// `let` reachable when the user hasn't started a qualified name.
-	if (!qualified
+	// Offer `let` so the binding form `case let x: T =>` stays reachable,
+	// but only from the bare `case <type>` position. In the binding form
+	// (`case let x: |`) the cursor is already past `let`, so re-offering it
+	// would complete to the invalid `case let x: let`.
+	if (!qualified && !binding_form
 			&& (len(full_typed) == 0 || strings::hasprefix("let", full_typed))) {
 		let item = json::newobject();
 		json::set(&item, "label", "let": json::value)!;

@@ -114,6 +114,12 @@ fn mc_item_with_label(
 	assert(labels_contains(labels, "int"), "binding form must offer `int`");
 	assert(labels_contains(labels, "str"), "binding form must offer `str`");
 	assert(labels_contains(labels, "void"), "binding form must offer `void`");
+	// The cursor is already past `let`, so offering it would complete to the
+	// invalid `case let e: let`.
+	assert(
+		!labels_contains(labels, "let"),
+		"binding form must not re-offer the `let` keyword in the type slot"
+	);
 };
 
 @test fn completion_match_case_recurses_nested_unions() void = {
