@@ -704,6 +704,116 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(found, "sibfunc should be offered");
 };
 
+@test fn completion_omits_non_exported_cross_module_symbol() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	// Two same-prefix decls in another module: one private, one exported.
+	// A private decl is unreachable from a different module even with a
+	// qualifier + import, so it must not be offered; the exported one
+	// must (a positive control proving the filter discriminates on
+	// exported-ness rather than dropping all cross-module symbols).
+	const provider = strings::toutf8(
+		"fn secret_priv() void = void;\nexport fn secret_pub() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/othermod/p.ha", provider);
+
+	// Open doc is in a DIFFERENT module (leaf "mymod").
+	comp_open(&s, "file:///repo/mymod/main.ha", "fn main() void = secret\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///repo/mymod/main.ha"},"position":{"line":0,"character":23}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 76.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 76.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let saw_pub = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		assert(
+			label != "secret_priv",
+			"a private cross-module decl must not be offered as a completion"
+		);
+		if (label == "secret_pub") saw_pub = true;
+	};
+	assert(saw_pub, "the exported cross-module decl must still be offered");
+};
+
+@test fn completion_auto_import_nested_workspace_module_uses_full_path(
+
+) void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	// Pin the module root so the synthetic /ws tree resolves: the file
+	// /ws/hare/parse/p.ha then belongs to module `hare::parse`, not the
+	// bare leaf `parse`.
+	free(s.config.harepath);
+	s.config.harepath = strings::dup("/ws")!;
+	const provider = strings::toutf8("export fn parser_func() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/ws/hare/parse/p.ha", provider);
+
+	// Open doc at the workspace root with no imports yet.
+	comp_open(&s, "file:///ws/main.ha", "fn main() void = parser\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///ws/main.ha"},"position":{"line":0,"character":23}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 77.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 77.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "parser_func") continue;
+		found = true;
+		// Referenced by the module leaf `parse`...
+		const it_text = *(json::get(&item, "insertText") as *json::value) as str;
+		assert(
+			strings::hasprefix(it_text, "parse::parser_func("),
+			"nested-module completion must qualify by the leaf `parse`"
+		);
+		// ...but imported by the FULL module path `hare::parse`.
+		const edits =
+			*(json::get(&item,
+				"additionalTextEdits") as *json::value) as []json::value;
+		assert(len(edits) >= 1, "nested-module completion must carry a use edit");
+		const e0 = edits[0] as json::object;
+		const new_text = *(json::get(&e0, "newText") as *json::value) as str;
+		assert(
+			strings::contains(new_text, "use hare::parse;"),
+			"nested-module auto-import must insert `use hare::parse;`, not `use parse;`"
+		);
+		break;
+	};
+	assert(found, "parser_func should be offered");
+};
+
 @test fn completion_module_name_suggests_stdlib_module() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);

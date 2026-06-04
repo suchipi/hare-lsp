@@ -634,14 +634,22 @@ fn add_workspace_symbols(
 	// per-entry whether to attach an auto-import edit.
 	const imported = doc_imported_modules(doc);
 	defer analysis::free_str_slice(imported);
-	// The current file's module: a symbol from a sibling file in the same
-	// module is reachable unqualified, so its inserted text stays a bare
-	// name; a symbol from any other module must insert module-qualified
-	// (`mod::name`) so it resolves after the auto-`use` - see
-	// [[attach_qualified_insert]].
+	// Module roots for resolving a file's fully-qualified module name.
+	// HAREPATH / configured roots are authoritative (that is what Hare
+	// uses to resolve `use`); the editor's workspace folders are a
+	// fallback for projects HAREPATH doesn't cover. Computed once and
+	// reused for the open document and every candidate entry.
+	const hp_roots = stdlib_search_paths(s);
+	defer analysis::free_str_slice(hp_roots);
+	const wf_roots = workspace_folder_roots(s);
+	defer analysis::free_str_slice(wf_roots);
+	// The open file's fully-qualified module. A symbol from the same
+	// module is reachable unqualified, so its insert stays bare; a symbol
+	// from any other module inserts module-qualified (`mod::name`) and
+	// carries a `use` edit - see [[attach_qualified_insert]].
 	const doc_path = uri_to_path(doc.uri);
 	defer free(doc_path);
-	const file_module = analysis::module_from_path(doc_path);
+	const file_module = qualified_module_of_file(hp_roots, wf_roots, doc_path);
 	defer free(file_module);
 	let added = 0z;
 	for (let i = 0z; i < cap && added < 200z; i += 1) {
@@ -649,6 +657,15 @@ fn add_workspace_symbols(
 		if (types_only && e.kind != analysis::symbol_kind::TYPE) continue;
 		if (len(partial) > 0
 				&& !strings::hasprefix(e.short_name, partial)) continue;
+		const entry_module = qualified_module_of_file(hp_roots, wf_roots, e.path);
+		defer free(entry_module);
+		const cross_module = entry_module != file_module;
+		// A private (non-exported) decl in another module is unreachable
+		// even with a qualifier and a `use`, so never offer it as a
+		// cross-module completion - it would only produce code that does
+		// not compile. Private decls in the SAME module stay visible
+		// (sibling files legitimately see each other's privates).
+		if (cross_module && !e.exported) continue;
 		let item = json::newobject();
 		json::set(&item, "label", e.short_name: json::value)!;
 		json::put(&item, "kind", symbol_kind_to_completion(e.kind))!;
@@ -659,15 +676,17 @@ fn add_workspace_symbols(
 		const sort = strings::concat(SORT_WORKSPACE, e.short_name)!;
 		defer free(sort);
 		json::set(&item, "sortText", sort: json::value)!;
-		if (len(e.module) > 0 && e.module != file_module) {
-			const qname = strings::concat(e.module, "::", e.short_name)!;
+		if (cross_module && len(entry_module) > 0) {
+			const leaf = module_leaf_name(entry_module);
+			const qname = strings::concat(leaf, "::", e.short_name)!;
 			defer free(qname);
 			attach_qualified_insert(&item, e.kind, qname, e.param_names);
-			// Cross-module: offer the companion `use` edit (a no-op if
-			// the module is already imported). Same-module siblings are
-			// reachable unqualified, so they get neither qualification
-			// nor an import - importing your own module is an error.
-			attach_auto_import(s, doc, &item, e.module, imported);
+			// Cross-module: qualify by the module leaf and offer the
+			// companion `use <full::module>;` edit (a no-op when already
+			// imported). The full path matters for nested modules: a
+			// `hare::parse` symbol is referenced as `parse::name` but
+			// must import `use hare::parse;`, not `use parse;`.
+			attach_auto_import(s, doc, &item, entry_module, imported);
 		} else if (e.kind == analysis::symbol_kind::FUNCTION) {
 			attach_function_snippet(&item, e.short_name, e.param_names);
 		};
@@ -676,6 +695,45 @@ fn add_workspace_symbols(
 		added += 1;
 	};
 	*arr = a;
+};
+
+// Decodes each of the editor's workspace folder URIs to a local
+// filesystem path. Used as fallback module roots when HAREPATH doesn't
+// cover the project. Caller frees with analysis::free_str_slice.
+//
+// @param s: borrowed
+// @returns: owned
+fn workspace_folder_roots(s: *server) []str = {
+	let out: []str = [];
+	for (let i = 0z; i < len(s.workspace_folders); i += 1) {
+		append(out, uri_to_path(s.workspace_folders[i].uri))!;
+	};
+	return out;
+};
+
+// Resolves a file's fully-qualified Hare module name (e.g. "hare::parse",
+// "server", or "" for a file that sits directly at a module root). Tries
+// the authoritative HAREPATH / configured roots first, then the editor's
+// workspace folders, and finally falls back to the leaf directory name
+// when neither contains the file (which is what unit tests with synthetic
+// paths and no roots configured exercise). Caller frees.
+//
+// @param hp_roots: borrowed
+// @param wf_roots: borrowed
+// @param path: borrowed
+// @returns: owned
+fn qualified_module_of_file(hp_roots: []str, wf_roots: []str, path: str) str = {
+	match (qualified_module_under_roots(hp_roots, path)) {
+	case let m: str =>
+		return m;
+	case void => void;
+	};
+	match (qualified_module_under_roots(wf_roots, path)) {
+	case let m: str =>
+		return m;
+	case void => void;
+	};
+	return analysis::module_from_path(path);
 };
 
 // Emits exported stdlib and third-party symbols for the PLAIN
