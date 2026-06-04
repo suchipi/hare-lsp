@@ -278,9 +278,11 @@ fn scan_decl_for_case_sentinel(d: *ast::decl) (*ast::expr | void) = {
 };
 
 // Recursively searches `e` for the match expression whose case type is the
-// sentinel. Covers the expression forms a `match` statement realistically
-// nests inside (blocks, bindings, control flow, defer/yield/return, calls,
-// assignments, operators). On a hit, returns the match's value expression.
+// sentinel, returning that match's value expression on a hit. Descends into
+// every expression form that can hold a sub-expression (mirroring the
+// exhaustive traversal of [[scan_expr_for_member]]) so a `match` nested in
+// a call argument, a builtin (alloc / append / len / slice / ...), a
+// literal, an index, a cast, or any control-flow body is still found.
 //
 // @param e: borrowed
 // @returns: borrowed from e
@@ -369,7 +371,12 @@ fn scan_expr_for_case_sentinel(e: *ast::expr) (*ast::expr | void) = {
 			};
 		case null => void;
 		};
-		return scan_expr_for_case_sentinel(fr.body);
+		match (scan_expr_for_case_sentinel(fr.body)) {
+		case let v: *ast::expr =>
+			return v;
+		case void => void;
+		};
+		return scan_opt_case_sentinel(fr.else_branch);
 	case let sw: ast::switch_expr =>
 		match (scan_expr_for_case_sentinel(sw.value)) {
 		case let v: *ast::expr =>
@@ -443,9 +450,169 @@ fn scan_expr_for_case_sentinel(e: *ast::expr) (*ast::expr | void) = {
 		return scan_expr_for_case_sentinel(p: *ast::expr);
 	case let p: ast::error_assert_expr =>
 		return scan_expr_for_case_sentinel(p: *ast::expr);
+	case let a: ast::access_expr =>
+		match (a) {
+		case ast::access_identifier =>
+			return void;
+		case let idx: ast::access_index =>
+			match (scan_expr_for_case_sentinel(idx.object)) {
+			case let v: *ast::expr =>
+				return v;
+			case void => void;
+			};
+			return scan_expr_for_case_sentinel(idx.index);
+		case let fd: ast::access_field =>
+			return scan_expr_for_case_sentinel(fd.object);
+		case let tu: ast::access_tuple =>
+			match (scan_expr_for_case_sentinel(tu.object)) {
+			case let v: *ast::expr =>
+				return v;
+			case void => void;
+			};
+			return scan_expr_for_case_sentinel(tu.value);
+		};
+	case let l: ast::len_expr =>
+		return scan_expr_for_case_sentinel(l: *ast::expr);
+	case let o: ast::offset_expr =>
+		return scan_expr_for_case_sentinel(o: *ast::expr);
+	case let f: ast::free_expr =>
+		return scan_expr_for_case_sentinel(f: *ast::expr);
+	case let a: ast::alloc_expr =>
+		match (scan_expr_for_case_sentinel(a.init)) {
+		case let v: *ast::expr =>
+			return v;
+		case void => void;
+		};
+		return scan_opt_case_sentinel(a.capacity);
+	case let a: ast::append_expr =>
+		return scan_append_insert_case_sentinel(a);
+	case let a: ast::insert_expr =>
+		return scan_append_insert_case_sentinel(a);
+	case let a: ast::assert_expr =>
+		match (scan_opt_case_sentinel(a.cond)) {
+		case let v: *ast::expr =>
+			return v;
+		case void => void;
+		};
+		return scan_opt_case_sentinel(a.message);
+	case let d: ast::delete_expr =>
+		return scan_expr_for_case_sentinel(d.object);
+	case let bk: ast::break_expr =>
+		return scan_opt_case_sentinel(bk.value);
+	case let sl: ast::slice_expr =>
+		match (scan_expr_for_case_sentinel(sl.object)) {
+		case let v: *ast::expr =>
+			return v;
+		case void => void;
+		};
+		match (scan_opt_case_sentinel(sl.start)) {
+		case let v: *ast::expr =>
+			return v;
+		case void => void;
+		};
+		return scan_opt_case_sentinel(sl.end);
+	case let lit: ast::literal_expr =>
+		return scan_literal_case_sentinel(lit);
+	case let va: ast::variadic_expr =>
+		match (va) {
+		case ast::vastart_expr =>
+			return void;
+		case let ar: ast::vaarg_expr =>
+			return scan_expr_for_case_sentinel(ar.ap);
+		case let en: ast::vaend_expr =>
+			return scan_expr_for_case_sentinel(en: *ast::expr);
+		};
+	// align / size hold a type, continue / undefined hold nothing:
+	// no sub-expression to descend into.
+
 	case =>
 		return void;
 	};
+};
+
+// Scans a nullable child expression, returning void when it is null.
+//
+// @param e: borrowed
+// @returns: borrowed from e
+fn scan_opt_case_sentinel(e: nullable *ast::expr) (*ast::expr | void) = {
+	match (e) {
+	case let p: *ast::expr =>
+		return scan_expr_for_case_sentinel(p);
+	case null =>
+		return void;
+	};
+};
+
+// Scans an append / insert expression (insert_expr is a type alias of
+// append_expr, so they share this shape).
+//
+// @returns: borrowed
+fn scan_append_insert_case_sentinel(a: ast::append_expr) (*ast::expr | void) = {
+	match (scan_expr_for_case_sentinel(a.object)) {
+	case let v: *ast::expr =>
+		return v;
+	case void => void;
+	};
+	match (scan_expr_for_case_sentinel(a.value)) {
+	case let v: *ast::expr =>
+		return v;
+	case void => void;
+	};
+	return scan_opt_case_sentinel(a.length);
+};
+
+// Descends into a literal's sub-expressions (array values, struct field
+// initializers, tuple elements).
+//
+// @returns: borrowed
+fn scan_literal_case_sentinel(lit: ast::literal_expr) (*ast::expr | void) = {
+	match (lit) {
+	case ast::plain_literal =>
+		return void;
+	case let a: ast::array_literal =>
+		for (let i = 0z; i < len(a.values); i += 1) {
+			match (scan_expr_for_case_sentinel(a.values[i])) {
+			case let v: *ast::expr =>
+				return v;
+			case void => void;
+			};
+		};
+		return void;
+	case let s: ast::struct_literal =>
+		return scan_struct_literal_case_sentinel(s);
+	case let t: ast::tuple_literal =>
+		for (let i = 0z; i < len(t); i += 1) {
+			match (scan_expr_for_case_sentinel(t[i])) {
+			case let v: *ast::expr =>
+				return v;
+			case void => void;
+			};
+		};
+		return void;
+	};
+};
+
+// @returns: borrowed
+fn scan_struct_literal_case_sentinel(
+	sl: ast::struct_literal,
+) (*ast::expr | void) = {
+	for (let i = 0z; i < len(sl.fields); i += 1) {
+		match (sl.fields[i]) {
+		case let v: ast::struct_value =>
+			match (scan_expr_for_case_sentinel(v.init)) {
+			case let m: *ast::expr =>
+				return m;
+			case void => void;
+			};
+		case let sub: *ast::struct_literal =>
+			match (scan_struct_literal_case_sentinel(*sub)) {
+			case let m: *ast::expr =>
+				return m;
+			case void => void;
+			};
+		};
+	};
+	return void;
 };
 
 // True when `t` is the completion sentinel used as a case type.

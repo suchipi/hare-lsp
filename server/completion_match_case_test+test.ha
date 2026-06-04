@@ -166,3 +166,28 @@ fn mc_item_with_label(
 		"switch case-arm must fall through to ordinary completion (offers `for`)"
 	);
 };
+
+@test fn completion_match_case_match_nested_in_builtin() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	// The match is the argument of an `alloc(...)` builtin (binding -> alloc
+	// -> match). The sentinel-finding walker must descend through `alloc`,
+	// one of the forms the earlier non-exhaustive version omitted, to reach
+	// the match and still offer its variants.
+	comp_open(&s, "file:///mc6.ha",
+		`type ab = (int | str | void);\nfn main(x: ab) void = {\n\tlet p = alloc(match (x) {\n\tcase \n\t});\n};\n`
+	);
+
+	// Line 3 = `\tcase `; char 6 sits right after the trailing space.
+	const items = run_completion(&s, out, "file:///mc6.ha", 3, 6, 4005.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+
+	assert(
+		labels_contains(labels, "int"),
+		"a match nested inside alloc(...) must still resolve its union variants"
+	);
+	assert(labels_contains(labels, "str"), "must offer `str`");
+	assert(labels_contains(labels, "void"), "must offer `void`");
+};
