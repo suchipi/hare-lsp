@@ -1721,6 +1721,258 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(strings::hassuffix(uri, "hare-lsp-nav-crossfile.ha"));
 };
 
+// Regression: go-to-definition on a bare, unqualified type name from a
+// file that itself lives in a stdlib/third-party module must resolve to
+// that module's own declaration (often in a sibling file), not to a
+// same-named type in an unrelated module. The file's own-module symbols
+// live in stdlib_index, so without a module-aware stdlib lookup for the
+// file's own module the resolver fell through to the module-blind
+// find_first_by_short_name and jumped to whichever `error` was indexed
+// first. Mirrors `error` on line 7 of io/util.ha landing on
+// crypto::ecdsa::error instead of io::error.
+@test fn definition_bare_name_resolves_to_own_stdlib_module() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// Build a fake stdlib tree on disk under an absolute .tmp root so
+	// stdlib_qualified_module can strip the root to "io" and
+	// ensure_stdlib_module_indexed can find the module directory.
+	const cwd = strings::dup(os::getcwd())!;
+	defer free(cwd);
+	const root = strings::concat(cwd, "/.tmp/hare-lsp-nav-ownmod")!;
+	defer free(root);
+	const io_dir = strings::concat(root, "/io")!;
+	defer free(io_dir);
+	const ecdsa_dir = strings::concat(root, "/crypto/ecdsa")!;
+	defer free(ecdsa_dir);
+	match (os::mkdirs(io_dir, 0o755: fs::mode)) {
+	case void => void;
+	case fs::error => abort("mkdirs io failed");
+	};
+	match (os::mkdirs(ecdsa_dir, 0o755: fs::mode)) {
+	case void => void;
+	case fs::error => abort("mkdirs ecdsa failed");
+	};
+	defer match (os::rmdirall(root)) {
+	case => void;
+	};
+
+	// io/types.ha holds the correct target, io::error.
+	const io_types = strings::concat(io_dir, "/types.ha")!;
+	defer free(io_types);
+	nav_write(io_types, "export type error = !void;\n")!;
+	// crypto/ecdsa/error.ha holds an unrelated, same-named type.
+	const ecdsa_err = strings::concat(ecdsa_dir, "/error.ha")!;
+	defer free(ecdsa_err);
+	nav_write(ecdsa_err, "export type error = !(invalidkey | invalidsig);\n")!;
+
+	// Pin harepath to the fake root; the default probes /usr/src and
+	// /usr/local/src which differ across hosts.
+	free(s.config.harepath);
+	s.config.harepath = strings::dup(root)!;
+
+	// Seed crypto::ecdsa::error into stdlib_index FIRST, so a
+	// module-blind first-match lookup would pick it over io::error. The
+	// file's own io module is left unindexed: the fix must index it
+	// lazily and prefer it as the same-module match.
+	assert(
+		analysis::read_and_index_file(&s.stdlib_index, ecdsa_err),
+		"seeding crypto::ecdsa::error must succeed"
+	);
+
+	// Open io/util.ha (in-memory) referencing the bare same-module
+	// `error`. Its own per-file index has no `error` decl, so resolution
+	// goes through the workspace/stdlib fallback.
+	const util_uri = strings::concat("file://", io_dir, "/util.ha")!;
+	defer free(util_uri);
+	const src = "fn f() error = void;";
+	nav_open(&s, util_uri, src);
+
+	const col = find_col(src, "error");
+	const params = pos_params(util_uri, 0, col);
+	defer free(params);
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 7001.0,
+		method = strings::dup("textDocument/definition")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_definition(&s, r);
+
+	const v = skip_to_response(out, 7001.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
+	const uri = *(json::get(&result, "uri") as *json::value) as str;
+	assert(
+		strings::hassuffix(uri, "/io/types.ha"),
+		"bare `error` in io/util.ha must resolve to io::error, not crypto::ecdsa::error"
+	);
+};
+
+// Regression: inferring the type of a `let` bound to a bare same-module
+// call must resolve the callee in the file's own module, including when
+// that module is a stdlib module whose sibling-file decls live in
+// stdlib_index. Exercises lookup_callee's bare path; without the
+// own-module stdlib lookup the callee can't be resolved and hover shows
+// no inferred type.
+@test fn hover_infers_return_type_of_own_stdlib_module_call() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const cwd = strings::dup(os::getcwd())!;
+	defer free(cwd);
+	const root = strings::concat(cwd, "/.tmp/hare-lsp-nav-callee")!;
+	defer free(root);
+	const io_dir = strings::concat(root, "/io")!;
+	defer free(io_dir);
+	match (os::mkdirs(io_dir, 0o755: fs::mode)) {
+	case void => void;
+	case fs::error => abort("mkdirs io failed");
+	};
+	defer match (os::rmdirall(root)) {
+	case => void;
+	};
+
+	// A sibling file in the io module declares the bare callee.
+	const sibling = strings::concat(io_dir, "/compute.ha")!;
+	defer free(sibling);
+	nav_write(sibling, "export fn compute() int = 0;\n")!;
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup(root)!;
+
+	// Open io/util.ha calling the bare same-module compute().
+	const util_uri = strings::concat("file://", io_dir, "/util.ha")!;
+	defer free(util_uri);
+	const src = "fn f() void = { let total = compute(); };";
+	nav_open(&s, util_uri, src);
+
+	const col = find_col(src, "total");
+	const md = nav_hover_contents(&s, out, util_uri, 0, col, 7002.0);
+	defer free(md);
+	assert(
+		strings::contains(md, ": int"),
+		"hover on a let bound to a same-module stdlib call must infer its return type"
+	);
+};
+
+// Regression: stripping error variants from an inferred `expr?` type must
+// recognize a same-module error alias as an error type, including when the
+// alias lives in a sibling file of a stdlib module (resolved via
+// stdlib_index). Exercises lookup_decl_by_ident's bare path through
+// type_is_error. Without the own-module stdlib lookup the alias isn't
+// recognized and the error variant leaks into the inferred type.
+@test fn hover_strips_own_stdlib_module_error_alias() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const cwd = strings::dup(os::getcwd())!;
+	defer free(cwd);
+	const root = strings::concat(cwd, "/.tmp/hare-lsp-nav-errstrip")!;
+	defer free(root);
+	const io_dir = strings::concat(root, "/io")!;
+	defer free(io_dir);
+	match (os::mkdirs(io_dir, 0o755: fs::mode)) {
+	case void => void;
+	case fs::error => abort("mkdirs io failed");
+	};
+	defer match (os::rmdirall(root)) {
+	case => void;
+	};
+
+	// A sibling file declares a same-module error alias and a function
+	// returning it alongside a value type.
+	const sibling = strings::concat(io_dir, "/risky.ha")!;
+	defer free(sibling);
+	nav_write(sibling,
+		"export type ioerror = !void;\nexport fn risky() (int | ioerror) = 0;\n")!;
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup(root)!;
+
+	// `risky()?` propagates ioerror, so the inferred type of `n` is the
+	// success branch `int`, not `(int | ioerror)`.
+	const util_uri = strings::concat("file://", io_dir, "/util.ha")!;
+	defer free(util_uri);
+	const src = "fn f() (int | ioerror) = { let n = risky()?; return n; };";
+	nav_open(&s, util_uri, src);
+
+	const col = find_col(src, "n = risky");
+	const md = nav_hover_contents(&s, out, util_uri, 0, col, 7003.0);
+	defer free(md);
+	assert(
+		strings::contains(md, ": int"),
+		"inferred type of risky()? must be the success type int"
+	);
+	assert(
+		!strings::contains(md, "ioerror"),
+		"the same-module error alias must be stripped from the inferred type"
+	);
+};
+
+// Regression: a bare `[[name]]` doc-comment reference in a stdlib-module
+// file must resolve to that module's own declaration, not to a same-named
+// symbol in an unrelated stdlib module. Exercises resolve_ref's bare path
+// via render_doc_refs. Same root cause as the go-to-definition bug.
+@test fn doc_ref_bare_name_resolves_to_own_stdlib_module() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	const cwd = strings::dup(os::getcwd())!;
+	defer free(cwd);
+	const root = strings::concat(cwd, "/.tmp/hare-lsp-nav-docref")!;
+	defer free(root);
+	const io_dir = strings::concat(root, "/io")!;
+	defer free(io_dir);
+	const ecdsa_dir = strings::concat(root, "/crypto/ecdsa")!;
+	defer free(ecdsa_dir);
+	match (os::mkdirs(io_dir, 0o755: fs::mode)) {
+	case void => void;
+	case fs::error => abort("mkdirs io failed");
+	};
+	match (os::mkdirs(ecdsa_dir, 0o755: fs::mode)) {
+	case void => void;
+	case fs::error => abort("mkdirs ecdsa failed");
+	};
+	defer match (os::rmdirall(root)) {
+	case => void;
+	};
+
+	const io_types = strings::concat(io_dir, "/types.ha")!;
+	defer free(io_types);
+	nav_write(io_types, "export type error = !void;\n")!;
+	const ecdsa_err = strings::concat(ecdsa_dir, "/error.ha")!;
+	defer free(ecdsa_err);
+	nav_write(ecdsa_err, "export type error = !(invalidkey | invalidsig);\n")!;
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup(root)!;
+	assert(
+		analysis::read_and_index_file(&s.stdlib_index, ecdsa_err),
+		"seeding crypto::ecdsa::error must succeed"
+	);
+
+	const util_uri = strings::concat("file://", io_dir, "/util.ha")!;
+	defer free(util_uri);
+	nav_open(&s, util_uri, "fn f() void = void;");
+	const doc = find_document(&s, util_uri) as *document;
+
+	const md = render_doc_refs(&s, doc, "See [[error]] for details.");
+	defer free(md);
+	assert(
+		strings::contains(md, "types.ha"),
+		"bare [[error]] in io/util.ha must link to io::error (io/types.ha)"
+	);
+	assert(
+		!strings::contains(md, "ecdsa"),
+		"bare [[error]] must not link to crypto::ecdsa::error"
+	);
+};
+
 // Same-file shadowing: the open buffer is a test file whose `@test fn`
 // shares a name with the function under test. Jump-to-definition on a call
 // to that function inside the test body must resolve to the real

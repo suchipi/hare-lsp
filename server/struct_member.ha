@@ -1719,6 +1719,19 @@ fn resolve_alias_decl(
 		return d;
 	case void => void;
 	};
+	// Sibling-file alias in the owner's own module — module-keyed (not a
+	// blind short-name search), so it stays unambiguous when several
+	// modules export the same type name and it reaches stdlib modules
+	// whose siblings live in stdlib_index.
+	const owner_path = lsp::uri_decode_path(owner_uri);
+	defer free(owner_path);
+	const owner_module = analysis::module_from_path(owner_path);
+	defer free(owner_module);
+	match (lookup_own_module(s, owner_path, owner_module, name)) {
+	case let e: *analysis::workspace_entry =>
+		return decl_from_workspace_entry(s, e, name);
+	case void => void;
+	};
 	match (analysis::find_first_by_short_name(&s.workspace_index, name)) {
 	case let e: *analysis::workspace_entry =>
 		return decl_from_workspace_entry(s, e, name);
