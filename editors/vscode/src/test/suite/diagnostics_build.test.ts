@@ -11,16 +11,44 @@
 // the stale pull entry stuck. The fix has the server request a diagnostic
 // refresh after a save-triggered build; this spec proves the diagnostic
 // actually clears in vscode.languages.getDiagnostics().
+//
+// Build diagnostics shell out to `hare build`, so this spec needs the
+// hare compiler on PATH. The CI vscode-e2e job runs VSCode on the glibc
+// ubuntu host, where hare is NOT installed (it lives only in the Alpine
+// image used to build the LSP binary; VSCode's Linux build can't run in
+// Alpine). So the spec self-skips when no hare compiler is reachable -
+// it runs locally, and in CI the same server-side fix is covered by the
+// pure-protocol e2e tests in the `server` job (which do run inside
+// Alpine): e2e_didsave_requests_diagnostic_refresh_for_pull_clients and
+// e2e_didsave_no_refresh_for_push_only_clients.
 
+import { execFileSync } from "node:child_process";
 import * as assert from "node:assert";
 import * as vscode from "vscode";
 import { openAndShow, sleep, waitFor, PROVIDER_TIMEOUT_MS } from "./helpers";
 
+// True when a `hare` compiler can be invoked. The LSP server inherits
+// this same PATH, so this is a faithful proxy for "the server can spawn
+// `hare build`".
+function hareCompilerAvailable(): boolean {
+  try {
+    execFileSync("hare", ["version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 suite("diagnostics (build)", () => {
   test("build error clears after the fix is saved", async function () {
-    // Opens a file, runs `hare build` twice (open + post-save re-pull),
-    // and includes a deliberate settle window; give it ample headroom.
-    this.timeout(90000);
+    // A cold `hare build` of a `use fmt` module compiles fmt's whole
+    // dependency tree the first time; allow generously for it (the
+    // build-appears wait below plus the post-save clear wait).
+    this.timeout(180000);
+
+    if (!hareCompilerAvailable()) {
+      this.skip();
+    }
 
     // The shared workspace runs with build diagnostics off so the other
     // specs see only parse results. Turn them on for this spec, then
@@ -39,13 +67,13 @@ suite("diagnostics (build)", () => {
       const doc = await openAndShow("buildfix/main.ha");
 
       // The unhandled-error build diagnostic must surface (via the pull
-      // the client issues on open).
+      // the client issues on open). Budget for a cold compile of fmt.
       await waitFor(
         async () =>
           vscode.languages
             .getDiagnostics(doc.uri)
             .some((d) => /ignore error/i.test(d.message)),
-        PROVIDER_TIMEOUT_MS,
+        90000,
         "build error did not appear for buildfix/main.ha",
       );
 
