@@ -538,6 +538,21 @@ fn do_init_with_workspace(s: *session, root: str) void = {
 		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
 };
 
+// Initializes without a workspace folder (so no background indexing
+// fires) but advertising workspace.diagnostics.refreshSupport, the
+// capability the server gates server-initiated
+// workspace/diagnostic/refresh on. Lets a test observe a save-triggered
+// refresh without an indexing-triggered one racing it.
+fn do_init_refresh_support(s: *session) void = {
+	send(s,
+		strings::toutf8(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{"workspace":{"diagnostics":{"refreshSupport":true}}}}}`
+		));
+	free(wait_for_response(s, 1.0));
+	send(s,
+		strings::toutf8(`{"jsonrpc":"2.0","method":"initialized","params":{}}`));
+};
+
 fn open_doc(s: *session, uri: str, body: str) void = {
 	const msg = build_did_open(uri, body);
 	defer free(msg);
@@ -555,6 +570,20 @@ fn build_did_open(uri: str, body: str) str = {
 	return strings::concat(
 		`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"`,
 		uri, `","languageId":"hare","version":1,"text":`, text_json, `}}}`)!;
+};
+
+// Builds a textDocument/didChange notification that replaces the whole
+// document (single full-text content change). `body` is JSON-encoded so
+// multi-byte runes round-trip. Caller frees.
+fn build_did_change_full(uri: str, version: int, body: str) str = {
+	const text_json = json::dumpstr(body);
+	defer free(text_json);
+	const ver = f64_to_int_str(version: f64);
+	defer free(ver);
+	return strings::concat(
+		`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"`,
+		uri, `","version":`, ver, `},"contentChanges":[{"text":`, text_json,
+		`}]}}`)!;
 };
 
 fn wait_for_response(s: *session, id: f64) []u8 = {
@@ -600,6 +629,69 @@ fn wait_for_publish_diagnostics(s: *session, uri: str) []u8 = {
 		free(body);
 	};
 	fmt::fatalf("e2e: never received publishDiagnostics for {}", uri);
+};
+
+// Drains frames until one carries the given JSON-RPC method (request or
+// notification), returning its raw body. Caller frees.
+fn wait_for_server_method(s: *session, method: str) []u8 = {
+	const needle = strings::concat(`"method":"`, method, `"`)!;
+	defer free(needle);
+	for (let i = 0z; i < 50z; i += 1) {
+		const body = recv(s);
+		const text = strings::fromutf8(body)!;
+		if (strings::contains(text, needle)) {
+			return body;
+		};
+		free(body);
+	};
+	fmt::fatalf("e2e: never received a server message with method {}", method);
+};
+
+// Drains frames until the response to request `id` arrives, asserting
+// that no frame seen on the way carries the JSON-RPC method `forbidden`.
+// The server is single-threaded and fully handles each earlier message -
+// including any server-initiated request it spawns - before replying to
+// a later one, so the response is a deterministic barrier: by the time
+// it arrives, everything the server emitted while handling the prior
+// message has already been read. Frees every frame it reads.
+fn drain_to_response_forbidding(s: *session, id: f64, forbidden: str) void = {
+	const needle = strings::concat(`"method":"`, forbidden, `"`)!;
+	defer free(needle);
+	for (let i = 0z; i < 50z; i += 1) {
+		const body = recv(s);
+		const text = strings::fromutf8(body)!;
+		const has_forbidden = strings::contains(text, needle);
+		let v = json::loadstr(text)!;
+		const is_response = match (v) {
+		case let obj: json::object =>
+			yield match (json::get(&obj, "method")) {
+			case *json::value =>
+				yield false;
+			case void =>
+				yield match (json::get(&obj, "id")) {
+				case let p: *json::value =>
+					yield match (*p) {
+					case let n: f64 =>
+						yield n == id;
+					case =>
+						yield false;
+					};
+				case void =>
+					yield false;
+				};
+			};
+		case =>
+			yield false;
+		};
+		json::finish(v);
+		free(body);
+		assert(
+			!has_forbidden,
+			"server sent a forbidden server-initiated request before the barrier response"
+		);
+		if (is_response) return;
+	};
+	fmt::fatalf("e2e: barrier response for id {} never arrived", id);
 };
 
 fn parse_publish_diagnostics(body: []u8) (json::value, []json::value) = {

@@ -154,7 +154,7 @@ jobs:
       # editors/vscode/.vscode-test/. Cache across runs to avoid the
       # ~100MB re-download.
       - name: Cache VSCode download
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: editors/vscode/.vscode-test
           key: vscode-test-${{ runner.os }}
@@ -203,7 +203,7 @@ jobs:
       # the previous tag from cache (the Makefile rule skips its
       # `git clone` when the .deps dir already exists).
       - name: Cache plenary.nvim
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: e2e-nvim/.deps/plenary.nvim
           key: plenary-${{ hashFiles('Makefile') }}

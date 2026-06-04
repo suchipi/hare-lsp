@@ -675,17 +675,61 @@ export fn handle_workspace_diagnostic(s: *server, r: lsp::request) void = {
 	send_to_client(s, r.id, result: json::value);
 };
 
-// Sends a workspace/diagnostic/refresh request to the client. Used after
-// the workspace index changes in a way that may have invalidated previous
-// reports.
+// Sends a workspace/diagnostic/refresh request to the client, asking it
+// to re-pull diagnostics for everything it's tracking. Used after the
+// workspace index changes, and after a save changes the on-disk content
+// that build diagnostics are derived from.
+//
+// No-ops when the client didn't advertise refresh support: a push-only
+// client answers every refresh with a MethodNotFound error, and the
+// save-triggered call below fires often enough that the error log would
+// become noise.
 //
 // @param s: borrowed
 export fn request_diagnostic_refresh(s: *server) void = {
+	if (!client_supports_diagnostic_refresh(s)) return;
 	const id = next_outgoing_id(s);
 	if (!send_request(s, id, "workspace/diagnostic/refresh", json::_null)) {
 		return;
 	};
 	pending_remember(s, id, "workspace/diagnostic/refresh");
+};
+
+// Returns true if the client advertised support for server-initiated
+// workspace/diagnostic/refresh (capabilities.workspace.diagnostics.
+// refreshSupport). Defaults to false when the subtree is absent.
+//
+// @param s: borrowed
+fn client_supports_diagnostic_refresh(s: *server) bool = {
+	const caps = match (s.client_capabilities) {
+	case void =>
+		return false;
+	case let v: json::value =>
+		yield match (v) {
+		case let o: json::object =>
+			yield o;
+		case =>
+			return false;
+		};
+	};
+	const ws = match (lsp::json_obj(&caps, "workspace")) {
+	case let o: json::object =>
+		yield o;
+	case void =>
+		return false;
+	};
+	const diag = match (lsp::json_obj(&ws, "diagnostics")) {
+	case let o: json::object =>
+		yield o;
+	case void =>
+		return false;
+	};
+	return match (lsp::json_bool(&diag, "refreshSupport")) {
+	case let b: bool =>
+		yield b;
+	case void =>
+		yield false;
+	};
 };
 
 // Sends a workspace/inlayHint/refresh request to the client. Used after
