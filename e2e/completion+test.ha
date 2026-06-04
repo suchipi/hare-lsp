@@ -351,6 +351,14 @@ export fn main() void = {
 			strings::contains(new_text, "use bufio;"),
 			"stdlib auto-import: edit must insert `use bufio;`"
 		);
+		// The accepted text itself must be the module-qualified call:
+		// `use bufio;` alone doesn't bring `newscanner` into scope
+		// unqualified, so a bare `newscanner(...)` would not resolve.
+		const it_text = *(json::get(&it, "insertText") as *json::value) as str;
+		assert(
+			strings::hasprefix(it_text, "bufio::newscanner("),
+			"stdlib auto-import: accepted text must be the qualified call `bufio::newscanner(...)`"
+		);
 		break;
 	};
 	assert(
@@ -431,6 +439,13 @@ export fn main() void = {
 		assert(
 			strings::contains(new_text, "use encoding::json;"),
 			"third-party auto-import: edit must insert `use encoding::json;`"
+		);
+		// Accepted text is qualified by the module leaf `json`, not the
+		// full `encoding::json::` path Hare uses in the `use` line.
+		const it_text = *(json::get(&it, "insertText") as *json::value) as str;
+		assert(
+			strings::hasprefix(it_text, "json::newobject("),
+			"third-party auto-import: accepted text must be the leaf-qualified call `json::newobject(...)`"
 		);
 		break;
 	};

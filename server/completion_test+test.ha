@@ -497,6 +497,213 @@ fn comp_skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	assert(found);
 };
 
+@test fn completion_auto_import_inserts_qualified_function_snippet() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	// Exported function in a module the open document doesn't import.
+	const provider = strings::toutf8("export fn barbar() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/mymod/p.ha", provider);
+
+	// Open doc has no `use mymod;`. Cursor after "ba".
+	comp_open(&s, "file:///qc.ha", "fn main() void = ba\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///qc.ha"},"position":{"line":0,"character":19}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 72.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 72.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "barbar") continue;
+		found = true;
+		// Accepting must insert the module-qualified call, not a bare
+		// `barbar()` that wouldn't resolve after the `use mymod;` edit.
+		const it_text = *(json::get(&item, "insertText") as *json::value) as str;
+		assert(
+			strings::hasprefix(it_text, "mymod::barbar("),
+			"cross-module function completion must insert a qualified call"
+		);
+		const fmt_kind =
+			*(json::get(&item, "insertTextFormat") as *json::value) as f64;
+		assert(fmt_kind == 2.0, "qualified function insert must be a Snippet");
+		break;
+	};
+	assert(found, "barbar should be offered");
+};
+
+@test fn completion_stdlib_inserts_qualified_function_snippet() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup("/repo/stdlib")!;
+	const seed = strings::toutf8("export fn loadstr(input: str) void = void;\n");
+	analysis::index_file(&s.stdlib_index, "/repo/stdlib/encoding/json/loader.ha",
+		seed);
+
+	// Doc has no `use encoding::json;`. Cursor after "load".
+	comp_open(&s, "file:///qz.ha", "fn main() void = load\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///qz.ha"},"position":{"line":0,"character":21}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 73.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 73.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "loadstr") continue;
+		found = true;
+		const it_text = *(json::get(&item, "insertText") as *json::value) as str;
+		// The module leaf `json`, not the full `encoding::json::` path:
+		// Hare references the module by its last segment.
+		assert(
+			strings::hasprefix(it_text, "json::loadstr("),
+			"stdlib completion must insert the leaf-qualified call"
+		);
+		break;
+	};
+	assert(found, "loadstr should be offered");
+};
+
+@test fn completion_cross_module_type_inserts_qualified_plain_name() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	const provider = strings::toutf8("export type mytype = int;\n");
+	analysis::index_file(&s.workspace_index, "/repo/othermod/t.ha", provider);
+
+	comp_open(&s, "file:///qt.ha", "fn main() void = my\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///qt.ha"},"position":{"line":0,"character":19}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 74.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 74.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "mytype") continue;
+		found = true;
+		// Non-function: a plain qualified identifier with no snippet
+		// placeholders and no Snippet format flag.
+		const it_text = *(json::get(&item, "insertText") as *json::value) as str;
+		assert(
+			it_text == "othermod::mytype",
+			"cross-module type completion must insert the qualified name"
+		);
+		match (json::get(&item, "insertTextFormat")) {
+		case *json::value => abort(
+			"plain qualified insert must not be marked as a Snippet"
+		);
+		case => void;
+		};
+		break;
+	};
+	assert(found, "mytype should be offered");
+};
+
+@test fn completion_same_module_inserts_bare_name() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+
+	// Sibling file in the SAME module as the open document.
+	const provider = strings::toutf8("export fn sibfunc() void = void;\n");
+	analysis::index_file(&s.workspace_index, "/repo/proj/sibling.ha", provider);
+
+	// Open doc lives in /repo/proj too, so `sibfunc` is reachable
+	// unqualified - the insert must stay a bare call.
+	comp_open(&s, "file:///repo/proj/main.ha", "fn main() void = sib\\n");
+
+	const params =
+		`{"textDocument":{"uri":"file:///repo/proj/main.ha"},"position":{"line":0,"character":20}}`;
+	let pv = json::loadstr(params)!;
+	defer json::finish(pv);
+	const r = lsp::request {
+		id = 75.0,
+		method = strings::dup("textDocument/completion")!,
+		params = pv,
+	};
+	defer free(r.method);
+	handle_completion(&s, r);
+
+	const v = comp_skip_to_response(out, 75.0);
+	defer json::finish(v);
+	const result =
+		*(json::get(&(v as json::object),
+			"result") as *json::value) as json::object;
+	const items = *(json::get(&result, "items") as *json::value) as []json::value;
+	let found = false;
+	for (let i = 0z; i < len(items); i += 1) {
+		const item = items[i] as json::object;
+		const label = *(json::get(&item, "label") as *json::value) as str;
+		if (label != "sibfunc") continue;
+		found = true;
+		const it_text = *(json::get(&item, "insertText") as *json::value) as str;
+		assert(
+			strings::hasprefix(it_text, "sibfunc("),
+			"same-module function completion must insert a bare call"
+		);
+		assert(
+			!strings::contains(it_text, "::"),
+			"same-module completion must not qualify the inserted name"
+		);
+		// And no `use` edit: importing your own module is an error.
+		match (json::get(&item, "additionalTextEdits")) {
+		case *json::value => abort(
+			"same-module completion must not attach a `use <own-module>;` edit"
+		);
+		case => void;
+		};
+		break;
+	};
+	assert(found, "sibfunc should be offered");
+};
+
 @test fn completion_module_name_suggests_stdlib_module() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);

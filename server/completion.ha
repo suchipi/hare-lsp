@@ -634,6 +634,15 @@ fn add_workspace_symbols(
 	// per-entry whether to attach an auto-import edit.
 	const imported = doc_imported_modules(doc);
 	defer analysis::free_str_slice(imported);
+	// The current file's module: a symbol from a sibling file in the same
+	// module is reachable unqualified, so its inserted text stays a bare
+	// name; a symbol from any other module must insert module-qualified
+	// (`mod::name`) so it resolves after the auto-`use` - see
+	// [[attach_qualified_insert]].
+	const doc_path = uri_to_path(doc.uri);
+	defer free(doc_path);
+	const file_module = analysis::module_from_path(doc_path);
+	defer free(file_module);
 	let added = 0z;
 	for (let i = 0z; i < cap && added < 200z; i += 1) {
 		const e = &s.workspace_index.entries[i];
@@ -650,10 +659,18 @@ fn add_workspace_symbols(
 		const sort = strings::concat(SORT_WORKSPACE, e.short_name)!;
 		defer free(sort);
 		json::set(&item, "sortText", sort: json::value)!;
-		if (e.kind == analysis::symbol_kind::FUNCTION) {
+		if (len(e.module) > 0 && e.module != file_module) {
+			const qname = strings::concat(e.module, "::", e.short_name)!;
+			defer free(qname);
+			attach_qualified_insert(&item, e.kind, qname, e.param_names);
+			// Cross-module: offer the companion `use` edit (a no-op if
+			// the module is already imported). Same-module siblings are
+			// reachable unqualified, so they get neither qualification
+			// nor an import - importing your own module is an error.
+			attach_auto_import(s, doc, &item, e.module, imported);
+		} else if (e.kind == analysis::symbol_kind::FUNCTION) {
 			attach_function_snippet(&item, e.short_name, e.param_names);
 		};
-		attach_auto_import(s, doc, &item, e.module, imported);
 		attach_resolve_data(&item, RESOLVE_SRC_WORKSPACE, e.uri, e.short_name);
 		append(a, item: json::value)!;
 		added += 1;
@@ -715,9 +732,14 @@ fn add_stdlib_symbols(
 		const sort = strings::concat(SORT_STDLIB, e.short_name)!;
 		defer free(sort);
 		json::set(&item, "sortText", sort: json::value)!;
-		if (e.kind == analysis::symbol_kind::FUNCTION) {
-			attach_function_snippet(&item, e.short_name, e.param_names);
-		};
+		// Stdlib symbols always live outside the user's module, so the
+		// accepted text is module-qualified (`json::loadstr`). The leaf
+		// is the form Hare references the module by - see
+		// [[attach_qualified_insert]].
+		const qname =
+			strings::concat(module_leaf_name(qualified), "::", e.short_name)!;
+		defer free(qname);
+		attach_qualified_insert(&item, e.kind, qname, e.param_names);
 		attach_auto_import(s, doc, &item, qualified, imported);
 		attach_resolve_data(&item, RESOLVE_SRC_WORKSPACE, e.uri, e.short_name);
 		append(a, item: json::value)!;
@@ -1745,6 +1767,36 @@ fn fmt_size_local_comp(n: size) str = {
 		buf[i] = '0': u8 + (v % 10): u8;
 	};
 	return strings::dup(strings::fromutf8(buf[i..])!)!;
+};
+
+// Sets the text a completion item inserts when accepted. Functions get
+// the parameter-placeholder snippet from [[attach_function_snippet]];
+// every other kind inserts the plain identifier `insert_name`.
+//
+// `insert_name` is the exact text to insert. For a cross-module symbol
+// surfaced in a PLAIN (unqualified) position it is the module-qualified
+// form `leaf::name`: Hare references an imported module by its leaf
+// segment, so accepting `readall` in a file without `use io;` must
+// produce `io::readall(in, buf)`, not a bare `readall(in, buf)` that
+// wouldn't resolve even after the companion `use io;` edit is applied.
+// The bare label stays the item's filterText so the client still matches
+// it against what the user typed.
+//
+// @param item: borrowed
+// @param insert_name: borrowed
+// @param param_names: borrowed
+fn attach_qualified_insert(
+	item: *json::object,
+	kind: analysis::symbol_kind,
+	insert_name: str,
+	param_names: []str,
+) void = {
+	if (kind == analysis::symbol_kind::FUNCTION) {
+		attach_function_snippet(item, insert_name, param_names);
+	} else {
+		// json::set duplicates the string, so the borrowed view is fine.
+		json::set(item, "insertText", insert_name: json::value)!;
+	};
 };
 
 fn symbol_kind_to_completion(k: analysis::symbol_kind) f64 = {
