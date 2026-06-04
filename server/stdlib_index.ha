@@ -131,12 +131,9 @@ fn module_subpath(module: str) str = {
 // Returns the fully-qualified module name (e.g. "encoding::json", "os")
 // for a file located under one of the stdlib OR third-party search roots.
 // Both trees share [[stdlib_search_paths]], so the helper handles them
-// uniformly: prefix-matches `path` against each search root and joins the
-// remaining directory segments with `::`, peeling +tag/-tag dirs that
-// Hare treats as part of the parent module.
-//
-// Falls back to [[analysis::module_from_path]] (the leaf-directory name)
-// when no search root matches. Caller frees.
+// uniformly. Delegates root matching to [[qualified_module_under_roots]]
+// and falls back to [[analysis::module_from_path]] (the leaf-directory
+// name) when no search root contains the file. Caller frees.
 //
 // @param s: borrowed
 // @param path: borrowed
@@ -147,31 +144,56 @@ export fn stdlib_qualified_module(s: *server, path: str) str = {
 		for (let i = 0z; i < len(roots); i += 1) free(roots[i]);
 		free(roots);
 	};
+	match (qualified_module_under_roots(roots, path)) {
+	case let m: str =>
+		return m;
+	case void =>
+		return analysis::module_from_path(path);
+	};
+};
+
+// Returns the fully-qualified Hare module name for `path` relative to
+// whichever of `roots` contains it. The longest matching root wins, so
+// nested roots resolve `path` to its most specific enclosing module. The
+// module is the file's directory under that root with "/" turned into
+// "::" and +tag / -tag directories peeled (Hare treats them as part of
+// the parent module). Returns "" when the file sits directly at a root
+// (no enclosing module), or void when no root contains it so callers can
+// fall back.
+//
+// A path-component boundary is required, so a root "/foo" does not absorb
+// "/foobar/x.ha" even though the literal prefix matches.
+//
+// @param roots: borrowed
+// @param path: borrowed
+// @returns: owned
+fn qualified_module_under_roots(roots: []str, path: str) (str | void) = {
+	let found = false;
+	let best_len = 0z;
 	for (let i = 0z; i < len(roots); i += 1) {
 		const root = roots[i];
 		if (len(root) == 0) continue;
 		if (!strings::hasprefix(path, root)) continue;
-		let rel = strings::sub(path, len(root), strings::end);
-		// Require a path-component boundary. Without this, a root
-		// "/foo" would silently absorb "/foo-bar/x.ha" (since both
-		// share the literal "/foo" prefix) and produce a bogus
-		// module name like "-bar::...". The default install layouts
-		// don't overlap, but a custom HAREPATH may.
-		if (len(rel) > 0 && !strings::hasprefix(rel, "/")) continue;
-		if (strings::hasprefix(rel, "/")) {
-			rel = strings::sub(rel, 1, strings::end);
+		const rest = strings::sub(path, len(root), strings::end);
+		if (len(rest) > 0 && !strings::hasprefix(rest, "/")) continue;
+		if (!found || len(root) > best_len) {
+			found = true;
+			best_len = len(root);
 		};
-		// Strip the filename — keep only the directory portion.
-		const dir = match (strings::rindex(rel, '/')) {
-		case let idx: size =>
-			yield strings::sub(rel, 0, idx);
-		case void =>
-			// File sits at the root: there's no enclosing module.
-			return strings::dup("")!;
-		};
-		return qualified_module_from_rel_dir(dir);
 	};
-	return analysis::module_from_path(path);
+	if (!found) return void;
+	let rel = strings::sub(path, best_len, strings::end);
+	if (strings::hasprefix(rel, "/")) {
+		rel = strings::sub(rel, 1, strings::end);
+	};
+	const dir = match (strings::rindex(rel, '/')) {
+	case let idx: size =>
+		yield strings::sub(rel, 0, idx);
+	case void =>
+		// File sits directly at the root: there's no enclosing module.
+		return strings::dup("")!;
+	};
+	return qualified_module_from_rel_dir(dir);
 };
 
 // Joins a relative-from-stdlib-root directory like "encoding/json" or
