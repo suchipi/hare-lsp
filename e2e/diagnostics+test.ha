@@ -404,6 +404,195 @@ use strings;
 	);
 };
 
+// Regression (same-file, push path): a build error in the file being
+// edited must clear from the push channel once the user fixes it and
+// saves again. Uses the reported reproduction - `fmt::println("yeah");`
+// emits "Cannot ignore error here", adding `!` fixes it - with the error
+// and fix in the SAME file (unlike e2e_didsave_clears_stale_diagnostics_-
+// for_sibling, which exercises a sibling). This covers the
+// publishDiagnostics wire path only; the client-side pull-collection
+// staleness that the report was actually about is covered by the VSCode
+// e2e suite (it needs a real vscode-languageclient) and, on the server
+// side, by e2e_didsave_requests_diagnostic_refresh_for_pull_clients.
+@test fn e2e_didsave_clears_same_file_build_error_after_fix() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-didsave-samefile-clear")!;
+	defer free(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
+
+	match (os::mkdirs(root, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
+	};
+	const main_path = strings::concat(root, "/main.ha")!;
+	defer free(main_path);
+	const broken =
+		"use fmt;\n\nexport fn main() void = {\n\tfmt::println(\"yeah\");\n};\n";
+	const fixed =
+		"use fmt;\n\nexport fn main() void = {\n\tfmt::println(\"yeah\")!;\n};\n";
+	write_test_file(main_path, broken);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init_with_workspace(&s, root);
+	drain_until_indexed_ref(&s);
+
+	const main_uri = strings::concat("file://", main_path)!;
+	defer free(main_uri);
+	open_doc(&s, main_uri, broken);
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	const save_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"`,
+			main_uri, `"}}}`)!;
+	defer free(save_msg);
+
+	// First save: the unhandled error must surface as a build diagnostic.
+	send(&s, strings::toutf8(save_msg));
+	const first = wait_for_publish_diagnostics(&s, main_uri);
+	defer free(first);
+	const (first_root, first_diags) = parse_publish_diagnostics(first);
+	defer json::finish(first_root);
+	let saw_ignore = false;
+	for (let i = 0z; i < len(first_diags); i += 1) {
+		const d = first_diags[i] as json::object;
+		const dmsg = *(json::get(&d, "message") as *json::value) as str;
+		if (strings::contains(dmsg, "Cannot ignore error")) {
+			saw_ignore = true;
+			break;
+		};
+	};
+	assert(
+		saw_ignore,
+		"first didSave must publish the `Cannot ignore error here` build diagnostic"
+	);
+
+	// Fix the file on disk and in the buffer, then save again. The pass
+	// must publish an empty diagnostics list for main.ha.
+	write_test_file(main_path, fixed);
+	const change_msg = build_did_change_full(main_uri, 2, fixed);
+	defer free(change_msg);
+	send(&s, strings::toutf8(change_msg));
+	send(&s, strings::toutf8(save_msg));
+
+	const second = wait_for_publish_diagnostics(&s, main_uri);
+	defer free(second);
+	const (second_root, second_diags) = parse_publish_diagnostics(second);
+	defer json::finish(second_root);
+	assert(
+		len(second_diags) == 0,
+		"second didSave must publish empty diagnostics once the error is fixed"
+	);
+};
+
+// Regression for the reported VSCode bug: a build error fixed in the
+// editor and saved kept lingering. Root cause is client-side - VSCode
+// pulls diagnostics on didChange (against the pre-save, still-broken
+// disk) but not on didSave, and renders its pull-diagnostic collection
+// unioned with the push one; after the save fixed the disk nothing
+// re-pulled, so the stale pull entry stuck. The server-side fix asks
+// pull-capable clients to re-pull after a save-triggered build. This
+// asserts that wiring: a save (build diagnostics on by default, client
+// advertising refreshSupport) must yield a workspace/diagnostic/refresh.
+// No workspace folder is used so the indexing-triggered refresh can't
+// race the save-triggered one we're looking for.
+@test fn e2e_didsave_requests_diagnostic_refresh_for_pull_clients() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-didsave-refresh-wiring")!;
+	defer free(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
+
+	match (os::mkdirs(root, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
+	};
+	const main_path = strings::concat(root, "/main.ha")!;
+	defer free(main_path);
+	const body = "export fn f() void = void;\n";
+	write_test_file(main_path, body);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init_refresh_support(&s);
+
+	const main_uri = strings::concat("file://", main_path)!;
+	defer free(main_uri);
+	open_doc(&s, main_uri, body);
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	const save_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"`,
+			main_uri, `"}}}`)!;
+	defer free(save_msg);
+	send(&s, strings::toutf8(save_msg));
+
+	free(wait_for_server_method(&s, "workspace/diagnostic/refresh"));
+};
+
+// Companion: a push-only client (no workspace.diagnostics.refreshSupport)
+// must NOT receive a workspace/diagnostic/refresh on save - it can't
+// handle one, and answering every save with a MethodNotFound error would
+// spam the log. The next publishDiagnostics standing in for "the server
+// moved on without sending a refresh first".
+@test fn e2e_didsave_no_refresh_for_push_only_clients() void = {
+	const cwd = os::getcwd();
+	const root = strings::concat(cwd, "/.tmp/e2e-didsave-no-refresh")!;
+	defer free(root);
+	cleanup_workspace(root);
+	defer cleanup_workspace(root);
+
+	match (os::mkdirs(root, 0o755: fs::mode)) {
+	case void => void;
+	case let e: fs::error =>
+		fmt::fatalf("e2e: cannot mkdir {}: {}", root, fs::strerror(e));
+	};
+	const main_path = strings::concat(root, "/main.ha")!;
+	defer free(main_path);
+	const body = "export fn f() void = void;\n";
+	write_test_file(main_path, body);
+
+	let s = spawn_session();
+	defer finish_session(&s);
+	// do_init advertises empty capabilities (no refreshSupport).
+	do_init(&s);
+
+	const main_uri = strings::concat("file://", main_path)!;
+	defer free(main_uri);
+	open_doc(&s, main_uri, body);
+	free(wait_for_publish_diagnostics(&s, main_uri));
+
+	const save_msg =
+		strings::concat(
+			`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"`,
+			main_uri, `"}}}`)!;
+	defer free(save_msg);
+	send(&s, strings::toutf8(save_msg));
+
+	// The save republishes diagnostics for main.ha. Drain frames until
+	// that publish; none of them may be a diagnostic refresh.
+	for (let i = 0z; i < 50z; i += 1) {
+		const frame = recv(&s);
+		const text = strings::fromutf8(frame)!;
+		assert(
+			!strings::contains(text, "workspace/diagnostic/refresh"),
+			"push-only client must not receive a diagnostic refresh on save"
+		);
+		const is_publish =
+			strings::contains(text, `"method":"textDocument/publishDiagnostics"`)
+			&& strings::contains(text, main_uri);
+		free(frame);
+		if (is_publish) return;
+	};
+	fmt::fatalf("e2e: never received the save's publishDiagnostics for {}",
+		main_uri);
+};
+
 // Regression: the didSave dep-build path uses `hare build -t o` to type-
 // check modules. Without `-o /dev/null`, hare drops `<module>.o` into the
 // child's cwd (the workspace folder), littering the user's repo. Verifies

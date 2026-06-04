@@ -578,6 +578,20 @@ export fn handle_did_save(s: *server, n: lsp::notification) void = {
 	// Save bypasses the debounce: we want fresh diagnostics now.
 	refresh_diagnostics_with_build(s, doc);
 	doc.diagnostics_pending = false;
+
+	// Build diagnostics come from `hare build`, which reads the file
+	// from disk. Pull-model clients (e.g. VSCode) pull on didChange but
+	// not on didSave by default, so by now their last pull ran against
+	// the pre-save (stale) disk and their pull-diagnostic collection is
+	// out of date - a build error fixed in the editor and saved would
+	// otherwise linger forever. The push above only updates the client's
+	// separate push collection, which VSCode shows unioned with the pull
+	// one. Ask such clients to re-pull so the build result they see
+	// matches what's now on disk. Push-only clients are filtered out
+	// inside request_diagnostic_refresh.
+	if (s.config.enable_build_diagnostics) {
+		request_diagnostic_refresh(s);
+	};
 };
 
 // Handles textDocument/willSave (notification). LSP allows the client to

@@ -119,6 +119,21 @@ function writeFixtures(workspaceDir: string): void {
       "export fn caller() int = old_name() + old_name();",
       "",
     ].join("\n"),
+    // In its own module dir so `hare build` sees only this file (the
+    // loose root fixtures would otherwise collide as one module). Parse-
+    // clean but type-broken: the println error isn't handled, so
+    // `hare build` reports "Cannot ignore error here". The build-
+    // diagnostics spec opens this, then fixes it with `!` to prove the
+    // diagnostic clears. enableBuild is off in the shared workspace
+    // settings, so that spec turns it on for itself and restores it.
+    "buildfix/main.ha": [
+      "use fmt;",
+      "",
+      "export fn main() void = {",
+      "\tfmt::println(\"yeah\");",
+      "};",
+      "",
+    ].join("\n"),
   };
   for (const [rel, contents] of Object.entries(files)) {
     const full = path.join(workspaceDir, rel);
