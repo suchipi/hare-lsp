@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 
+use analysis;
 use encoding::json;
+use fs;
 use lsp;
 use memio;
+use os;
 use strings;
 
 // Unit tests for handle_inlay_hint. The e2e tests in
@@ -304,4 +307,89 @@ fn count_param_hints(arr: []json::value) size = {
 		if (label == "name:" && line == 1.0 && ch == 26.0) saw_name = true;
 	};
 	assert(saw_name, "real call must emit a `name:` hint at the arg position");
+};
+
+// Regression: the inferred-type inlay hint must unwrap a type alias that
+// lives in the file's OWN module, including when that module is a stdlib
+// module whose sibling-file decls live in stdlib_index. Before the fix
+// resolve_alias_once used a module-blind, workspace-only search: it could
+// not see the own-module alias (so the hint stopped at the alias name)
+// and, when another module exported the same name, could unwrap the wrong
+// one. Exercises follow_alias_chain -> resolve_alias_once.
+@test fn inlay_hints_unwrap_alias_in_own_stdlib_module() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+	// Alias-following needs at least two hops: make() -> myalias, then
+	// myalias -> int.
+	s.config.inlay_hints_inferred_types_max_depth = 3;
+
+	const cwd = strings::dup(os::getcwd())!;
+	defer free(cwd);
+	const root = strings::concat(cwd, "/.tmp/hare-lsp-ih-ownmod")!;
+	defer free(root);
+	const io_dir = strings::concat(root, "/io")!;
+	defer free(io_dir);
+	const ecdsa_dir = strings::concat(root, "/crypto/ecdsa")!;
+	defer free(ecdsa_dir);
+	match (os::mkdirs(io_dir, 0o755: fs::mode)) {
+	case void => void;
+	case fs::error => abort("mkdirs io failed");
+	};
+	match (os::mkdirs(ecdsa_dir, 0o755: fs::mode)) {
+	case void => void;
+	case fs::error => abort("mkdirs ecdsa failed");
+	};
+	defer match (os::rmdirall(root)) {
+	case => void;
+	};
+
+	// io sibling file declares the alias (underlying int) and a function
+	// returning it.
+	const io_sib = strings::concat(io_dir, "/sib.ha")!;
+	defer free(io_sib);
+	nav_write(io_sib,
+		"export type myalias = int;\nexport fn make() myalias = 0;\n")!;
+	// Decoy module exporting the SAME type name with a different
+	// underlying, seeded into stdlib_index first so a module-blind search
+	// would be tempted to unwrap it to `str`.
+	const ecdsa_alias = strings::concat(ecdsa_dir, "/alias.ha")!;
+	defer free(ecdsa_alias);
+	nav_write(ecdsa_alias, "export type myalias = str;\n")!;
+
+	free(s.config.harepath);
+	s.config.harepath = strings::dup(root)!;
+	assert(
+		analysis::read_and_index_file(&s.stdlib_index, ecdsa_alias),
+		"seeding crypto::ecdsa::myalias must succeed"
+	);
+
+	// Open io/util.ha with a bare same-module call whose result is the
+	// alias; the hint must unwrap through io's myalias to int.
+	const util_uri = strings::concat("file://", io_dir, "/util.ha")!;
+	defer free(util_uri);
+	nav_open(&s, util_uri, "def x = make();");
+
+	const arr = run_inlay_hints(&s, util_uri, 4100.0);
+	defer finish_hint_arr(arr);
+	let found = false;
+	for (let i = 0z; i < len(arr); i += 1) {
+		const it = arr[i] as json::object;
+		const kind = *(json::get(&it, "kind") as *json::value) as f64;
+		if (kind != 1.0) continue;
+		const label = *(json::get(&it, "label") as *json::value) as str;
+		found = true;
+		assert(
+			strings::contains(label, "int"),
+			"hint must unwrap io::myalias to its underlying int"
+		);
+		assert(
+			!strings::contains(label, "str"),
+			"hint must not unwrap the decoy crypto::ecdsa::myalias (str)"
+		);
+		assert(
+			!strings::contains(label, "myalias"),
+			"hint must follow the alias, not stop at its name"
+		);
+	};
+	assert(found, "a type-kind inlay hint must be emitted for def x = make()");
 };

@@ -21,6 +21,7 @@ use analysis;
 use hare::ast;
 use hare::unparse;
 use io;
+use lsp;
 use memio;
 use strings;
 
@@ -47,23 +48,29 @@ export fn infer_let_type_deep(
 		return void;
 	};
 	if (max_depth <= 1) return first;
-	return follow_alias_chain(s, first, max_depth - 1);
+	return follow_alias_chain(s, doc, first, max_depth - 1);
 };
 
 // Given a type label (e.g. "result"), tries to unwrap it as an alias up
 // to `budget` more times. Stops as soon as the current label doesn't
-// match a workspace TYPE entry or its underlying isn't easily rendered.
+// match a TYPE entry or its underlying isn't easily rendered.
 // `current` is consumed; the returned string is freshly allocated.
 //
 // @param s: borrowed
+// @param doc: borrowed
 // @param current: owned
-fn follow_alias_chain(s: *server, current: str, budget: u32) str = {
+fn follow_alias_chain(
+	s: *server,
+	doc: *document,
+	current: str,
+	budget: u32,
+) str = {
 	let label = current;
 	let visited: []str = [];
 	defer analysis::free_str_slice(visited);
 	append(visited, strings::dup(label)!)!;
 	for (let hops: u32 = 0; hops < budget; hops += 1) {
-		const next = match (resolve_alias_once(s, label)) {
+		const next = match (resolve_alias_once(s, doc, label)) {
 		case let s: str =>
 			yield s;
 		case void =>
@@ -80,22 +87,35 @@ fn follow_alias_chain(s: *server, current: str, budget: u32) str = {
 	return label;
 };
 
-// Looks up `name` as a TYPE entry in the workspace and renders its
-// underlying type. Returns void when the name doesn't resolve, isn't a
-// TYPE, doesn't have an underlying, or the underlying can't be
-// rendered.
+// Looks up `name` as a TYPE entry and renders its underlying type. The
+// name is resolved against the file's own module first (workspace, then
+// stdlib for own-module siblings of stdlib/third-party files), then a
+// module-blind workspace search as a fallback — the same own-module-first
+// ordering the other bare-name resolvers use. Returns void when the name
+// doesn't resolve, isn't a TYPE, doesn't have an underlying, or the
+// underlying can't be rendered.
 //
 // @param s: borrowed
+// @param doc: borrowed
 // @param name: borrowed
-fn resolve_alias_once(s: *server, name: str) (str | void) = {
-	const entry = match (analysis::find_first_by_short_name(&s.workspace_index,
-		name)) {
+fn resolve_alias_once(s: *server, doc: *document, name: str) (str | void) = {
+	const doc_path = lsp::uri_decode_path(doc.uri);
+	defer free(doc_path);
+	const file_module = analysis::module_from_path(doc_path);
+	defer free(file_module);
+	const found = match (lookup_own_module(s, doc_path, file_module, name)) {
 	case let e: *analysis::workspace_entry =>
-		if (e.kind != analysis::symbol_kind::TYPE) return void;
+		yield e;
+	case void =>
+		yield analysis::find_first_by_short_name(&s.workspace_index, name);
+	};
+	const entry = match (found) {
+	case let e: *analysis::workspace_entry =>
 		yield e;
 	case void =>
 		return void;
 	};
+	if (entry.kind != analysis::symbol_kind::TYPE) return void;
 	const fpe = match (cached_parse_or_drop_stale(s, entry.path)) {
 	case let p: *file_parse_entry =>
 		yield p;
