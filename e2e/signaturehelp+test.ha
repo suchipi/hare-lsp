@@ -225,6 +225,91 @@ export fn main() void = {
 	);
 };
 
+// The originally-reported bug: typing `io::readall(` showed no parameter
+// info. signatureHelp consulted only the open file and the workspace index,
+// never the stdlib index, so qualified stdlib calls came back null. This
+// drives the real spawned binary against the real stdlib on HAREPATH,
+// lazily indexing the `io` module on first use, and asserts a populated
+// SignatureInformation.
+@test fn e2e_signature_help_resolves_stdlib_call() void = {
+	let s = spawn_session();
+	defer finish_session(&s);
+	do_init(&s);
+
+	const sample =
+		"use io;\n"
+		"export fn main() void = {\n"
+		"\tio::readall();\n"
+		"};\n";
+	open_doc(&s, "file:///sh_stdlib.ha", sample);
+
+	// Cursor just inside `io::readall(` on line 2:
+	//   "\tio::readall(" = tab + "io::readall(" (12 chars) = char 13.
+	const req =
+		`{"jsonrpc":"2.0","id":1920,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///sh_stdlib.ha"},"position":{"line":2,"character":13}}}`;
+	send(&s, strings::toutf8(req));
+
+	const body = wait_for_response(&s, 1920.0);
+	defer free(body);
+	const text = strings::fromutf8(body)!;
+	let v = json::loadstr(text)!;
+	defer json::finish(v);
+	const obj = v as json::object;
+	const result = match (json::get(&obj, "result")) {
+	case let p: *json::value =>
+		yield *p;
+	case void =>
+		fmt::fatalf("e2e: stdlib signatureHelp missing result: {}", text);
+	};
+	const result_obj = match (result) {
+	case let o: json::object =>
+		yield o;
+	case =>
+		fmt::fatalf(
+			"e2e: stdlib signatureHelp returned null -- stdlib resolution regressed. body={}",
+			text);
+	};
+	const sigs =
+		*(json::get(&result_obj, "signatures") as *json::value) as []json::value;
+	if (len(sigs) != 1) {
+		fmt::fatalf(
+			"e2e: stdlib signatureHelp returned {} signatures; expected 1. body={}",
+			len(sigs), text);
+	};
+	const sig = sigs[0] as json::object;
+	const label = *(json::get(&sig, "label") as *json::value) as str;
+	assert(
+		strings::contains(label, "readall"),
+		"stdlib signature label should name the resolved function"
+	);
+	const params =
+		*(json::get(&sig, "parameters") as *json::value) as []json::value;
+	if (len(params) != 2) {
+		fmt::fatalf("e2e: io::readall should have 2 parameters; got {}. body={}",
+			len(params), text);
+	};
+	const p0 = params[0] as json::object;
+	const p0_label = *(json::get(&p0, "label") as *json::value) as str;
+	assert(
+		p0_label == "in: handle",
+		"stdlib parameter[0] label should be `in: handle`"
+	);
+	assert(
+		strings::contains(label, p0_label),
+		"parameter[0] label must be a substring of the signature label"
+	);
+	const p1 = params[1] as json::object;
+	const p1_label = *(json::get(&p1, "label") as *json::value) as str;
+	assert(
+		p1_label == "buf: []u8",
+		"stdlib parameter[1] label should be `buf: []u8`"
+	);
+	assert(
+		strings::contains(label, p1_label),
+		"parameter[1] label must be a substring of the signature label"
+	);
+};
+
 @test fn e2e_signature_help_outside_call_returns_null() void = {
 	let s = spawn_session();
 	defer finish_session(&s);
