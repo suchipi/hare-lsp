@@ -141,6 +141,19 @@ fn resolve_ref(s: *server, doc: *document, ref: str) (ref_target | void) = {
 			return target_for_local(s, doc, p);
 		case void => void;
 		};
+		// A bare `[[name]]` reference resolves only against the local
+		// file or the file's own module; resolve the file's own module —
+		// including the stdlib index when the open file is itself part of
+		// a stdlib module — before the import and last-resort fallbacks.
+		const doc_path = lsp::uri_decode_path(doc.uri);
+		defer free(doc_path);
+		const file_module = analysis::module_from_path(doc_path);
+		defer free(file_module);
+		match (lookup_own_module(s, doc_path, file_module, name)) {
+		case let e: *analysis::workspace_entry =>
+			return target_for_entry(s, e);
+		case void => void;
+		};
 		const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
 		defer analysis::free_str_slice(imports);
 		match (analysis::find_in_imports(&s.workspace_index, imports, name)) {

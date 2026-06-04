@@ -956,10 +956,48 @@ fn attr_at(data: []u8, off: size) ((size, size) | void) = {
 	};
 };
 
+// Resolves a bare (unqualified) name against the file's OWN module: first
+// in the workspace index, then in the stdlib/third-party index, indexing
+// that module on first use. In Hare a bare reference can only name a local
+// or same-module symbol (cross-module references must be qualified), so
+// this is the correct lookup for a name with no `::` qualifier and must run
+// before any import-based or module-blind fallback. The stdlib index is
+// consulted (not just for qualified references) because the open file may
+// itself belong to a stdlib/third-party module, whose sibling-file symbols
+// live there rather than in workspace_index — e.g. editing io/util.ha,
+// whose bare `error` is the io::error declared in io/types.ha. Keyed on the
+// leaf module name find_in_module matches, but indexed via the
+// fully-qualified path. Returns void when the file has no module or the
+// name isn't declared in it.
+//
+// @param s: borrowed
+// @param doc_path: borrowed
+// @param file_module: borrowed
+// @param name: borrowed
+fn lookup_own_module(
+	s: *server,
+	doc_path: str,
+	file_module: str,
+	name: str,
+) (*analysis::workspace_entry | void) = {
+	if (len(file_module) == 0) return void;
+	match (analysis::find_in_module(&s.workspace_index, file_module, name)) {
+	case let e: *analysis::workspace_entry =>
+		return e;
+	case void => void;
+	};
+	const qualified = stdlib_qualified_module(s, doc_path);
+	defer free(qualified);
+	if (ensure_stdlib_module_indexed(s, qualified)) {
+		return analysis::find_in_module(&s.stdlib_index, file_module, name);
+	};
+	return void;
+};
+
 // Module-aware workspace lookup. Tries in priority order:
 //   1. Qualifier present  -> workspace, then stdlib (lazily indexing)
-//   2. Bare: file's imports against workspace, then stdlib
-//   3. Last-resort: any match in workspace, then stdlib
+//   2. Bare: file's own module (workspace, then stdlib via
+//      [[lookup_own_module]]), then the file's imports, then last-resort.
 //
 // The workspace-only resolution is delegated to
 // `analysis::workspace_lookup_for_subunit`; stdlib resolution layers on
@@ -1012,13 +1050,10 @@ fn workspace_lookup_aware(
 	// Bare name: try the file's own module first (a same-module
 	// reference is the most common case), then rank by the open file's
 	// imports.
-	if (len(file_module) > 0) {
-		match (analysis::find_in_module(&s.workspace_index, file_module,
-			ident_str)) {
-		case let e: *analysis::workspace_entry =>
-			return e;
-		case void => void;
-		};
+	match (lookup_own_module(s, doc_path, file_module, ident_str)) {
+	case let e: *analysis::workspace_entry =>
+		return e;
+	case void => void;
 	};
 	const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
 	defer analysis::free_str_slice(imports);
@@ -2469,6 +2504,20 @@ fn lookup_callee(
 		};
 		return void;
 	};
+	// Bare callee: in Hare an unqualified name resolves only against the
+	// local file or the file's own module (cross-module calls must be
+	// qualified), so resolve the file's own module — including the stdlib
+	// index when the open file is itself part of a stdlib module — before
+	// the import and last-resort fallbacks.
+	const doc_path = lsp::uri_decode_path(doc.uri);
+	defer free(doc_path);
+	const file_module = analysis::module_from_path(doc_path);
+	defer free(file_module);
+	match (lookup_own_module(srv, doc_path, file_module, name)) {
+	case let e: *analysis::workspace_entry =>
+		return e;
+	case void => void;
+	};
 	const cache = parse_of(doc);
 	const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
 	defer analysis::free_str_slice(imports);
@@ -2705,6 +2754,19 @@ fn lookup_decl_by_ident(
 	match (find_decl_by_name(&cache.pr.subunit, name)) {
 	case let i: size =>
 		return &cache.pr.subunit.decls[i];
+	case void => void;
+	};
+	// Sibling-file decl in the file's own module — including the stdlib
+	// index when the open file is itself part of a stdlib module — before
+	// the import and last-resort fallbacks. A bare reference can only name
+	// a local or same-module symbol.
+	const doc_path = lsp::uri_decode_path(doc.uri);
+	defer free(doc_path);
+	const file_module = analysis::module_from_path(doc_path);
+	defer free(file_module);
+	match (lookup_own_module(srv, doc_path, file_module, name)) {
+	case let e: *analysis::workspace_entry =>
+		return decl_from_workspace_entry(srv, e, name);
 	case void => void;
 	};
 	const imports = analysis::collect_imported_module_names(&cache.pr.subunit);
