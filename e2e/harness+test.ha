@@ -647,6 +647,53 @@ fn wait_for_server_method(s: *session, method: str) []u8 = {
 	fmt::fatalf("e2e: never received a server message with method {}", method);
 };
 
+// Drains frames until the response to request `id` arrives, asserting
+// that no frame seen on the way carries the JSON-RPC method `forbidden`.
+// The server is single-threaded and fully handles each earlier message -
+// including any server-initiated request it spawns - before replying to
+// a later one, so the response is a deterministic barrier: by the time
+// it arrives, everything the server emitted while handling the prior
+// message has already been read. Frees every frame it reads.
+fn drain_to_response_forbidding(s: *session, id: f64, forbidden: str) void = {
+	const needle = strings::concat(`"method":"`, forbidden, `"`)!;
+	defer free(needle);
+	for (let i = 0z; i < 50z; i += 1) {
+		const body = recv(s);
+		const text = strings::fromutf8(body)!;
+		const has_forbidden = strings::contains(text, needle);
+		let v = json::loadstr(text)!;
+		const is_response = match (v) {
+		case let obj: json::object =>
+			yield match (json::get(&obj, "method")) {
+			case *json::value =>
+				yield false;
+			case void =>
+				yield match (json::get(&obj, "id")) {
+				case let p: *json::value =>
+					yield match (*p) {
+					case let n: f64 =>
+						yield n == id;
+					case =>
+						yield false;
+					};
+				case void =>
+					yield false;
+				};
+			};
+		case =>
+			yield false;
+		};
+		json::finish(v);
+		free(body);
+		assert(
+			!has_forbidden,
+			"server sent a forbidden server-initiated request before the barrier response"
+		);
+		if (is_response) return;
+	};
+	fmt::fatalf("e2e: barrier response for id {} never arrived", id);
+};
+
 fn parse_publish_diagnostics(body: []u8) (json::value, []json::value) = {
 	const text = strings::fromutf8(body)!;
 	let v = json::loadstr(text)!;

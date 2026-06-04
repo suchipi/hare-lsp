@@ -536,10 +536,14 @@ use strings;
 };
 
 // Companion: a push-only client (no workspace.diagnostics.refreshSupport)
-// must NOT receive a workspace/diagnostic/refresh on save - it can't
+// must NOT be sent a workspace/diagnostic/refresh on save - it can't
 // handle one, and answering every save with a MethodNotFound error would
-// spam the log. The next publishDiagnostics standing in for "the server
-// moved on without sending a refresh first".
+// spam the log. handle_did_save emits the save's publishDiagnostics
+// BEFORE it would (wrongly) request a refresh, so a drain that stops at
+// the publish would never reach the refresh and pass regardless of the
+// gate. Instead drain to a deterministic barrier - the response to a
+// follow-up request, which the single-threaded server only sends after
+// fully handling the didSave - while asserting no refresh appeared.
 @test fn e2e_didsave_no_refresh_for_push_only_clients() void = {
 	const cwd = os::getcwd();
 	const root = strings::concat(cwd, "/.tmp/e2e-didsave-no-refresh")!;
@@ -574,23 +578,18 @@ use strings;
 	defer free(save_msg);
 	send(&s, strings::toutf8(save_msg));
 
-	// The save republishes diagnostics for main.ha. Drain frames until
-	// that publish; none of them may be a diagnostic refresh.
-	for (let i = 0z; i < 50z; i += 1) {
-		const frame = recv(&s);
-		const text = strings::fromutf8(frame)!;
-		assert(
-			!strings::contains(text, "workspace/diagnostic/refresh"),
-			"push-only client must not receive a diagnostic refresh on save"
-		);
-		const is_publish =
-			strings::contains(text, `"method":"textDocument/publishDiagnostics"`)
-			&& strings::contains(text, main_uri);
-		free(frame);
-		if (is_publish) return;
-	};
-	fmt::fatalf("e2e: never received the save's publishDiagnostics for {}",
-		main_uri);
+	// Follow-up request used purely as an ordering barrier: its response
+	// can only arrive after the server has finished handling the didSave
+	// above (publish plus any refresh it would have sent).
+	const sym_params =
+		strings::concat(`{"textDocument":{"uri":"`, main_uri, `"}}`)!;
+	defer free(sym_params);
+	const sym_req = make_request("textDocument/documentSymbol", 9001.0,
+		sym_params);
+	defer free(sym_req);
+	send(&s, strings::toutf8(sym_req));
+
+	drain_to_response_forbidding(&s, 9001.0, "workspace/diagnostic/refresh");
 };
 
 // Regression: the didSave dep-build path uses `hare build -t o` to type-
