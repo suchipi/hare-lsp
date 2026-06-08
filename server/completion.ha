@@ -333,9 +333,9 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 	// access (not part of `..`, not part of a float literal, not
 	// preceded by whitespace). The byte before the dot must be one that
 	// can plausibly terminate an expression - see
-	// [[receiver_ends_before_dot]].
+	// [[analysis::receiver_ends_before_dot]].
 	if (s >= 1 && data[s - 1] == '.': u8 && s >= 2
-			&& receiver_ends_before_dot(data, s - 1)) {
+			&& analysis::receiver_ends_before_dot(data, s - 1)) {
 		return prefix_info {
 			kind = prefix_kind::MEMBER,
 			module = strings::dup("")!,
@@ -375,36 +375,6 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 		ident_end = e,
 		module_start = s,
 	};
-};
-
-// Returns true when the byte slice ending at `dot_off` (exclusive)
-// looks like an expression a member access could chain off, given that
-// `data[dot_off] == '.'`. We accept `)`, `]`, `!`, `?` (postfix
-// error-assert / propagate, as in `foo()!.field`), or a word ending in
-// any alphanumeric/underscore - but if the preceding word is all
-// digits we reject it, because `1.` is a float literal, not a member
-// access on `1`. Identifiers like `buf1` or `hash32` end in a digit
-// but still have non-digit characters earlier in the word, so they
-// pass.
-//
-// @param data: borrowed
-fn receiver_ends_before_dot(data: []u8, dot_off: size) bool = {
-	if (dot_off == 0) return false;
-	const b = data[dot_off - 1];
-	if (b == ')': u8) return true;
-	if (b == ']': u8) return true;
-	if (b == '!': u8) return true;
-	if (b == '?': u8) return true;
-	if (!analysis::is_ident_byte(b)) return false;
-	// Walk back over the word and check whether any byte is non-digit.
-	// Pure-digit prefix means this `.` belongs to a numeric literal.
-	let i = dot_off;
-	for (i > 0; i -= 1) {
-		const c = data[i - 1];
-		if (!analysis::is_ident_byte(c)) break;
-		if (c < '0': u8 || c > '9': u8) return true;
-	};
-	return false;
 };
 
 // sortText prefixes: clients rank lexicographically. We bias toward

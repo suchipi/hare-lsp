@@ -235,8 +235,9 @@ fn free_subunit(su: *ast::subunit) void = {
 //   - dots inside strings, runes, raw strings and comments are skipped via
 //     [[token_skip_noncode]];
 //   - `..` and `...` (slice ranges, variadic, struct spread) are left alone;
-//   - a dot must directly follow a receiver (identifier, `)` or `]`) - a dot
-//     after a digit is a float literal (`1.`), never a member access;
+//   - a dot must directly follow a receiver (see [[receiver_ends_before_dot]]:
+//     an identifier, `)`, `]`, or postfix `!`/`?`) - a dot after a pure-digit
+//     word is a float literal (`1.`), never a member access;
 //   - a dot followed (after whitespace/comments) by an identifier or digit
 //     is a complete `.field` / `.0` access and is left alone.
 //
@@ -266,10 +267,12 @@ fn repair_dangling_member_dots(text: []u8) ([]u8 | void) = {
 			i += 1;
 			continue;
 		};
-		// A member-access dot directly follows its receiver. A leading dot
-		// or one after a non-receiver byte (digit -> float literal,
-		// whitespace, operator) is not something we can safely blank.
-		if (i == 0 || !is_receiver_end_byte(text[i - 1])) {
+		// A member-access dot directly follows its receiver - an identifier
+		// (including ones ending in a digit, like `buf1`), `)`, `]`, or a
+		// postfix `!`/`?`. A leading dot, a dot after whitespace/operator,
+		// or one after a pure-digit word (the float literal `1.`) is not
+		// something we can safely blank.
+		if (!receiver_ends_before_dot(text, i)) {
 			i += 1;
 			continue;
 		};
@@ -307,16 +310,6 @@ fn repair_dangling_member_dots(text: []u8) ([]u8 | void) = {
 		return out;
 	};
 	return void;
-};
-
-// True for a byte that can be the last byte of a member-access receiver:
-// an ASCII letter, `_`, `)` or `]`. Digits are deliberately excluded so a
-// trailing dot on a number (`1.`, a float literal) is not mistaken for a
-// member access.
-fn is_receiver_end_byte(b: u8) bool = {
-	if (b >= 'a': u8 && b <= 'z': u8) return true;
-	if (b >= 'A': u8 && b <= 'Z': u8) return true;
-	return b == '_': u8 || b == ')': u8 || b == ']': u8;
 };
 
 fn is_space_byte(b: u8) bool = {

@@ -214,3 +214,71 @@ fn first_string_literal_value(su: *ast::subunit) str = {
 	};
 	return "";
 };
+
+// Direct coverage for the shared receiver classifier. A single-byte test
+// before the dot would wrongly reject identifiers ending in a digit and
+// postfix `!`/`?` receivers; the word-walk accepts them while still
+// rejecting bare numeric literals. dot_off is the index of the `.`.
+@test fn receiver_ends_before_dot_recognizes_digit_idents_and_postfix() void = {
+	assert(receiver_ends_before_dot(strings::toutf8("buf."), 3));
+	assert(
+		receiver_ends_before_dot(strings::toutf8("buf1."), 4),
+		"identifier ending in a digit is a receiver"
+	);
+	assert(receiver_ends_before_dot(strings::toutf8("sha256."), 6));
+	assert(
+		receiver_ends_before_dot(strings::toutf8("foo()!."), 6),
+		"postfix propagate is a receiver"
+	);
+	assert(
+		receiver_ends_before_dot(strings::toutf8("foo()?."), 6),
+		"postfix error-assert is a receiver"
+	);
+	assert(
+		receiver_ends_before_dot(strings::toutf8("xs[0]."), 5),
+		"index expression is a receiver"
+	);
+	assert(
+		!receiver_ends_before_dot(strings::toutf8("1."), 1),
+		"a bare integer is a float literal, not a receiver"
+	);
+	assert(
+		!receiver_ends_before_dot(strings::toutf8("123."), 3),
+		"a multi-digit integer is a float literal"
+	);
+};
+
+// Regression: the dangling-dot repair must recover the function for a
+// receiver ending in a digit (`buf1.`). A single-byte digit check used to
+// mistake it for a float literal and skip recovery, so hover/go-to-def on
+// the function's other bindings broke while the dot was present.
+@test fn recovers_dangling_dot_on_digit_ending_receiver() void = {
+	const src =
+		`export fn f(buf1: int) void = {
+	const keep = 42;
+	g(buf1.);
+};
+`;
+	let r = parse_recover(strings::toutf8(src), "test.ha");
+	defer finish_parse_result(&r);
+	assert(
+		len(r.subunit.decls) == 1,
+		"a dangling access on an identifier ending in a digit must still recover the function"
+	);
+};
+
+// Regression: same for a postfix `!` (propagate) receiver (`foo()!.`),
+// which the single-byte check also failed to recognize.
+@test fn recovers_dangling_dot_on_postfix_propagate_receiver() void = {
+	const src = `export fn f() void = {
+	const keep = 42;
+	g(foo()!.);
+};
+`;
+	let r = parse_recover(strings::toutf8(src), "test.ha");
+	defer finish_parse_result(&r);
+	assert(
+		len(r.subunit.decls) == 1,
+		"a dangling access on a postfix `!` receiver must still recover the function"
+	);
+};
