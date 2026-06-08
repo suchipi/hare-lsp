@@ -1126,6 +1126,114 @@ fn parse_with_sentinel(
 	return analysis::parse_recover(synth, uri);
 };
 
+// Builds a sentinel parse for the mid-typing case where the brackets
+// enclosing the access have not been closed yet (e.g. `consume(b.|`). The
+// plain [[parse_with_sentinel]] keeps the unparsed tail, which leaves the
+// buffer unbalanced and discards the whole function. Here we instead keep
+// everything up to the cursor, append the sentinel, and synthesize closing
+// brackets for every still-open bracket so the function (and the receiver's
+// binding, which lives before the cursor) parses. The tail after the cursor
+// is intentionally dropped - the receiver type only depends on what comes
+// before it.
+//
+// @param data: borrowed
+// @param info: borrowed
+fn parse_with_sentinel_balanced(
+	data: []u8,
+	info: *prefix_info,
+	uri: str,
+) analysis::parse_result = {
+	const sentinel_bytes = strings::toutf8(COMPLETION_SENTINEL);
+	const suffix = balancing_suffix(data, info.partial_start);
+	defer free(suffix);
+	let synth: []u8 =
+		alloc([], info.partial_start + len(sentinel_bytes) + len(suffix))!;
+	defer free(synth);
+	append(synth, data[..info.partial_start]...)!;
+	append(synth, sentinel_bytes...)!;
+	append(synth, suffix...)!;
+	return analysis::parse_recover(synth, uri);
+};
+
+// Scans `data[..upto]` (skipping strings/comments via token_skip_noncode)
+// and returns the bytes needed to close every bracket still open at `upto`,
+// so a sentinel spliced at `upto` lands in a parseable function. The
+// innermost run of expression brackets (`(`/`[`) is closed first, then a
+// `;` terminates the access's statement, then the remaining (block)
+// brackets are closed outermost-last. Mismatched closers in the prefix are
+// ignored (best-effort over in-progress edits). Caller frees.
+//
+// @param data: borrowed
+// @returns: owned
+fn balancing_suffix(data: []u8, upto: size) []u8 = {
+	let stack: []u8 = [];
+	defer free(stack);
+	let i = 0z;
+	for (i < upto) {
+		const j = analysis::token_skip_noncode(data, i, upto);
+		if (j != i) {
+			i = j;
+			continue;
+		};
+		const b = data[i];
+		switch (b) {
+		case '(': u8, '[': u8, '{': u8 =>
+			append(stack, b)!;
+		case ')': u8 =>
+			pop_if_top(&stack, '(': u8);
+		case ']': u8 =>
+			pop_if_top(&stack, '[': u8);
+		case '}': u8 =>
+			pop_if_top(&stack, '{': u8);
+		case => void;
+		};
+		i += 1;
+	};
+	let out: []u8 = [];
+	let n = len(stack);
+	// Close the contiguous expression brackets at the top of the stack,
+	// completing the expression the access sits in.
+	for (n > 0 && (stack[n - 1] == '(': u8 || stack[n - 1] == '[': u8)) {
+		append(out, bracket_closer(stack[n - 1]))!;
+		n -= 1;
+	};
+	// Terminate the access's statement, then close each remaining (block)
+	// bracket. In Hare every block-statement and the function declaration
+	// itself end in `;`, so a terminator follows each closer - e.g. an
+	// `if (..) { .. }` body closes as `};` and the enclosing `fn .. { .. }`
+	// as `};` again.
+	append(out, ';': u8)!;
+	for (n > 0) {
+		append(out, bracket_closer(stack[n - 1]))!;
+		append(out, ';': u8)!;
+		n -= 1;
+	};
+	return out;
+};
+
+// Pops the top of `stack` iff it equals `open`. Used so a balanced
+// `(...)`/`[...]`/`{...}` in the prefix nets to zero while a stray closer
+// over broken input is ignored rather than underflowing.
+//
+// @param stack: borrowed
+fn pop_if_top(stack: *[]u8, open: u8) void = {
+	let s = *stack;
+	if (len(s) > 0 && s[len(s) - 1] == open) {
+		*stack = s[..len(s) - 1];
+	};
+};
+
+fn bracket_closer(open: u8) u8 = {
+	switch (open) {
+	case '(': u8 =>
+		return ')': u8;
+	case '[': u8 =>
+		return ']': u8;
+	case =>
+		return '}': u8;
+	};
+};
+
 // @param s: borrowed
 // @param doc: borrowed
 // @param data: borrowed
@@ -1138,18 +1246,29 @@ fn add_struct_members(
 	info: *prefix_info,
 	arr: *[]json::value,
 ) void = {
-	// We try two splices: one with just the sentinel, and one with an
-	// extra `;` after it. The bare splice handles mid-expression cases
-	// like `foo(a, b.|, c)`, struct literal initializers (`{ v = b.| }`),
-	// and match heads (`match (b.|)`). The `;`-suffixed splice handles
-	// end-of-statement cases like `{ b.| }` where the parser would
-	// otherwise reject the missing terminator. Whichever variant the
-	// AST walker finds the sentinel in is the right one.
+	// We try three splices, in order:
+	//   1. bare sentinel - handles mid-expression cases like `foo(a, b.|, c)`,
+	//      struct literal initializers (`{ v = b.| }`), and match heads
+	//      (`match (b.|)`).
+	//   2. sentinel + `;` - handles end-of-statement cases like `{ b.| }`
+	//      where the parser would otherwise reject the missing terminator.
+	//   3. balancing splice - handles mid-typing where the brackets enclosing
+	//      the access aren't closed yet (`consume(b.|` with no `)`). Both
+	//      plain splices leave the buffer unbalanced, so the whole function -
+	//      including the receiver's binding - fails to parse and completion
+	//      came back empty. [[parse_with_sentinel_balanced]] discards the
+	//      unparsed tail and synthesizes the closing brackets instead.
+	// Whichever variant the AST walker finds the sentinel in is the right one.
 	let pr = parse_with_sentinel(data, info, doc.uri, false);
 	let af_match = find_sentinel_access_field(&pr.subunit);
 	if (af_match is void) {
 		analysis::finish_parse_result(&pr);
 		pr = parse_with_sentinel(data, info, doc.uri, true);
+		af_match = find_sentinel_access_field(&pr.subunit);
+	};
+	if (af_match is void) {
+		analysis::finish_parse_result(&pr);
+		pr = parse_with_sentinel_balanced(data, info, doc.uri);
 		af_match = find_sentinel_access_field(&pr.subunit);
 	};
 	defer analysis::finish_parse_result(&pr);

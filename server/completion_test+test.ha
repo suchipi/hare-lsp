@@ -1535,6 +1535,35 @@ fn free_labels(labels: []str) void = {
 	assert(labels_contains(labels, "line_index"));
 };
 
+// Mid-typing: the member access is inside a call whose `)` has not been
+// typed yet (`consume(b.` with an unbalanced paren). The plain sentinel
+// splice leaves the buffer unbalanced, so the enclosing function fails to
+// parse and member completion came back empty - the editor then fell back
+// to word-based suggestions. The balancing splice closes the open brackets
+// so the prior `const b` binding is recovered and the receiver resolves.
+@test fn completion_struct_field_unbalanced_open_paren() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	comp_open(&s, "file:///m5b.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\nfn make_buf() buffer = buffer { ... };\nfn main() void = {\n\tconst b = make_buf();\n\tconsume(b.\n};\n`
+	);
+
+	// Cursor right after `b.` on line 4 (`\tconsume(b.`), char 11.
+	const items = run_completion(&s, out, "file:///m5b.ha", 4, 11, 1044.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "data"),
+		"member completion must work even with an unclosed enclosing paren"
+	);
+	assert(labels_contains(labels, "line_index"));
+	assert(
+		!labels_contains(labels, "const"),
+		"member completion stays exclusive (no keywords) in the unbalanced case"
+	);
+};
+
 @test fn completion_struct_field_after_nested_field() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);

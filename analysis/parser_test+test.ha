@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // (c) hare-lsp authors
 
+use hare::ast;
 use strings;
 
 @test fn parses_clean_program() void = {
@@ -114,4 +115,102 @@ export fn e() void = void;
 	assert(len(r.errors) >= 1);
 	// At least 4 of the 5 should parse (a, b, d, e).
 	assert(len(r.subunit.decls) >= 4);
+};
+
+// An incomplete member access (`obj.` with no field name yet) is the most
+// common transient edit state - it is exactly what exists the instant
+// before requesting completion. The stdlib parser rejects the whole
+// function on it, discarding every binding inside; the recovery retry
+// blanks the dangling dot so the function (and its bindings) survives,
+// while still reporting the access as an error for diagnostics.
+@test fn recovers_function_body_with_dangling_dot() void = {
+	const src =
+		`export fn f(obj: int) void = {
+	const keep = 42;
+	g(obj.);
+};
+`;
+	let r = parse_recover(strings::toutf8(src), "test.ha");
+	defer finish_parse_result(&r);
+	// The dangling dot is still surfaced as a diagnostic.
+	assert(len(r.errors) >= 1, "incomplete member access must still be reported");
+	// ...but the function is recovered rather than discarded.
+	assert(
+		len(r.subunit.decls) == 1,
+		"function should be recovered, not dropped"
+	);
+};
+
+// The repair must blank ONLY real member-access dots, never dots inside
+// string literals (the try-hare file that surfaced this bug has `'.d.ts'`
+// help text). token_skip_noncode keeps the repair out of strings; verify
+// a string's dots survive intact even when a sibling statement triggers
+// the dangling-dot recovery.
+@test fn dangling_dot_repair_preserves_string_literals() void = {
+	const src =
+		`export fn f(obj: int) void = {
+	const dotted = "a.b.";
+	g(obj.);
+};
+`;
+	let r = parse_recover(strings::toutf8(src), "test.ha");
+	defer finish_parse_result(&r);
+	assert(len(r.subunit.decls) == 1, "function should be recovered");
+	const val = first_string_literal_value(&r.subunit);
+	assert(
+		val == "a.b.",
+		"string literal content must be preserved (dots inside strings are not member accesses)"
+	);
+};
+
+// Returns the value of the first plain string literal bound by a `let`/
+// `const` inside the first function declaration, or "" if none.
+//
+// @param su: borrowed
+fn first_string_literal_value(su: *ast::subunit) str = {
+	for (let i = 0z; i < len(su.decls); i += 1) {
+		const f = match (su.decls[i].decl) {
+		case let f: ast::decl_func =>
+			yield f;
+		case =>
+			continue;
+		};
+		const body = match (f.body) {
+		case let e: *ast::expr =>
+			yield e;
+		case null =>
+			continue;
+		};
+		const c = match (body.expr) {
+		case let c: ast::compound_expr =>
+			yield c;
+		case =>
+			continue;
+		};
+		for (let j = 0z; j < len(c.exprs); j += 1) {
+			const b = match (c.exprs[j].expr) {
+			case let b: ast::binding_expr =>
+				yield b;
+			case =>
+				continue;
+			};
+			if (len(b.bindings) == 0) continue;
+			const lit = match (b.bindings[0].init.expr) {
+			case let l: ast::literal_expr =>
+				yield l;
+			case =>
+				continue;
+			};
+			match (lit) {
+			case let pl: ast::plain_literal =>
+				match (pl.value) {
+				case let s: str =>
+					return s;
+				case => void;
+				};
+			case => void;
+			};
+		};
+	};
+	return "";
 };
