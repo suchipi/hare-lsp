@@ -80,3 +80,34 @@ export fn qualifier_prefix_at(data: []u8, ident_start: size) str = {
 	if (q_start == q_end) return strings::dup("")!;
 	return strings::dup(strings::fromutf8(data[q_start..q_end])!)!;
 };
+
+// Returns true when the dot at `dot_off` (`data[dot_off]` must be `.`) is a
+// member-access dot - i.e. it directly follows an expression a member access
+// can chain off. Accepts `)`, `]`, `!`, `?` (postfix call / index /
+// error-assert / propagate, as in `foo()!.field`) and any identifier word,
+// EXCEPT a word made up entirely of digits, since `1.` is a float literal
+// rather than a member access on `1`. Identifiers ending in a digit
+// (`buf1`, `sha256`, `utf8`) still pass because the word has non-digit
+// bytes earlier - a single-byte test before the dot would wrongly reject
+// them. Shared by completion's prefix classifier and the recovering
+// parser's dangling-dot repair.
+//
+// @param data: borrowed
+export fn receiver_ends_before_dot(data: []u8, dot_off: size) bool = {
+	if (dot_off == 0) return false;
+	const b = data[dot_off - 1];
+	if (b == ')': u8) return true;
+	if (b == ']': u8) return true;
+	if (b == '!': u8) return true;
+	if (b == '?': u8) return true;
+	if (!is_ident_byte(b)) return false;
+	// Walk back over the word; any non-digit byte means it's an identifier,
+	// not a numeric literal.
+	let i = dot_off;
+	for (i > 0; i -= 1) {
+		const c = data[i - 1];
+		if (!is_ident_byte(c)) break;
+		if (c < '0': u8 || c > '9': u8) return true;
+	};
+	return false;
+};

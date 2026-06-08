@@ -1860,6 +1860,34 @@ fn skip_to_response(out: *memio::stream, request_id: f64) json::value = {
 	);
 };
 
+// Regression for the try-hare `media.` bug: a function whose body contains
+// an incomplete member access (`media.` with no field yet) used to be
+// discarded wholesale by the stdlib parser, so hover on a binding declared
+// earlier in that function returned null. The recovering parser now blanks
+// the dangling dot and keeps the function, so hover resolves the binding's
+// inferred type. Uses the real stdlib `mime` module (lookup_ext returns
+// `nullable *mimetype`) and a multi-rune binding name so an offset bug
+// would surface.
+@test fn hover_on_binding_survives_dangling_member_dot_in_body() void = {
+	let (s, scan, in_buf, out) = nav_test_server();
+	defer nav_test_cleanup(&s, scan, in_buf, out);
+
+	// `consume(media.)` is a real syntax error (dangling member access);
+	// without body recovery the whole `check` function vanishes from the AST.
+	const src =
+		"use mime;\\nexport fn check(output: str, flag: bool) void = {\\n\\tif (flag) {\\n\\t\\tconst media = mime::lookup_ext(output);\\n\\t\\tconsume(media.);\\n\\t};\\n};\\n";
+	nav_open(&s, "file:///media_hover.ha", src);
+
+	const (line, col) = find_pos(src, "media =");
+	const md = nav_hover_contents(&s, out, "file:///media_hover.ha", line, col,
+		7050.0);
+	defer free(md);
+	assert(
+		strings::contains(md, "mimetype"),
+		"hover on `media` must resolve through the recovered function to `nullable *mimetype`"
+	);
+};
+
 // Regression: stripping error variants from an inferred `expr?` type must
 // recognize a same-module error alias as an error type, including when the
 // alias lives in a sibling file of a stdlib module (resolved via

@@ -50,9 +50,68 @@ export type parse_diagnostic = struct {
 //
 // `path` is an opaque label used in error messages.
 //
+// Two-pass body recovery: the stdlib `parse::decl` rejects an entire
+// function when ANY statement in its body is malformed, and this parser
+// only resyncs at decl boundaries, so a single bad statement otherwise
+// discards every binding in the function (breaking hover, go-to-def,
+// references, etc. for the whole function). The overwhelmingly common
+// such transient error during editing is an incomplete member access -
+// `foo.` with no field name yet, e.g. the instant before requesting
+// completion. When the first pass reports errors, we retry on an
+// offset-preserving copy in which each dangling member-access dot is
+// blanked to a space (see [[repair_dangling_member_dots]]); if that pass
+// recovers more decls we adopt its AST but keep the ORIGINAL errors, so
+// the incomplete access still surfaces as a diagnostic. Blanking (rather
+// than inserting a placeholder) keeps every byte/rune offset identical,
+// so the recovered AST is consumed against the original source without
+// remapping.
+//
 // @param text: borrowed
 // @param path: borrowed
 export fn parse_recover(text: []u8, path: str) parse_result = {
+	let res = parse_phases(text, path);
+
+	if (len(res.errors) > 0) {
+		match (repair_dangling_member_dots(text)) {
+		case let repaired: []u8 =>
+			defer free(repaired);
+			let res2 = parse_phases(repaired, path);
+			if (len(res2.subunit.decls) > len(res.subunit.decls)) {
+				// Adopt the recovered AST, but keep the original
+				// errors for diagnostics. Offsets match because the
+				// repair is byte-for-byte length-preserving.
+				free_subunit(&res.subunit);
+				res.subunit = res2.subunit;
+				res2.subunit = ast::subunit {
+					imports = [],
+					decls = [],
+				};
+			};
+			finish_parse_result(&res2);
+		case void => void;
+		};
+	};
+
+	res.completely_failed =
+		len(res.subunit.imports) == 0 && len(res.subunit.decls) == 0
+		&& len(res.errors) > 0;
+	// hare::lex stores `loc.off` as a rune index, but every
+	// downstream consumer (byte_to_position, source slicing,
+	// documentLink, etc.) treats it as a byte offset. Translate
+	// the entire AST to byte offsets here so callers don't need
+	// to know about the underlying rune-vs-byte distinction.
+	fixup_parse_result(&res, text);
+	return res;
+};
+
+// Runs the recovering parse passes (imports, then a decl loop) over `text`
+// and returns the best-effort AST plus recorded errors. The result is NOT
+// location-fixed-up; [[parse_recover]] owns that final step so it can run
+// these passes more than once (see its body-recovery retry).
+//
+// @param text: borrowed
+// @param path: borrowed
+fn parse_phases(text: []u8, path: str) parse_result = {
 	let res = parse_result {
 		subunit = ast::subunit {
 			imports = [],
@@ -124,12 +183,6 @@ export fn parse_recover(text: []u8, path: str) parse_result = {
 	res.completely_failed =
 		len(res.subunit.imports) == 0 && len(res.subunit.decls) == 0
 		&& len(res.errors) > 0;
-	// hare::lex stores `loc.off` as a rune index, but every
-	// downstream consumer (byte_to_position, source slicing,
-	// documentLink, etc.) treats it as a byte offset. Translate
-	// the entire AST to byte offsets here so callers don't need
-	// to know about the underlying rune-vs-byte distinction.
-	fixup_parse_result(&res, text);
 	return res;
 };
 
@@ -150,6 +203,117 @@ export fn finish_parse_result(r: *parse_result) void = {
 		ast::decl_finish(r.subunit.decls[i]);
 	};
 	free(r.subunit.decls);
+};
+
+// Frees the imports and decls owned by a subunit (but not the subunit
+// value itself, which is a plain struct). Used by [[parse_recover]]'s
+// body-recovery retry when it adopts the repaired AST and must release
+// the first pass's discarded one.
+//
+// @param su: borrowed
+fn free_subunit(su: *ast::subunit) void = {
+	for (let i = 0z; i < len(su.imports); i += 1) {
+		ast::import_finish(su.imports[i]);
+	};
+	free(su.imports);
+	for (let i = 0z; i < len(su.decls); i += 1) {
+		ast::decl_finish(su.decls[i]);
+	};
+	free(su.decls);
+};
+
+// Returns an offset-preserving copy of `text` in which every dangling
+// member-access dot - a `.` written as the start of a field access but
+// with no field name after it yet, e.g. `foo.` right before a `)`, `;`,
+// `}`, or end of input - is overwritten with a space, or void when there
+// is no such dot. Overwriting in place (rather than deleting the dot or
+// inserting a placeholder name) keeps every byte and rune offset identical
+// to the original, so an AST parsed from the result maps onto the original
+// source without remapping.
+//
+// Only member-access dots are touched:
+//   - dots inside strings, runes, raw strings and comments are skipped via
+//     [[token_skip_noncode]];
+//   - `..` and `...` (slice ranges, variadic, struct spread) are left alone;
+//   - a dot must directly follow a receiver (see [[receiver_ends_before_dot]]:
+//     an identifier, `)`, `]`, or postfix `!`/`?`) - a dot after a pure-digit
+//     word is a float literal (`1.`), never a member access;
+//   - a dot followed (after whitespace/comments) by an identifier or digit
+//     is a complete `.field` / `.0` access and is left alone.
+//
+// @param text: borrowed
+// @returns: owned
+fn repair_dangling_member_dots(text: []u8) ([]u8 | void) = {
+	const n = len(text);
+	let out: []u8 = [];
+	let changed = false;
+	let i = 0z;
+	for (i < n) {
+		const j = token_skip_noncode(text, i, n);
+		if (j != i) {
+			i = j;
+			continue;
+		};
+		if (text[i] != '.': u8) {
+			i += 1;
+			continue;
+		};
+		// `..` / `...`: skip both dots so the second isn't reconsidered.
+		if (i + 1 < n && text[i + 1] == '.': u8) {
+			i += 2;
+			continue;
+		};
+		if (i > 0 && text[i - 1] == '.': u8) {
+			i += 1;
+			continue;
+		};
+		// A member-access dot directly follows its receiver - an identifier
+		// (including ones ending in a digit, like `buf1`), `)`, `]`, or a
+		// postfix `!`/`?`. A leading dot, a dot after whitespace/operator,
+		// or one after a pure-digit word (the float literal `1.`) is not
+		// something we can safely blank.
+		if (!receiver_ends_before_dot(text, i)) {
+			i += 1;
+			continue;
+		};
+		// Find the next code byte after the dot, skipping whitespace and
+		// comments. An identifier or digit there means the access is
+		// already complete (`.field` / `.0`); only a non-name byte (or
+		// end of input) is a dangling access.
+		let k = i + 1;
+		for (k < n) {
+			if (is_space_byte(text[k])) {
+				k += 1;
+				continue;
+			};
+			const m = token_skip_noncode(text, k, n);
+			if (m != k) {
+				k = m;
+				continue;
+			};
+			break;
+		};
+		const dangling = k >= n || !is_ident_byte(text[k]);
+		if (!dangling) {
+			i += 1;
+			continue;
+		};
+		if (!changed) {
+			out = alloc([], n)!;
+			append(out, text...)!;
+			changed = true;
+		};
+		out[i] = ' ': u8;
+		i += 1;
+	};
+	if (changed) {
+		return out;
+	};
+	return void;
+};
+
+fn is_space_byte(b: u8) bool = {
+	return b == ' ': u8 || b == '\t': u8 || b == '\n': u8 || b == '\r': u8;
 };
 
 // @param r: borrowed

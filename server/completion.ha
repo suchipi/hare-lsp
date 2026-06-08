@@ -333,9 +333,9 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 	// access (not part of `..`, not part of a float literal, not
 	// preceded by whitespace). The byte before the dot must be one that
 	// can plausibly terminate an expression - see
-	// [[receiver_ends_before_dot]].
+	// [[analysis::receiver_ends_before_dot]].
 	if (s >= 1 && data[s - 1] == '.': u8 && s >= 2
-			&& receiver_ends_before_dot(data, s - 1)) {
+			&& analysis::receiver_ends_before_dot(data, s - 1)) {
 		return prefix_info {
 			kind = prefix_kind::MEMBER,
 			module = strings::dup("")!,
@@ -375,36 +375,6 @@ fn scan_completion_prefix(data: []u8, off: size) prefix_info = {
 		ident_end = e,
 		module_start = s,
 	};
-};
-
-// Returns true when the byte slice ending at `dot_off` (exclusive)
-// looks like an expression a member access could chain off, given that
-// `data[dot_off] == '.'`. We accept `)`, `]`, `!`, `?` (postfix
-// error-assert / propagate, as in `foo()!.field`), or a word ending in
-// any alphanumeric/underscore - but if the preceding word is all
-// digits we reject it, because `1.` is a float literal, not a member
-// access on `1`. Identifiers like `buf1` or `hash32` end in a digit
-// but still have non-digit characters earlier in the word, so they
-// pass.
-//
-// @param data: borrowed
-fn receiver_ends_before_dot(data: []u8, dot_off: size) bool = {
-	if (dot_off == 0) return false;
-	const b = data[dot_off - 1];
-	if (b == ')': u8) return true;
-	if (b == ']': u8) return true;
-	if (b == '!': u8) return true;
-	if (b == '?': u8) return true;
-	if (!analysis::is_ident_byte(b)) return false;
-	// Walk back over the word and check whether any byte is non-digit.
-	// Pure-digit prefix means this `.` belongs to a numeric literal.
-	let i = dot_off;
-	for (i > 0; i -= 1) {
-		const c = data[i - 1];
-		if (!analysis::is_ident_byte(c)) break;
-		if (c < '0': u8 || c > '9': u8) return true;
-	};
-	return false;
 };
 
 // sortText prefixes: clients rank lexicographically. We bias toward
@@ -1126,6 +1096,159 @@ fn parse_with_sentinel(
 	return analysis::parse_recover(synth, uri);
 };
 
+// Builds a sentinel parse for the mid-typing case where the brackets
+// enclosing the access have not been closed yet (e.g. `consume(b.|`). The
+// plain [[parse_with_sentinel]] keeps the unparsed tail, which leaves the
+// buffer unbalanced and discards the whole function. Here we instead keep
+// everything up to the cursor, append the sentinel, and synthesize closing
+// brackets for every still-open bracket so the function (and the receiver's
+// binding, which lives before the cursor) parses. The tail after the cursor
+// is intentionally dropped - the receiver type only depends on what comes
+// before it.
+//
+// @param data: borrowed
+// @param info: borrowed
+fn parse_with_sentinel_balanced(
+	data: []u8,
+	info: *prefix_info,
+	uri: str,
+) analysis::parse_result = {
+	const sentinel_bytes = strings::toutf8(COMPLETION_SENTINEL);
+	const suffix = balancing_suffix(data, info.partial_start);
+	defer free(suffix);
+	let synth: []u8 =
+		alloc([], info.partial_start + len(sentinel_bytes) + len(suffix))!;
+	defer free(synth);
+	append(synth, data[..info.partial_start]...)!;
+	append(synth, sentinel_bytes...)!;
+	append(synth, suffix...)!;
+	return analysis::parse_recover(synth, uri);
+};
+
+// Bracket-stack kinds tracked by [[balancing_suffix]]. The two brace kinds
+// close differently: a statement block needs a `;` terminator, a struct or
+// array literal does not.
+def BK_PAREN: u8 = 0; // `(` -> `)`
+
+def BK_INDEX: u8 = 1; // `[` -> `]`
+
+def BK_BLOCK: u8 = 2; // `{` statement block -> `;}`
+
+def BK_LITERAL: u8 = 3;
+
+// `{` struct/array literal -> `}`
+
+// Scans `data[..upto]` (skipping strings/comments via token_skip_noncode)
+// and returns the bytes needed to close every bracket still open at `upto`,
+// so a sentinel spliced at `upto` lands in a parseable function. Each open
+// bracket is closed in reverse: a statement block as `;}` (its content is a
+// statement and Hare terminates statements with `;`), a struct/array literal
+// as `}` (its fields are comma-separated and it is an expression), and a
+// `(`/`[` with its plain closer. A trailing `;` terminates the enclosing
+// global or `fn` declaration. Braces are classified by what precedes them
+// (see [[brace_kind]]); a misclassification only yields an unparseable synth
+// that declines, never a wrong completion. Mismatched closers in the prefix
+// are ignored (best-effort over in-progress edits). Caller frees.
+//
+// @param data: borrowed
+// @returns: owned
+fn balancing_suffix(data: []u8, upto: size) []u8 = {
+	let stack: []u8 = [];
+	defer free(stack);
+	let i = 0z;
+	for (i < upto) {
+		const j = analysis::token_skip_noncode(data, i, upto);
+		if (j != i) {
+			i = j;
+			continue;
+		};
+		switch (data[i]) {
+		case '(': u8 =>
+			append(stack, BK_PAREN)!;
+		case '[': u8 =>
+			append(stack, BK_INDEX)!;
+		case '{': u8 =>
+			append(stack, brace_kind(data, i))!;
+		case ')': u8 =>
+			pop_kind(&stack, BK_PAREN);
+		case ']': u8 =>
+			pop_kind(&stack, BK_INDEX);
+		case '}': u8 =>
+			pop_brace(&stack);
+		case => void;
+		};
+		i += 1;
+	};
+	let out: []u8 = [];
+	for (let n = len(stack); n > 0; n -= 1) {
+		switch (stack[n - 1]) {
+		case BK_PAREN =>
+			append(out, ')': u8)!;
+		case BK_INDEX =>
+			append(out, ']': u8)!;
+		case BK_BLOCK =>
+			// The block's content is a statement: terminate, then close.
+			append(out, ';': u8)!;
+			append(out, '}': u8)!;
+		case BK_LITERAL =>
+			// A struct/array literal is an expression: close with just `}`.
+			append(out, '}': u8)!;
+		case => void;
+		};
+	};
+	// Terminate the enclosing declaration (`let x = ...;` or `fn .. { .. };`).
+	append(out, ';': u8)!;
+	return out;
+};
+
+// Classifies the `{` at `brace` as a statement block ([[BK_BLOCK]]) or a
+// struct/array literal ([[BK_LITERAL]]). A literal `{` directly follows a
+// type name (`mystruct {`); every other `{` - after `=`, `)`, `=>`, `{`, the
+// start of input, or a block-introducing keyword like `else` / `defer` - is
+// a block. Whitespace before the `{` is skipped; comments are not (a comment
+// there is rare and only costs a declined completion).
+//
+// @param data: borrowed
+fn brace_kind(data: []u8, brace: size) u8 = {
+	let j = brace;
+	for (j > 0 && is_ws_byte(data[j - 1])) j -= 1;
+	if (j == 0 || !analysis::is_ident_byte(data[j - 1])) {
+		return BK_BLOCK;
+	};
+	// Preceded by a word: a struct literal `Type { .. }`, unless the word is
+	// a block-introducing keyword.
+	let w = j;
+	for (w > 0 && analysis::is_ident_byte(data[w - 1])) w -= 1;
+	const word = strings::fromutf8(data[w..j])!;
+	if (word == "else" || word == "defer") {
+		return BK_BLOCK;
+	};
+	return BK_LITERAL;
+};
+
+// Pops the top of `stack` iff it equals `kind`. Lets a balanced
+// `(...)`/`[...]` in the prefix net to zero while a stray closer over broken
+// input is ignored rather than underflowing.
+//
+// @param stack: borrowed
+fn pop_kind(stack: *[]u8, kind: u8) void = {
+	let s = *stack;
+	if (len(s) > 0 && s[len(s) - 1] == kind) {
+		*stack = s[..len(s) - 1];
+	};
+};
+
+// Like [[pop_kind]] but for `}`, which closes either brace kind.
+//
+// @param stack: borrowed
+fn pop_brace(stack: *[]u8) void = {
+	let s = *stack;
+	if (len(s) > 0
+			&& (s[len(s) - 1] == BK_BLOCK || s[len(s) - 1] == BK_LITERAL)) {
+		*stack = s[..len(s) - 1];
+	};
+};
+
 // @param s: borrowed
 // @param doc: borrowed
 // @param data: borrowed
@@ -1138,18 +1261,29 @@ fn add_struct_members(
 	info: *prefix_info,
 	arr: *[]json::value,
 ) void = {
-	// We try two splices: one with just the sentinel, and one with an
-	// extra `;` after it. The bare splice handles mid-expression cases
-	// like `foo(a, b.|, c)`, struct literal initializers (`{ v = b.| }`),
-	// and match heads (`match (b.|)`). The `;`-suffixed splice handles
-	// end-of-statement cases like `{ b.| }` where the parser would
-	// otherwise reject the missing terminator. Whichever variant the
-	// AST walker finds the sentinel in is the right one.
+	// We try three splices, in order:
+	//   1. bare sentinel - handles mid-expression cases like `foo(a, b.|, c)`,
+	//      struct literal initializers (`{ v = b.| }`), and match heads
+	//      (`match (b.|)`).
+	//   2. sentinel + `;` - handles end-of-statement cases like `{ b.| }`
+	//      where the parser would otherwise reject the missing terminator.
+	//   3. balancing splice - handles mid-typing where the brackets enclosing
+	//      the access aren't closed yet (`consume(b.|` with no `)`). Both
+	//      plain splices leave the buffer unbalanced, so the whole function -
+	//      including the receiver's binding - fails to parse and completion
+	//      came back empty. [[parse_with_sentinel_balanced]] discards the
+	//      unparsed tail and synthesizes the closing brackets instead.
+	// Whichever variant the AST walker finds the sentinel in is the right one.
 	let pr = parse_with_sentinel(data, info, doc.uri, false);
 	let af_match = find_sentinel_access_field(&pr.subunit);
 	if (af_match is void) {
 		analysis::finish_parse_result(&pr);
 		pr = parse_with_sentinel(data, info, doc.uri, true);
+		af_match = find_sentinel_access_field(&pr.subunit);
+	};
+	if (af_match is void) {
+		analysis::finish_parse_result(&pr);
+		pr = parse_with_sentinel_balanced(data, info, doc.uri);
 		af_match = find_sentinel_access_field(&pr.subunit);
 	};
 	defer analysis::finish_parse_result(&pr);
