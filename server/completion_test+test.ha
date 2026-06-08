@@ -1564,6 +1564,55 @@ fn free_labels(labels: []str) void = {
 	);
 };
 
+// Mid-typing inside an unclosed struct literal (`point { px = b.`). The
+// balancing splice must close the literal with `}` (its fields are
+// comma-separated), NOT terminate it with `;`, or the synthetic buffer
+// fails to parse and the receiver never resolves.
+@test fn completion_struct_field_inside_unclosed_struct_literal() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	comp_open(&s, "file:///m5c.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\ntype point = struct { px: int, py: int };\nfn main(b: buffer) void = {\n\tpoint { px = b.\n};\n`
+	);
+
+	// Cursor after `b.` on line 3 (`\tpoint { px = b.`), char 16.
+	const items = run_completion(&s, out, "file:///m5c.ha", 3, 16, 1046.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "data"),
+		"member completion must work inside an unclosed struct literal"
+	);
+	assert(labels_contains(labels, "line_index"));
+	assert(
+		!labels_contains(labels, "px"),
+		"fields come from the receiver's type, not the literal's type"
+	);
+};
+
+// Mid-typing inside a block expression nested in a call argument
+// (`consume({ b.`). The inner block needs `;` terminators, but after it is
+// closed the enclosing call paren must close with `)`, not `;`.
+@test fn completion_struct_field_inside_unclosed_compound_arg() void = {
+	let (s, scan, in_buf, out) = comp_test_server();
+	defer comp_test_cleanup(&s, scan, in_buf, out);
+	comp_open(&s, "file:///m5d.ha",
+		`type buffer = struct { data: []u8, line_index: []size };\nfn consume(x: buffer) void = void;\nfn main(b: buffer) void = {\n\tconsume({ b.\n};\n`
+	);
+
+	// Cursor after `b.` on line 3 (`\tconsume({ b.`), char 13.
+	const items = run_completion(&s, out, "file:///m5d.ha", 3, 13, 1047.0);
+	defer finish_items(items);
+	const labels = item_labels(items);
+	defer free_labels(labels);
+	assert(
+		labels_contains(labels, "data"),
+		"member completion must work inside a block expression nested in a call"
+	);
+	assert(labels_contains(labels, "line_index"));
+};
+
 @test fn completion_struct_field_after_nested_field() void = {
 	let (s, scan, in_buf, out) = comp_test_server();
 	defer comp_test_cleanup(&s, scan, in_buf, out);

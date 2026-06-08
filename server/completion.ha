@@ -1125,13 +1125,30 @@ fn parse_with_sentinel_balanced(
 	return analysis::parse_recover(synth, uri);
 };
 
+// Bracket-stack kinds tracked by [[balancing_suffix]]. The two brace kinds
+// close differently: a statement block needs a `;` terminator, a struct or
+// array literal does not.
+def BK_PAREN: u8 = 0; // `(` -> `)`
+
+def BK_INDEX: u8 = 1; // `[` -> `]`
+
+def BK_BLOCK: u8 = 2; // `{` statement block -> `;}`
+
+def BK_LITERAL: u8 = 3;
+
+// `{` struct/array literal -> `}`
+
 // Scans `data[..upto]` (skipping strings/comments via token_skip_noncode)
 // and returns the bytes needed to close every bracket still open at `upto`,
-// so a sentinel spliced at `upto` lands in a parseable function. The
-// innermost run of expression brackets (`(`/`[`) is closed first, then a
-// `;` terminates the access's statement, then the remaining (block)
-// brackets are closed outermost-last. Mismatched closers in the prefix are
-// ignored (best-effort over in-progress edits). Caller frees.
+// so a sentinel spliced at `upto` lands in a parseable function. Each open
+// bracket is closed in reverse: a statement block as `;}` (its content is a
+// statement and Hare terminates statements with `;`), a struct/array literal
+// as `}` (its fields are comma-separated and it is an expression), and a
+// `(`/`[` with its plain closer. A trailing `;` terminates the enclosing
+// global or `fn` declaration. Braces are classified by what precedes them
+// (see [[brace_kind]]); a misclassification only yields an unparseable synth
+// that declines, never a wrong completion. Mismatched closers in the prefix
+// are ignored (best-effort over in-progress edits). Caller frees.
 //
 // @param data: borrowed
 // @returns: owned
@@ -1145,62 +1162,90 @@ fn balancing_suffix(data: []u8, upto: size) []u8 = {
 			i = j;
 			continue;
 		};
-		const b = data[i];
-		switch (b) {
-		case '(': u8, '[': u8, '{': u8 =>
-			append(stack, b)!;
+		switch (data[i]) {
+		case '(': u8 =>
+			append(stack, BK_PAREN)!;
+		case '[': u8 =>
+			append(stack, BK_INDEX)!;
+		case '{': u8 =>
+			append(stack, brace_kind(data, i))!;
 		case ')': u8 =>
-			pop_if_top(&stack, '(': u8);
+			pop_kind(&stack, BK_PAREN);
 		case ']': u8 =>
-			pop_if_top(&stack, '[': u8);
+			pop_kind(&stack, BK_INDEX);
 		case '}': u8 =>
-			pop_if_top(&stack, '{': u8);
+			pop_brace(&stack);
 		case => void;
 		};
 		i += 1;
 	};
 	let out: []u8 = [];
-	let n = len(stack);
-	// Close the contiguous expression brackets at the top of the stack,
-	// completing the expression the access sits in.
-	for (n > 0 && (stack[n - 1] == '(': u8 || stack[n - 1] == '[': u8)) {
-		append(out, bracket_closer(stack[n - 1]))!;
-		n -= 1;
+	for (let n = len(stack); n > 0; n -= 1) {
+		switch (stack[n - 1]) {
+		case BK_PAREN =>
+			append(out, ')': u8)!;
+		case BK_INDEX =>
+			append(out, ']': u8)!;
+		case BK_BLOCK =>
+			// The block's content is a statement: terminate, then close.
+			append(out, ';': u8)!;
+			append(out, '}': u8)!;
+		case BK_LITERAL =>
+			// A struct/array literal is an expression: close with just `}`.
+			append(out, '}': u8)!;
+		case => void;
+		};
 	};
-	// Terminate the access's statement, then close each remaining (block)
-	// bracket. In Hare every block-statement and the function declaration
-	// itself end in `;`, so a terminator follows each closer - e.g. an
-	// `if (..) { .. }` body closes as `};` and the enclosing `fn .. { .. }`
-	// as `};` again.
+	// Terminate the enclosing declaration (`let x = ...;` or `fn .. { .. };`).
 	append(out, ';': u8)!;
-	for (n > 0) {
-		append(out, bracket_closer(stack[n - 1]))!;
-		append(out, ';': u8)!;
-		n -= 1;
-	};
 	return out;
 };
 
-// Pops the top of `stack` iff it equals `open`. Used so a balanced
-// `(...)`/`[...]`/`{...}` in the prefix nets to zero while a stray closer
-// over broken input is ignored rather than underflowing.
+// Classifies the `{` at `brace` as a statement block ([[BK_BLOCK]]) or a
+// struct/array literal ([[BK_LITERAL]]). A literal `{` directly follows a
+// type name (`mystruct {`); every other `{` - after `=`, `)`, `=>`, `{`, the
+// start of input, or a block-introducing keyword like `else` / `defer` - is
+// a block. Whitespace before the `{` is skipped; comments are not (a comment
+// there is rare and only costs a declined completion).
+//
+// @param data: borrowed
+fn brace_kind(data: []u8, brace: size) u8 = {
+	let j = brace;
+	for (j > 0 && is_ws_byte(data[j - 1])) j -= 1;
+	if (j == 0 || !analysis::is_ident_byte(data[j - 1])) {
+		return BK_BLOCK;
+	};
+	// Preceded by a word: a struct literal `Type { .. }`, unless the word is
+	// a block-introducing keyword.
+	let w = j;
+	for (w > 0 && analysis::is_ident_byte(data[w - 1])) w -= 1;
+	const word = strings::fromutf8(data[w..j])!;
+	if (word == "else" || word == "defer") {
+		return BK_BLOCK;
+	};
+	return BK_LITERAL;
+};
+
+// Pops the top of `stack` iff it equals `kind`. Lets a balanced
+// `(...)`/`[...]` in the prefix net to zero while a stray closer over broken
+// input is ignored rather than underflowing.
 //
 // @param stack: borrowed
-fn pop_if_top(stack: *[]u8, open: u8) void = {
+fn pop_kind(stack: *[]u8, kind: u8) void = {
 	let s = *stack;
-	if (len(s) > 0 && s[len(s) - 1] == open) {
+	if (len(s) > 0 && s[len(s) - 1] == kind) {
 		*stack = s[..len(s) - 1];
 	};
 };
 
-fn bracket_closer(open: u8) u8 = {
-	switch (open) {
-	case '(': u8 =>
-		return ')': u8;
-	case '[': u8 =>
-		return ']': u8;
-	case =>
-		return '}': u8;
+// Like [[pop_kind]] but for `}`, which closes either brace kind.
+//
+// @param stack: borrowed
+fn pop_brace(stack: *[]u8) void = {
+	let s = *stack;
+	if (len(s) > 0
+			&& (s[len(s) - 1] == BK_BLOCK || s[len(s) - 1] == BK_LITERAL)) {
+		*stack = s[..len(s) - 1];
 	};
 };
 
