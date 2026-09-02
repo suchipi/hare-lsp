@@ -5,6 +5,7 @@ HARE = hare
 HAREFLAGS =
 
 DESTDIR =
+SOURCEDIR = /usr/src
 PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 
@@ -12,8 +13,8 @@ BINDIR = $(PREFIX)/bin
 # files down under /usr/src/hare, while a source build defaults to
 # /usr/local/src/hare. Prefer /usr/src when present; fall back to
 # /usr/local. Either can be overridden via the environment or command line.
-THIRDPARTY ?= $(if $(wildcard /usr/src/hare/third-party),/usr/src/hare/third-party,/usr/local/src/hare/third-party)
-STDLIB ?= $(if $(wildcard /usr/src/hare/stdlib),/usr/src/hare/stdlib,/usr/local/src/hare/stdlib)
+THIRDPARTY ?= $(if $(wildcard $(SOURCEDIR)/hare/third-party),$(SOURCEDIR)/hare/third-party,$(PREFIX)/src/hare/third-party)
+STDLIB ?= $(if $(wildcard $(SOURCEDIR)/hare/stdlib),$(SOURCEDIR)/hare/stdlib,$(PREFIX)/src/hare/stdlib)
 JSON_DIR = $(THIRDPARTY)/encoding/json
 
 # Project root must be on HAREPATH so `use lsp;` etc. resolve to ./lsp/.
